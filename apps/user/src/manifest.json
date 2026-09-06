@@ -1,0 +1,12 @@
+{
+  "name": "上行宝",
+  "appid": "__UNI__SXB01",
+  "description": "成人考证刷题与学习辅助平台",
+  "versionName": "0.1.0",
+  "versionCode": "10",
+  "transformPx": false,
+  "rpxCalcMaxDeviceWidth": 430,
+  "rpxCalcBaseDeviceWidth": 375,
+  "h5": { "title": "上行宝" },
+  "mp-weixin": { "appid": "", "setting": { "urlCheck": false }, "usingComponents": true }
+}

@@ -1,0 +1,25 @@
+# Dependencies and build output
+node_modules/
+dist/
+unpackage/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Development logs and temporary captures
+*.log
+.snapshots/
+docx_render/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test and tooling caches
+coverage/
+.cache/
+*.tsbuildinfo

@@ -1,0 +1,13 @@
+$ink: #152238;
+$muted: #718096;
+$line: #e6ebf3;
+$blue: #3569e8;
+
+page { background: #f5f7fb; color: $ink; }
+.page { min-height: 100vh; box-sizing: border-box; padding: 0 20px 112px; }
+.safe-top { padding-top: calc(env(safe-area-inset-top) + 28rpx); }
+.muted { color: $muted; font-size: 24rpx; }
+.panel { background: #fff; border: 1rpx solid $line; border-radius: 14rpx; box-shadow: 0 10rpx 28rpx rgba(30, 47, 78, .05); }
+button::after { border: 0; }
+::-webkit-scrollbar { width: 0; height: 0; display: none; }
+scroll-view { scrollbar-width: none; }

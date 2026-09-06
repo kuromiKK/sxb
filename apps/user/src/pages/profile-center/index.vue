@@ -1,0 +1,571 @@
+<script setup lang="ts">
+import { computed, onUnmounted, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
+import DebugMenu from '@/components/DebugMenu.vue'
+import { useAppStore } from '@/store/app'
+import { backOrFallback } from '@/utils/navigation'
+import { createRightsOrder, getActivePendingOrder, loadOrders, normalizeOrders, persistOrders, sortOrders, type PaymentMethod, type RightsOrder } from '@/utils/orders'
+import { monthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
+
+type CenterMode = 'report' | 'record' | 'handouts' | 'rights' | 'orders' | 'announcements' | 'faq' | 'security' | 'about' | 'agreement' | 'privacy'
+const { exam, logout } = useAppStore()
+const mode = ref<CenterMode>('record')
+const expanded = ref('')
+const visibleCount = ref(12)
+const serviceVisible = ref(false)
+const markAllReadStep = ref<0 | 1>(0)
+const bindVisible = ref(false)
+const bindStep = ref(1)
+const bindPhone = ref('')
+const bindCode = ref('')
+const logoutVisible = ref(false)
+const codeSeconds = ref(0)
+const orderNow = ref(Date.now())
+const orders = ref<RightsOrder[]>(loadOrders())
+const expandedOrderNo = ref('')
+const purchaseNoticeVisible = ref(false)
+const activePurchaseOrder = ref<RightsOrder>()
+type OrderDialogMode = 'pay' | 'cancel' | 'create'
+const orderDialogMode = ref<OrderDialogMode>()
+const orderDialogVisible = ref(false)
+const orderDialogOrder = ref<RightsOrder>()
+type PaymentPhase = 'select' | 'processing' | 'failed'
+const paymentPhase = ref<PaymentPhase>('select')
+const selectedPaymentMethod = ref<PaymentMethod>('wechat')
+const simulateNextPaymentFailure = ref(Boolean(uni.getStorageSync('sxb-debug-next-payment-failure')))
+const sortedOrders = computed(() => sortOrders(orders.value))
+type HandoutSystemState = 'active' | 'removed'
+type HandoutRecord = {
+  id: string
+  title: string
+  size: string
+  downloadedAt: string
+  downloadedVersion: string
+  systemVersion: string
+  systemState: HandoutSystemState
+}
+const handoutConfirmVisible = ref(false)
+const handoutVerifyVisible = ref(false)
+const activeHandout = ref<HandoutRecord>()
+const handoutVerificationCode = ref('')
+const handoutInputCode = ref('')
+const qrPattern = Array.from({ length: 64 }, (_, index) => [0, 1, 3, 5, 6, 8, 10, 11, 14, 16, 18, 19, 22, 24, 27, 29, 31, 34, 36, 37, 40, 42, 44, 46, 49, 51, 53, 55, 57, 60, 62, 63].includes(index))
+const titles: Record<CenterMode, string> = {
+  report: '学习报告', record: '学习记录', handouts: '我的讲义', rights: '我的权益', orders: '我的订单', announcements: '公告', faq: '常见问题', security: '设置', about: '关于上行宝', agreement: '用户服务协议', privacy: '隐私政策',
+}
+const title = computed(() => titles[mode.value])
+
+const records = [
+  { icon: 'list', color: '#3569e8', title: '完成章节练习 8 题', meta: '社会工作服务的目标与功能 · 今天 18:42' },
+  { icon: 'sound', color: '#e98a3a', title: '学习精讲课 27 分钟', meta: '第1节 社会工作服务的目标与功能 · 今天 16:10' },
+  { icon: 'map', color: '#7655df', title: '查看知识点', meta: '社会层面的目标与社会工作服务功能 · 昨天 21:36' },
+  { icon: 'refresh', color: '#1a9a7b', title: '完成错题重练 6 题', meta: '社会工作综合能力（初级） · 8月9日' },
+]
+const savedHandoutRecords: Record<string, Pick<HandoutRecord, 'downloadedAt' | 'downloadedVersion'>> = uni.getStorageSync('sxb-handout-download-records') || {}
+const handouts = ref<HandoutRecord[]>(([
+  { id: 'handout-goals', title: '社会工作服务目标与功能讲义.pdf', size: '2.8 MB', downloadedAt: '2026-08-10', downloadedVersion: '1.2', systemVersion: '1.2', systemState: 'active' },
+  { id: 'handout-principles', title: '社会工作发展的基本原则.pdf', size: '3.1 MB', downloadedAt: '2026-08-08', downloadedVersion: '1.0', systemVersion: '1.4', systemState: 'active' },
+  { id: 'handout-relationships', title: '专业关系建立与发展讲义.pdf', size: '4.6 MB', downloadedAt: '2026-08-05', downloadedVersion: '1.0', systemVersion: '1.0', systemState: 'removed' },
+] satisfies HandoutRecord[]).map(item => ({ ...item, ...(savedHandoutRecords[item.id] || {}) })))
+const announcementsBase = [
+  { id: 'notice-1', title: '内部版 0.1 学习功能更新', date: '2026-08-11', content: '本次更新开放知识图谱、精讲课和刷题模块，已完成的题目、错题、收藏与笔记会保存在当前设备。' },
+  { id: 'notice-2', title: '初级社会工作师备考提醒', date: '2026-08-08', content: '建议先确认当前考试和每日刷题计划，再按章节完成练习。考试日期变化时，系统会同步调整倒计时。' },
+  { id: 'notice-3', title: '课程讲义下载说明', date: '2026-08-02', content: '带有“有讲义”标识的精讲课支持下载。下载前需要输入页面展示的验证码。' },
+]
+const announcements = Array.from({ length: 36 }, (_, index) => announcementsBase[index % announcementsBase.length]).map((item, index) => ({ ...item, id: `${item.id}-${index}`, date: `2026-08-${String(11 - (index % 10)).padStart(2, '0')}` }))
+const unreadAnnouncementIds = ref<string[]>(uni.getStorageSync('sxb-unread-announcement-ids') || [announcements[0].id, announcements[1].id])
+const faqsBase = [
+  { id: 'faq-1', title: '为什么做过的题不能修改答案？', content: '首次提交后会立即记录正确或错误状态，避免重复修改影响学习数据。如需重新作答，可以从错题本或章节练习重新开始。' },
+  { id: 'faq-2', title: '错题答对后还会保留吗？', content: '不会。错题重新答对后会自动移出错题本；清空错题本则会把错题恢复为未作答状态。' },
+  { id: 'faq-3', title: '收藏支持哪些内容？', content: '目前支持收藏题目、知识点和精讲课，所有收藏内容可以在“我的收藏”统一查看。' },
+  { id: 'faq-4', title: '课程讲义在小程序里如何查看？', content: '小程序会先下载到临时文件，再调用文档预览能力打开。是否能长期保存取决于微信和手机系统。' },
+  { id: 'faq-5', title: '更换考试后学习数据会丢失吗？', content: '不会。不同考试的数据会分别记录，切换回来后可以继续原来的学习进度。' },
+]
+const faqs = Array.from({ length: 30 }, (_, index) => ({ ...faqsBase[index % faqsBase.length], id: `${faqsBase[index % faqsBase.length].id}-${index}` }))
+const visibleAnnouncements = computed(() => announcements.slice(0, visibleCount.value))
+const visibleFaqs = computed(() => faqs.slice(0, visibleCount.value))
+
+onLoad((options) => {
+  const next = options?.mode as CenterMode
+  if (next && titles[next]) mode.value = next
+})
+
+const orderTimer = setInterval(() => {
+  orderNow.value = Date.now()
+  orders.value = normalizeOrders(orders.value, orderNow.value)
+}, 1000)
+onUnmounted(() => clearInterval(orderTimer))
+
+const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy') { switchMode('about'); return } backOrFallback('/pages/profile/index') }
+const toggle = (id: string) => { expanded.value = expanded.value === id ? '' : id; if (mode.value === 'announcements') { unreadAnnouncementIds.value = unreadAnnouncementIds.value.filter(item => item !== id); uni.setStorageSync('sxb-unread-announcement-ids', unreadAnnouncementIds.value); uni.setStorageSync('sxb-unread-announcements', unreadAnnouncementIds.value.length > 0) } }
+const toast = (title: string) => uni.showToast({ title, icon: 'none' })
+const switchMode = (next: CenterMode) => { mode.value = next; expanded.value = '' }
+const loadMore = () => { visibleCount.value += 12 }
+const openMonthlyReport = (item: MonthlyReport) => {
+  if (item.status === 'generating') return toast(`${item.year}年${item.month}月报告将在次月1日生成`)
+  uni.navigateTo({ url: `/pages/monthly-report/index?id=${item.id}` })
+}
+const markAllRead = () => {
+  if (!unreadAnnouncementIds.value.length) return toast('当前没有未读公告')
+  markAllReadStep.value = 1
+}
+const confirmMarkAllRead = () => {
+  unreadAnnouncementIds.value = []
+  uni.setStorageSync('sxb-unread-announcement-ids', [])
+  uni.setStorageSync('sxb-unread-announcements', false)
+  markAllReadStep.value = 0
+  toast('已全部标记为已读')
+}
+const startBind = () => { bindStep.value = 1; bindCode.value = ''; bindPhone.value = ''; bindVisible.value = true }
+const sendCode = () => { if (codeSeconds.value) return; codeSeconds.value = 60; toast(`验证码已发送至${bindStep.value === 1 ? '现手机号' : '新手机号'}`); const timer = setInterval(() => { if (codeSeconds.value <= 1) { codeSeconds.value = 0; clearInterval(timer); return } codeSeconds.value -= 1 }, 1000) }
+const nextBind = () => { if (bindStep.value === 1 && bindCode.value.length < 4) return toast('请输入现手机号验证码'); if (bindStep.value === 2 && !/^1\d{10}$/.test(bindPhone.value)) return toast('请输入正确的新手机号'); if (bindStep.value === 3 && bindCode.value.length < 4) return toast('请输入新手机号验证码'); if (bindStep.value < 3) { bindStep.value += 1; bindCode.value = ''; codeSeconds.value = 0; return } bindVisible.value = false; logout(); uni.showToast({ title: '换绑成功，请重新登录', icon: 'none' }); setTimeout(() => uni.reLaunch({ url: '/pages/login/index?redirect=%2Fpages%2Fprofile%2Findex' }), 500) }
+const confirmSignOut = () => {
+  logoutVisible.value = false
+  logout()
+  uni.reLaunch({ url: '/pages/login/index?redirect=%2Fpages%2Fprofile%2Findex' })
+}
+const handoutState = (item: HandoutRecord) => item.systemState === 'removed' ? 'removed' : item.downloadedVersion !== item.systemVersion ? 'updated' : 'available'
+const handoutActionLabel = (item: HandoutRecord) => handoutState(item) === 'removed' ? '已下架' : handoutState(item) === 'updated' ? '下载新版' : '重复下载'
+const openHandoutDownload = (item: HandoutRecord) => {
+  if (handoutState(item) === 'removed') return toast('该讲义已从系统下架，下载记录仍为你保留')
+  activeHandout.value = item
+  handoutConfirmVisible.value = true
+}
+const openHandoutVerification = () => {
+  handoutConfirmVisible.value = false
+  handoutVerificationCode.value = String(Math.floor(1000 + Math.random() * 9000))
+  handoutInputCode.value = ''
+  handoutVerifyVisible.value = true
+}
+const refreshHandoutCode = () => {
+  handoutVerificationCode.value = String(Math.floor(1000 + Math.random() * 9000))
+  handoutInputCode.value = ''
+}
+const saveHandoutDownloadRecord = (item: HandoutRecord) => {
+  const stored: Record<string, Pick<HandoutRecord, 'downloadedAt' | 'downloadedVersion'>> = uni.getStorageSync('sxb-handout-download-records') || {}
+  stored[item.id] = { downloadedAt: item.downloadedAt, downloadedVersion: item.downloadedVersion }
+  uni.setStorageSync('sxb-handout-download-records', stored)
+}
+const startHandoutFileDownload = (item: HandoutRecord) => {
+  // #ifdef H5
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
+    '5 0 obj\n<< /Length 79 >>\nstream\nBT /F1 22 Tf 72 760 Td (SXB Handout Download) Tj 0 -36 Td /F1 12 Tf (Verified learning material) Tj ET\nendstream\nendobj\n',
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets = [0]
+  objects.forEach((object) => { offsets.push(pdf.length); pdf += object })
+  const xrefOffset = pdf.length
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`
+  const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = item.title
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  // #endif
+}
+const verifyHandoutDownload = () => {
+  if (handoutInputCode.value.trim() !== handoutVerificationCode.value) return toast('验证码不正确，请重新输入')
+  const item = activeHandout.value
+  if (!item || item.systemState === 'removed') {
+    handoutVerifyVisible.value = false
+    return toast('讲义状态已变化，请刷新后重试')
+  }
+  item.downloadedVersion = item.systemVersion
+  item.downloadedAt = new Date().toISOString().slice(0, 10)
+  saveHandoutDownloadRecord(item)
+  handoutVerifyVisible.value = false
+  startHandoutFileDownload(item)
+  toast('验证通过，讲义下载已开始')
+}
+const orderStatusLabel = (status: RightsOrder['status']) => status === 'pending' ? '待支付' : status === 'completed' ? '已完成' : '已关闭'
+const formatOrderTime = (timestamp?: number) => timestamp ? new Date(timestamp).toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-') : '—'
+const orderCountdown = (item: RightsOrder) => {
+  if (item.status !== 'pending' || !item.expiresAt) return ''
+  const remaining = Math.max(item.expiresAt - orderNow.value, 0)
+  const minutes = Math.floor(remaining / 60000)
+  const seconds = Math.floor(remaining % 60000 / 1000)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+const toggleOrder = (orderNo: string) => { expandedOrderNo.value = expandedOrderNo.value === orderNo ? '' : orderNo }
+const updateOrder = (orderNo: string, update: Partial<RightsOrder>) => {
+  orders.value = orders.value.map(item => item.no === orderNo ? { ...item, ...update } : item)
+  persistOrders(orders.value)
+}
+const continuePayment = (item: RightsOrder) => {
+  orderDialogOrder.value = item
+  orderDialogMode.value = 'pay'
+  selectedPaymentMethod.value = item.lastPaymentMethod || 'wechat'
+  paymentPhase.value = item.lastPaymentError ? 'failed' : 'select'
+  orderDialogVisible.value = true
+}
+const cancelOrder = (item: RightsOrder) => {
+  orderDialogOrder.value = item
+  orderDialogMode.value = 'cancel'
+  orderDialogVisible.value = true
+}
+const viewRights = () => switchMode('rights')
+const repurchase = () => startRightsPurchase()
+const startRightsPurchase = () => {
+  orders.value = normalizeOrders(orders.value)
+  const pending = getActivePendingOrder(orders.value)
+  if (pending) {
+    activePurchaseOrder.value = pending
+    purchaseNoticeVisible.value = true
+    return
+  }
+  orderDialogOrder.value = undefined
+  orderDialogMode.value = 'create'
+  orderDialogVisible.value = true
+}
+const openPendingOrder = () => {
+  if (!activePurchaseOrder.value) return
+  purchaseNoticeVisible.value = false
+  expandedOrderNo.value = activePurchaseOrder.value.no
+  switchMode('orders')
+}
+const closeOrderDialog = () => {
+  orderDialogVisible.value = false
+  orderDialogMode.value = undefined
+  orderDialogOrder.value = undefined
+  paymentPhase.value = 'select'
+}
+const paymentMethodLabel = (method?: PaymentMethod) => method === 'alipay' ? '支付宝支付' : '微信支付'
+const selectPaymentMethod = (method: PaymentMethod) => {
+  if (paymentPhase.value === 'processing') return
+  selectedPaymentMethod.value = method
+  if (paymentPhase.value === 'failed') paymentPhase.value = 'select'
+}
+const finishPaymentAttempt = (item: RightsOrder) => {
+  if (simulateNextPaymentFailure.value) {
+    simulateNextPaymentFailure.value = false
+    uni.removeStorageSync('sxb-debug-next-payment-failure')
+    paymentPhase.value = 'failed'
+    updateOrder(item.no, {
+      lastPaymentMethod: selectedPaymentMethod.value,
+      lastPaymentAt: Date.now(),
+      lastPaymentError: '支付未完成，请检查支付账户后重试',
+    })
+    orderDialogOrder.value = orders.value.find(order => order.no === item.no)
+    return
+  }
+  updateOrder(item.no, {
+    status: 'completed',
+    backendStatus: 'paid',
+    paidAt: Date.now(),
+    paymentMethod: paymentMethodLabel(selectedPaymentMethod.value),
+    lastPaymentMethod: selectedPaymentMethod.value,
+    lastPaymentAt: Date.now(),
+    lastPaymentError: undefined,
+    validity: `${new Date().toISOString().slice(0, 10)} 起 12 个月`,
+  })
+  expandedOrderNo.value = item.no
+  closeOrderDialog()
+  toast('支付成功，权益已生效')
+}
+const submitPayment = (item: RightsOrder) => {
+  if (paymentPhase.value === 'processing') return
+  paymentPhase.value = 'processing'
+  setTimeout(() => finishPaymentAttempt(item), 900)
+}
+const confirmOrderDialog = () => {
+  if (orderDialogMode.value === 'create') {
+    const order = createRightsOrder()
+    orders.value = [order, ...orders.value]
+    persistOrders(orders.value)
+    expandedOrderNo.value = order.no
+    closeOrderDialog()
+    switchMode('orders')
+    toast('订单已创建，请在30分钟内支付')
+    return
+  }
+  const item = orderDialogOrder.value
+  if (!item) return closeOrderDialog()
+  if (orderDialogMode.value === 'pay') {
+    submitPayment(item)
+    return
+  }
+  updateOrder(item.no, { status: 'closed', backendStatus: 'closed', closeReason: '用户主动取消订单' })
+  expandedOrderNo.value = ''
+  closeOrderDialog()
+  toast('订单已取消')
+}
+const applyOrderDebug = (key: string) => {
+  if (key === 'next-payment-failure') {
+    simulateNextPaymentFailure.value = true
+    uni.setStorageSync('sxb-debug-next-payment-failure', true)
+    toast('下一次支付将模拟失败')
+    return
+  }
+  if (key !== 'first-pending') return
+  const now = Date.now()
+  const firstOrder = sortOrders(orders.value)[0]
+  if (!firstOrder) return
+  orders.value = orders.value.map((item) => {
+    if (item.no === firstOrder.no) {
+      return {
+        ...item,
+        amount: '798.00',
+        status: 'pending',
+        backendStatus: 'pending_payment',
+        createdAt: now,
+        expiresAt: now + 30 * 60 * 1000,
+        paidAt: undefined,
+        paymentMethod: undefined,
+        lastPaymentMethod: undefined,
+        lastPaymentAt: undefined,
+        lastPaymentError: undefined,
+        closeReason: undefined,
+        validity: '支付成功后 12 个月',
+      }
+    }
+    if (item.status !== 'pending') return item
+    return { ...item, status: 'closed', backendStatus: 'closed', closeReason: '调试切换时自动关闭原待支付订单' }
+  })
+  persistOrders(orders.value)
+  orderNow.value = now
+  expandedOrderNo.value = firstOrder.no
+  toast('第一条订单已设为待支付')
+}
+const applyAnnouncementDebug = (key: string) => {
+  if (key !== 'restore-unread') return
+  unreadAnnouncementIds.value = [announcements[0], announcements[1], announcements[2], announcements[5]]
+    .filter(Boolean)
+    .map(item => item.id)
+  uni.setStorageSync('sxb-unread-announcement-ids', unreadAnnouncementIds.value)
+  uni.setStorageSync('sxb-unread-announcements', true)
+  toast('前三条和第6条已设为未读')
+}
+</script>
+
+<template>
+  <view class="center-page page safe-top">
+    <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>{{ title }}</text><view></view><text v-if="mode === 'announcements'" class="top-bar-action" @tap="markAllRead">全部已读</text></view>
+
+    <view v-if="mode === 'report'" class="report-archive"><view class="report-archive-hero"><view class="archive-hero-icon"><uni-icons type="map-filled" size="29" color="#e2c476" /></view><view><text>月度学习报告</text><text>每个自然月生成一次，记录学习成果与下月计划</text></view><text>{{ monthlyReports.filter(item => item.status === 'ready').length }}份</text></view><view class="report-year"><text>2026年</text></view><view class="report-list"><view v-for="item in monthlyReports" :key="item.id" class="report-row" :class="{ generating: item.status === 'generating' }" @tap="openMonthlyReport(item)"><view class="report-month"><text>{{ String(item.month).padStart(2, '0') }}</text><text>月</text></view><view class="report-row-copy"><view><text>{{ item.year }}年{{ item.month }}月学习报告</text><text :class="item.status">{{ item.status === 'ready' ? '已生成' : '生成中' }}</text></view><view v-if="item.status === 'ready'" class="report-meta"><text>学习{{ item.metrics.studyDays }}天</text><text>{{ item.metrics.questions }}题</text><text>掌握 +{{ item.metrics.masteryGain }}%</text></view><view v-else class="generating-progress"><view><view></view></view><text>将在9月1日生成</text></view></view><uni-icons :type="item.status === 'ready' ? 'forward' : 'clock'" size="19" :color="item.status === 'ready' ? '#b99b50' : '#8792a4'" /></view></view></view>
+
+    <view v-else-if="mode === 'record'" class="content-block"><view class="summary-band"><view><text>18</text><text>累计学习天数</text></view><view><text>286</text><text>累计刷题</text></view><view><text>327</text><text>学习分钟</text></view></view><view class="list-card"><view v-for="item in records" :key="item.title" class="record-row"><view class="row-icon" :style="{ background: `${item.color}16` }"><uni-icons :type="item.icon" size="20" :color="item.color" /></view><view><text>{{ item.title }}</text><text>{{ item.meta }}</text></view></view></view></view>
+
+    <view v-else-if="mode === 'handouts'" class="content-block handout-block"><view class="page-note"><uni-icons type="info" size="18" color="#3569e8" /><text>下面是已经下载过的讲义记录，点击可重复下载。</text></view><view class="list-card handout-list"><view v-for="item in handouts" :key="item.id" class="handout-row" :class="`is-${handoutState(item)}`" @tap="openHandoutDownload(item)"><view class="pdf-icon">PDF</view><view class="handout-record-copy"><text>{{ item.title }}</text><text>{{ item.size }} · 下载于 {{ item.downloadedAt }} · v{{ item.downloadedVersion }}</text></view><view class="handout-row-action"><button :disabled="handoutState(item) === 'removed'" @tap.stop="openHandoutDownload(item)">{{ handoutActionLabel(item) }}</button></view></view></view></view>
+
+    <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>PRO</text><view><text>专业版</text><text>有效至 {{ exam.expiry }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in ['全科历年真题题库', '全部章节与知识点内容', '专业知识图谱', '精讲课程与配套讲义', '错题本、收藏和学习笔记', '学习计划与多端进度记录']" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><button class="primary-button" @tap="startRightsPurchase">续费或升级</button></view>
+
+    <view v-else-if="mode === 'orders'" class="content-block order-block"><view class="order-tip"><uni-icons type="info" size="18" color="#5f748b" /><text>待支付订单30分钟内有效，点击订单可展开查看详情。</text></view><view class="order-list"><view v-for="item in sortedOrders" :key="item.no" class="order-item" :class="[`status-${item.status}`, { expanded: expandedOrderNo === item.no }]" @tap="toggleOrder(item.no)"><view class="order-summary"><view class="order-main"><view class="order-title-line"><text>{{ item.productName }}</text><text class="order-status">{{ orderStatusLabel(item.status) }}</text></view><text class="order-time">{{ formatOrderTime(item.createdAt) }}</text></view><view class="order-price"><text>¥{{ item.amount }}</text><uni-icons :type="expandedOrderNo === item.no ? 'up' : 'down'" size="17" color="#8995a5" /></view></view><view v-if="item.status === 'pending'" class="pending-countdown"><view class="pulse-dot"></view><text>支付剩余 {{ orderCountdown(item) }}</text></view><view v-if="expandedOrderNo === item.no" class="order-detail" @tap.stop><view class="detail-line"><text>订单编号</text><text>{{ item.no }}</text></view><view class="detail-line"><text>购买权益</text><text>{{ item.rightsName }}</text></view><view class="detail-line"><text>权益期限</text><text>{{ item.validity || '—' }}</text></view><view class="detail-line"><text>支付方式</text><text>{{ item.paymentMethod || '待选择' }}</text></view><view v-if="item.paidAt" class="detail-line"><text>支付时间</text><text>{{ formatOrderTime(item.paidAt) }}</text></view><view v-if="item.lastPaymentError" class="detail-line payment-failed-line"><text>最近支付</text><text>{{ paymentMethodLabel(item.lastPaymentMethod) }}失败 · {{ item.lastPaymentError }}</text></view><view v-if="item.closeReason" class="detail-line close-reason"><text>关闭原因</text><text>{{ item.closeReason }}</text></view><view class="detail-line total-line"><text>实付金额</text><text>¥{{ item.amount }}</text></view><view v-if="item.status === 'pending'" class="order-actions"><button class="secondary" @tap="cancelOrder(item)">取消订单</button><button @tap="continuePayment(item)">继续支付</button></view><view v-else-if="item.status === 'completed'" class="order-actions"><button class="secondary" @tap="serviceVisible = true">联系客服</button><button @tap="viewRights">查看当前权益</button></view><view v-else class="order-actions single"><button @tap="repurchase">重新购买</button></view></view></view></view></view>
+
+    <view v-else-if="mode === 'announcements'" class="content-block"><view class="list-card fold-list announcement-list"><view v-for="item in visibleAnnouncements" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><view class="notice-title"><view v-if="unreadAnnouncementIds.includes(item.id)" class="item-unread"></view><text>{{ item.title }}</text></view><text>{{ item.date }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><view v-if="expanded === item.id" class="fold-content"><text>{{ item.content }} 公告详情将持续补充图文、流程说明和相关附件，用户可在这里完整查看，不受首页摘要长度限制。</text><view v-if="item.id.includes('notice-1')" class="notice-media"><uni-icons type="image" size="28" color="#fff" /><text>内部版 0.1 功能更新概览</text></view></view></view><view v-if="visibleAnnouncements.length < announcements.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部公告</text></view></view>
+
+    <view v-else-if="mode === 'faq'" class="content-block"><view class="list-card fold-list faq-list"><view v-for="item in visibleFaqs" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><text>{{ item.title }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><text v-if="expanded === item.id" class="fold-content">{{ item.content }} 如仍未解决，可以从页面底部联系客服获取进一步帮助。</text></view><view v-if="visibleFaqs.length < faqs.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部问题</text></view></view>
+
+    <view v-else-if="mode === 'security'" class="content-block"><view class="list-card settings-list security-list"><view><text>登录手机号</text><text>138****6452</text></view><view><text>微信账号</text><text>已绑定</text></view><view @tap="startBind"><text>更换绑定手机号</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view class="logout-row" @tap="logoutVisible = true"><text>退出登录</text><uni-icons type="right" size="18" color="#c85056" /></view></view></view>
+
+    <view v-else-if="mode === 'about'" class="about-block"><view class="brand-mark">上</view><text class="brand-name">上行宝</text><text class="brand-version">内部版 0.1</text><view class="list-card settings-list about-menu"><view @tap="switchMode('agreement')"><text>用户服务协议</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view @tap="switchMode('privacy')"><text>隐私政策</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view><text>当前版本</text><text>0.1.0</text></view></view><text class="copyright">Copyright © 2026 上行宝</text></view>
+
+    <view v-else class="article-block"><text class="article-title">{{ title }}</text><text class="article-date">更新日期：2026年8月11日</text><text class="article-text" v-if="mode === 'agreement'">欢迎使用上行宝。使用本产品前，请仔细阅读并理解本协议。上行宝为用户提供考试知识点、课程、题库、学习计划以及相关学习服务。用户应妥善保管账号信息，不得以任何方式转让、出租或共享付费权益。平台展示的学习数据用于帮助用户安排复习，不构成考试通过承诺。课程、题目、讲义及其他内容的知识产权归权利人所有，未经许可不得复制、传播或用于商业用途。</text><text class="article-text" v-else>上行宝重视用户个人信息和学习数据的保护。为完成登录、同步学习进度、保存错题收藏和处理订单，我们会在必要范围内处理手机号、账号标识、学习记录及订单信息。我们不会向无关第三方出售个人信息。用户可以申请查询、更正或删除相关信息。正式上线前，隐私政策将根据实际接入的服务和权限进一步完善。</text></view>
+    <view v-if="markAllReadStep" class="modal-mask announcement-modal-mask" @tap="markAllReadStep = 0"><view class="announcement-modal" @tap.stop><view class="announcement-modal-accent"></view><view class="announcement-modal-icon"><uni-icons type="email-filled" size="30" color="#fff" /></view><text class="announcement-modal-title">全部标记为已读？</text><text class="announcement-modal-desc">将清除 {{ unreadAnnouncementIds.length }} 条公告的未读标记，公告内容仍会保留。</text><view class="announcement-modal-count"><text>{{ unreadAnnouncementIds.length }}</text><text>条未读公告</text></view><view class="announcement-modal-actions"><button @tap="markAllReadStep = 0">暂不处理</button><button @tap="confirmMarkAllRead">确定</button></view></view></view>
+    <view v-if="serviceVisible || logoutVisible || bindVisible" class="modal-mask" @tap="serviceVisible = false; logoutVisible = false; bindVisible = false">
+      <view v-if="serviceVisible" class="center-modal" @tap.stop><view class="qr-code"><view v-for="(filled, index) in qrPattern" :key="index" :class="{ filled }"></view></view><text class="modal-title">扫一扫联系客服</text><text class="modal-desc">使用微信扫一扫，添加上行宝企业微信客服</text><text class="modal-time">工作日 09:00-18:00 · SXB-KF01</text><button class="modal-cancel" @tap="serviceVisible = false">关闭</button></view>
+      <view v-else-if="logoutVisible" class="center-modal logout-modal" @tap.stop><view class="modal-mark danger-mark"><uni-icons type="undo" size="27" color="#fff" /></view><text class="modal-title">确认退出登录？</text><text class="modal-desc modal-copy">退出后仍可浏览公开内容，错题、收藏和学习进度不会丢失；深度学习功能需要重新登录。</text><button class="logout-confirm" @tap="confirmSignOut">确认退出</button><button class="modal-cancel" @tap="logoutVisible = false">暂不退出</button></view>
+      <view v-else class="center-modal bind-modal" @tap.stop><text class="modal-title">更换绑定手机号</text><text class="modal-desc">{{ bindStep === 1 ? '先验证当前手机号 138****6452' : bindStep === 2 ? '输入新的手机号' : `验证新手机号 ${bindPhone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}` }}</text><input v-if="bindStep === 2" v-model="bindPhone" class="modal-input" type="number" placeholder="请输入新手机号" maxlength="11" /><view v-if="bindStep !== 2" class="code-input-row"><input v-model="bindCode" class="modal-input" type="number" placeholder="请输入6位验证码" maxlength="6" /><button @tap="sendCode">{{ codeSeconds ? `${codeSeconds}s` : '获取验证码' }}</button></view><button class="modal-primary" @tap="nextBind">{{ bindStep === 3 ? '确认换绑并重新登录' : '下一步' }}</button><button class="modal-cancel" @tap="bindVisible = false">取消</button></view>
+    </view>
+    <view v-if="handoutConfirmVisible" class="modal-mask" @tap="handoutConfirmVisible = false"><view v-if="activeHandout" class="center-modal handout-modal" @tap.stop><view class="modal-mark handout-mark"><uni-icons type="download" size="27" color="#fff" /></view><text class="modal-title">{{ handoutState(activeHandout) === 'updated' ? '下载新版讲义' : '重复下载讲义' }}</text><text class="modal-desc modal-copy">即将下载《{{ activeHandout.title }}》，继续前需要完成验证码校验。</text><view class="handout-version-card"><view><text>上次下载</text><text>v{{ activeHandout.downloadedVersion }}</text></view><view><text>系统版本</text><text :class="{ updated: handoutState(activeHandout) === 'updated' }">v{{ activeHandout.systemVersion }}</text></view><view><text>文件大小</text><text>{{ activeHandout.size }}</text></view></view><button class="modal-primary" @tap="openHandoutVerification">继续验证</button><button class="modal-cancel" @tap="handoutConfirmVisible = false">取消</button></view></view>
+    <view v-if="handoutVerifyVisible" class="modal-mask" @tap="handoutVerifyVisible = false"><view class="center-modal handout-modal" @tap.stop><text class="modal-title no-mark">输入验证码</text><text class="modal-desc">请输入下方 4 位验证码，验证通过后立即下载 PDF 讲义。</text><view class="handout-code-display"><text>{{ handoutVerificationCode }}</text><button @tap="refreshHandoutCode">换一张</button></view><input v-model="handoutInputCode" class="handout-code-input" type="number" maxlength="4" placeholder="请输入验证码" /><button class="modal-primary" @tap="verifyHandoutDownload">验证并下载</button><button class="modal-cancel" @tap="handoutVerifyVisible = false">取消</button></view></view>
+    <view v-if="purchaseNoticeVisible" class="modal-mask" @tap="purchaseNoticeVisible = false"><view v-if="activePurchaseOrder" class="center-modal purchase-notice" @tap.stop><view class="modal-mark pending-mark"><uni-icons type="wallet" size="27" color="#fff" /></view><text class="modal-title">存在待支付订单</text><text class="modal-desc modal-copy">你已有一笔{{ activePurchaseOrder.rightsName }}订单，请先支付、取消或等待订单自动失效后再创建新订单。</text><view class="pending-order-summary"><text>{{ activePurchaseOrder.productName }}</text><view><text>¥{{ activePurchaseOrder.amount }}</text><text>剩余 {{ orderCountdown(activePurchaseOrder) }}</text></view></view><button class="modal-primary" @tap="openPendingOrder">查看待支付订单</button><button class="modal-cancel" @tap="purchaseNoticeVisible = false">取消</button></view></view>
+    <view v-if="orderDialogVisible && orderDialogMode" class="modal-mask order-dialog-mask" @tap="paymentPhase !== 'processing' && closeOrderDialog()">
+      <view class="order-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>
+        <view class="order-dialog-top"><view class="order-dialog-icon"><uni-icons :type="orderDialogMode === 'cancel' ? 'closeempty' : orderDialogMode === 'pay' ? 'wallet' : 'medal'" size="28" color="#fff" /></view><view class="order-dialog-heading"><text>{{ orderDialogMode === 'pay' ? '订单支付' : orderDialogMode === 'cancel' ? '取消订单' : '创建权益订单' }}</text><text>{{ orderDialogMode === 'pay' ? '选择支付方式并完成付款' : orderDialogMode === 'cancel' ? '订单关闭后可重新选择权益' : '订单创建后30分钟内有效' }}</text></view><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
+        <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '上行宝旗舰版' }}</text><text>{{ orderDialogOrder?.rightsName || '旗舰版权益' }} · 支付成功后12个月</text></view><text>¥{{ orderDialogOrder?.amount || '798.00' }}</text></view>
+        <view v-if="orderDialogMode === 'pay'" class="payment-methods">
+          <text>选择支付方式</text>
+          <view class="payment-method-list">
+            <view :class="{ active: selectedPaymentMethod === 'wechat' }" @tap="selectPaymentMethod('wechat')"><view class="pay-brand wechat">微</view><view><text>微信支付</text><text>使用微信安全支付</text></view><uni-icons :type="selectedPaymentMethod === 'wechat' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPaymentMethod === 'wechat' ? '#19a974' : '#b2bbc7'" /></view>
+            <!-- #ifdef H5 -->
+            <view :class="{ active: selectedPaymentMethod === 'alipay' }" @tap="selectPaymentMethod('alipay')"><view class="pay-brand alipay">支</view><view><text>支付宝支付</text><text>跳转支付宝完成付款</text></view><uni-icons :type="selectedPaymentMethod === 'alipay' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPaymentMethod === 'alipay' ? '#1677ff' : '#b2bbc7'" /></view>
+            <!-- #endif -->
+          </view>
+        </view>
+        <view v-if="orderDialogMode === 'pay' && paymentPhase === 'failed'" class="payment-result failed"><uni-icons type="closeempty" size="19" color="#c85056" /><view><text>支付未完成</text><text>{{ orderDialogOrder?.lastPaymentError || '请更换支付方式或稍后重试' }}</text></view></view><view v-else-if="orderDialogMode === 'pay' && paymentPhase === 'processing'" class="payment-result processing"><view class="payment-spinner"></view><view><text>正在发起{{ paymentMethodLabel(selectedPaymentMethod) }}</text><text>演示环境不会跳转第三方支付页面</text></view></view><view v-else-if="orderDialogMode === 'pay' && orderDialogOrder" class="order-dialog-notice"><uni-icons type="clock" size="18" color="#3569e8" /><text>请在 {{ orderCountdown(orderDialogOrder) }} 内完成支付</text></view><view v-else-if="orderDialogMode === 'cancel'" class="order-dialog-notice danger"><uni-icons type="info" size="18" color="#c85056" /><text>取消后本订单立即关闭，无法恢复</text></view><view v-else class="order-dialog-notice"><uni-icons type="info" size="18" color="#3569e8" /><text>有效期内不能重复创建新的权益订单</text></view>
+        <view class="order-dialog-actions"><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog">{{ orderDialogMode === 'cancel' ? '保留订单' : '暂不操作' }}</button><button :disabled="paymentPhase === 'processing'" :class="{ danger: orderDialogMode === 'cancel' }" @tap="confirmOrderDialog">{{ orderDialogMode === 'pay' ? paymentPhase === 'processing' ? '支付处理中' : paymentPhase === 'failed' ? '重新支付' : `${paymentMethodLabel(selectedPaymentMethod)} ¥${orderDialogOrder?.amount}` : orderDialogMode === 'cancel' ? '确认取消' : '确认创建' }}</button></view>
+      </view>
+    </view>
+    <DebugMenu v-if="mode === 'orders'" page="我的订单" :options="[{ key: 'first-pending', label: '第一条订单设为待支付' }, { key: 'next-payment-failure', label: '下次支付模拟失败' }]" @select="applyOrderDebug" />
+    <DebugMenu v-if="mode === 'announcements'" page="公告" :options="[{ key: 'restore-unread', label: '前三条和第6条设为未读' }]" @select="applyAnnouncementDebug" />
+  </view>
+</template>
+
+<style lang="scss">
+.center-page { max-width:430px; margin:0 auto; padding-top:calc(env(safe-area-inset-top) + 18rpx); padding-bottom:42rpx; background:#f5f7fb; }.top-bar { display:flex; align-items:center; justify-content:space-between; height:58rpx; }.top-bar button { width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; margin:0; padding:0; background:#edf1fb; border-radius:15rpx; }.top-bar button::after { display:none; }.top-bar>text { color:#1e3048; font-size:27rpx; font-weight:900; }.top-bar>view { width:58rpx; }.content-block,.about-block,.article-block,.empty-block { margin-top:20rpx; }.summary-band { display:grid; grid-template-columns:repeat(3,1fr); padding:19rpx 6rpx; background:linear-gradient(120deg,#edf3ff,#f3efff); border:1rpx solid #dce5fa; border-radius:12rpx; }.summary-band view { display:flex; align-items:center; flex-direction:column; gap:5rpx; border-right:1rpx solid #dfe5f2; }.summary-band view:last-child { border-right:0; }.summary-band text:first-child { color:#263953; font-size:29rpx; font-weight:900; }.summary-band text:last-child { color:#7f8da1; font-size:16rpx; }.list-card { margin-top:14rpx; padding:0 17rpx; background:#fff; border:1rpx solid #e0e6f0; border-radius:12rpx; }.record-row { display:flex; align-items:center; gap:12rpx; min-height:78rpx; border-bottom:1rpx solid #edf0f5; }.record-row:last-child { border-bottom:0; }.row-icon { width:43rpx; height:43rpx; display:flex; align-items:center; justify-content:center; flex:none; border-radius:11rpx; }.record-row>view:last-child { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.record-row>view:last-child text:first-child { color:#2c3d55; font-size:21rpx; font-weight:800; }.record-row>view:last-child text:last-child { overflow:hidden; color:#8995a5; font-size:17rpx; text-overflow:ellipsis; white-space:nowrap; }.page-note { display:flex; align-items:flex-start; gap:7rpx; padding:13rpx 14rpx; color:#5f6f87; background:#edf3ff; border-radius:9rpx; font-size:18rpx; line-height:1.5; }.handout-row { display:flex; align-items:center; gap:11rpx; min-height:88rpx; border-bottom:1rpx solid #edf0f5; }.handout-row:last-child { border-bottom:0; }.pdf-icon { width:42rpx; height:47rpx; display:flex; align-items:center; justify-content:center; flex:none; color:#d45d63; background:#fff0ef; border-radius:8rpx; font-size:15rpx; font-weight:900; }.handout-row>view:nth-child(2) { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.handout-row>view:nth-child(2) text:first-child { overflow:hidden; color:#2c3d55; font-size:19rpx; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.handout-row>view:nth-child(2) text:last-child { color:#8b96a5; font-size:16rpx; }.handout-row button { width:auto; height:40rpx; line-height:40rpx; margin:0; padding:0 10rpx; color:#3569e8; background:#eaf0ff; border-radius:7rpx; font-size:16rpx; }.handout-row button::after { display:none; }.rights-hero { display:flex; align-items:center; gap:14rpx; padding:22rpx; color:#fff; background:linear-gradient(105deg,#315fda,#6952ce); border-radius:13rpx; box-shadow:0 12rpx 26rpx rgba(68,79,187,.18); }.rights-hero>text { width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.16); border-radius:16rpx; font-size:21rpx; font-weight:900; }.rights-hero>view { display:flex; flex-direction:column; gap:5rpx; }.rights-hero>view text:first-child { font-size:27rpx; font-weight:900; }.rights-hero>view text:last-child { color:#dbe1ff; font-size:18rpx; }.section-label { margin:24rpx 0 11rpx; color:#22354e; font-size:23rpx; font-weight:850; }.benefit-list { padding:6rpx 17rpx; background:#fff; border:1rpx solid #e0e6f0; border-radius:12rpx; }.benefit-list view { display:flex; align-items:center; gap:9rpx; min-height:58rpx; border-bottom:1rpx solid #edf0f5; color:#34475f; font-size:20rpx; }.benefit-list view:last-child { border-bottom:0; }.primary-button { width:100%; height:61rpx; line-height:61rpx; margin:18rpx 0 0; padding:0; color:#fff; background:linear-gradient(100deg,#3569e8,#6949df); border-radius:9rpx; font-size:21rpx; font-weight:850; }.primary-button::after { display:none; }.order-list { margin-top:0; }.order-item { padding:18rpx 0; border-bottom:1rpx solid #edf0f5; }.order-item:last-child { border-bottom:0; }.order-head,.order-foot { display:flex; align-items:center; justify-content:space-between; }.order-head text:first-child { color:#263953; font-size:22rpx; font-weight:850; }.order-head text:last-child { color:#1a9a7b; font-size:18rpx; font-weight:800; }.order-no { display:block; margin-top:8rpx; color:#8a96a5; font-size:16rpx; }.order-foot { margin-top:10rpx; color:#7b8797; font-size:17rpx; }.order-foot text:last-child { color:#243650; font-size:22rpx; font-weight:900; }.fold-list { margin-top:0; }.fold-item { padding:17rpx 0; border-bottom:1rpx solid #edf0f5; }.fold-item:last-child { border-bottom:0; }.fold-head { display:flex; align-items:center; gap:10rpx; }.fold-head>view { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.fold-head>view text:first-child { color:#2b3d56; font-size:21rpx; line-height:1.45; font-weight:800; }.fold-head>view text:last-child { color:#929dab; font-size:16rpx; }.fold-content { display:block; margin-top:13rpx; padding:13rpx; color:#5f7087; background:#f6f8fb; border-radius:8rpx; font-size:19rpx; line-height:1.65; }.settings-list { margin-top:0; }.settings-list>view { min-height:67rpx; display:flex; align-items:center; justify-content:space-between; gap:12rpx; border-bottom:1rpx solid #edf0f5; color:#2c3d55; font-size:20rpx; }.settings-list>view:last-child { border-bottom:0; }.settings-list>view>text:last-child { color:#8793a3; font-size:18rpx; }.danger { color:#c85056; }.about-block { display:flex; align-items:center; flex-direction:column; }.brand-mark { width:72rpx; height:72rpx; display:flex; align-items:center; justify-content:center; color:#fff; background:linear-gradient(135deg,#3569e8,#7655df); border-radius:19rpx; font-size:36rpx; font-weight:900; }.brand-name { margin-top:12rpx; color:#20334b; font-size:28rpx; font-weight:900; }.brand-version { margin-top:4rpx; color:#8b96a5; font-size:18rpx; }.about-menu { width:100%; box-sizing:border-box; margin-top:24rpx; }.copyright { margin-top:23rpx; color:#a0a9b5; font-size:16rpx; }.article-title { display:block; color:#20334b; font-size:29rpx; font-weight:900; }.article-date { display:block; margin-top:7rpx; color:#919ba8; font-size:17rpx; }.article-text { display:block; margin-top:18rpx; color:#4c5e75; font-size:21rpx; line-height:1.9; }.empty-block { display:flex; align-items:center; flex-direction:column; padding:86rpx 28rpx; color:#7c899b; text-align:center; }.empty-icon { width:68rpx; height:68rpx; display:flex; align-items:center; justify-content:center; background:#e9efff; border-radius:18rpx; }.empty-block>text:nth-child(2) { margin-top:15rpx; color:#263953; font-size:24rpx; font-weight:850; }.empty-block>text:last-child { margin-top:8rpx; font-size:19rpx; line-height:1.55; }
+.top-bar-action { width:58rpx; color:#3569e8 !important; font-size:19rpx !important; font-weight:800 !important; text-align:right; white-space:nowrap; }.notice-title { display:flex; align-items:center; gap:8rpx; }.item-unread { width:10rpx; height:10rpx; flex:none; background:#e45e64; border-radius:50%; }.fold-head>view text:first-child { font-size:24rpx; line-height:1.5; }.fold-head>view text:last-child { font-size:18rpx; }.notice-media { height:120rpx; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:7rpx; margin-top:12rpx; color:#fff; background:linear-gradient(120deg,#3569e8,#7655df); border-radius:9rpx; font-size:18rpx; font-weight:800; }.load-more { display:flex; align-items:center; justify-content:center; height:58rpx; color:#3569e8; border-top:1rpx solid #edf0f5; font-size:20rpx; font-weight:800; }.list-end { display:block; padding:20rpx 0; color:#9aa5b4; border-top:1rpx solid #edf0f5; font-size:17rpx; text-align:center; }.modal-mask { position:fixed; z-index:100; inset:0; display:flex; align-items:center; justify-content:center; padding:28rpx; background:rgba(20,31,51,.52); }.center-modal { width:100%; max-width:350px; box-sizing:border-box; display:flex; align-items:center; flex-direction:column; padding:24rpx; background:#fff; border-radius:16rpx; box-shadow:0 22rpx 52rpx rgba(22,37,64,.24); }.modal-title { margin-top:14rpx; color:#22354d; font-size:25rpx; font-weight:900; }.modal-desc { margin-top:7rpx; color:#7f8da1; font-size:18rpx; line-height:1.5; text-align:center; }.modal-time { margin-top:7rpx; color:#1a9a7b; font-size:17rpx; }.modal-mark { width:60rpx; height:60rpx; display:flex; align-items:center; justify-content:center; background:#1a9a7b; border-radius:17rpx; }.danger-mark { background:#c85056; }.qr-code { width:180rpx; height:180rpx; box-sizing:border-box; display:grid; grid-template-columns:repeat(8,1fr); padding:12rpx; gap:2rpx; background:#fff; border:8rpx solid #fff; box-shadow:0 0 0 1rpx #e1e6ee; }.qr-code view { background:#f2f4f8; }.qr-code view.filled { background:#17202d; }.modal-copy { max-width:280px; }.modal-primary,.modal-cancel { width:100%; height:56rpx; line-height:56rpx; margin-top:16rpx; border-radius:9rpx; font-size:20rpx; }.modal-primary { color:#fff; background:#3569e8; font-weight:850; }.modal-cancel { margin-top:8rpx; color:#718096; background:#f1f3f6; }.modal-primary::after,.modal-cancel::after { display:none; }.modal-input { width:100%; height:58rpx; box-sizing:border-box; margin-top:18rpx; padding:0 16rpx; color:#243650; background:#f5f7fb; border:1rpx solid #dce5f0; border-radius:9rpx; font-size:20rpx; }.code-input-row { width:100%; display:flex; align-items:stretch; gap:9rpx; margin-top:18rpx; }.code-input-row .modal-input { flex:1; min-width:0; margin-top:0; }.code-input-row button { width:110rpx; height:58rpx; line-height:58rpx; flex:none; margin:0; padding:0; color:#3569e8; background:#eaf0ff; border-radius:9rpx; font-size:18rpx; font-weight:800; }.code-input-row button::after { display:none; }
+.top-bar { position:relative; }
+.top-bar-action { position:absolute; right:0; width:auto; font-size:21rpx !important; text-align:right; }
+.fold-item { padding:20rpx 0; }
+.fold-head>view text:first-child { font-size:28rpx; line-height:1.5; }
+.fold-head>view text:last-child { font-size:20rpx; }
+.fold-content { font-size:22rpx; line-height:1.75; }
+.handout-block .page-note { align-items:center; }
+.handout-list { padding:0 16rpx; }
+.handout-row { min-height:108rpx; gap:12rpx; }
+.handout-record-copy { justify-content:center; }
+.handout-record-copy text:first-child { font-size:20rpx !important; }
+.handout-record-copy text:last-child { overflow:hidden; font-size:16rpx !important; text-overflow:ellipsis; white-space:nowrap; }
+.handout-row-action { width:102rpx; display:flex; align-items:center; justify-content:center; flex:none; }
+.handout-row-action button { width:100%; height:42rpx; line-height:42rpx; padding:0 5rpx; font-size:16rpx; font-weight:800; }
+.handout-row.is-updated .handout-row-action button { color:#c86d1e; background:#fff1df; }
+.handout-row.is-removed { opacity:.72; }
+.handout-row.is-removed .pdf-icon { color:#8995a5; background:#eef1f5; }
+.handout-row.is-removed .handout-row-action button { color:#9ba5b2; background:#eef1f5; }
+.handout-row-action button[disabled] { opacity:1; }
+.handout-modal { padding:27rpx 24rpx 23rpx; }
+.handout-mark { background:linear-gradient(135deg,#3569e8,#6949df); }
+.handout-modal .modal-title.no-mark { margin-top:0; }
+.handout-version-card { width:100%; box-sizing:border-box; display:grid; grid-template-columns:repeat(3,1fr); margin-top:18rpx; padding:14rpx 5rpx; background:#f5f7fb; border:1rpx solid #e2e7ef; border-radius:10rpx; }
+.handout-version-card view { display:flex; align-items:center; flex-direction:column; gap:5rpx; border-right:1rpx solid #e1e6ee; }
+.handout-version-card view:last-child { border-right:0; }
+.handout-version-card text:first-child { color:#8793a3; font-size:16rpx; }
+.handout-version-card text:last-child { color:#263953; font-size:19rpx; font-weight:850; }
+.handout-version-card text.updated { color:#d47a25; }
+.handout-code-display { width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; margin-top:18rpx; padding:14rpx 16rpx; background:#f0f3ff; border:1rpx solid #dce6ff; border-radius:10rpx; }
+.handout-code-display>text { color:#3569e8; font-size:34rpx; letter-spacing:6rpx; font-weight:900; }
+.handout-code-display button { width:auto; height:38rpx; line-height:38rpx; margin:0; padding:0 9rpx; color:#3569e8; background:#fff; border-radius:7rpx; font-size:17rpx; }
+.handout-code-display button::after { display:none; }
+.handout-code-input { width:100%; height:62rpx; box-sizing:border-box; margin-top:13rpx; padding:0 15rpx; color:#263953; background:#fafbfe; border:1rpx solid #dfe6f0; border-radius:9rpx; font-size:21rpx; text-align:center; }
+.order-block { padding-bottom:20rpx; }
+.order-tip { display:flex; align-items:center; gap:8rpx; padding:13rpx 14rpx; color:#66768c; background:#eef2f6; border-radius:9rpx; font-size:18rpx; line-height:1.5; }
+.order-list { display:flex; flex-direction:column; gap:13rpx; margin-top:14rpx; }
+.order-item { overflow:hidden; padding:0; background:#fff; border:1rpx solid #e0e6f0; border-radius:11rpx; box-shadow:0 5rpx 14rpx rgba(39,59,91,.04); }
+.order-item.status-pending { border-color:#7296ee; animation:pending-border 1.8s ease-in-out infinite; }
+@keyframes pending-border { 0%,100% { box-shadow:0 0 0 0 rgba(53,105,232,.08),0 7rpx 17rpx rgba(53,105,232,.08); } 50% { box-shadow:0 0 0 4rpx rgba(53,105,232,.13),0 9rpx 21rpx rgba(53,105,232,.15); } }
+.order-summary { min-height:91rpx; display:flex; align-items:center; gap:12rpx; padding:15rpx 16rpx; box-sizing:border-box; }
+.order-main { display:flex; flex:1; min-width:0; flex-direction:column; gap:7rpx; }
+.order-title-line { display:flex; align-items:center; gap:8rpx; min-width:0; }
+.order-title-line>text:first-child { overflow:hidden; color:#263953; font-size:22rpx; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.order-status { flex:none; padding:3rpx 8rpx; color:#1a9a7b; background:#e8f7f1; border-radius:5rpx; font-size:16rpx; font-weight:800; }
+.status-pending .order-status { color:#3569e8; background:#eaf0ff; }
+.status-closed .order-status { color:#8490a0; background:#eef1f5; }
+.order-time { color:#8995a5; font-size:17rpx; }
+.order-price { display:flex; align-items:center; gap:8rpx; flex:none; }
+.order-price>text { color:#243650; font-size:23rpx; font-weight:900; }
+.status-closed .order-summary { opacity:.72; }
+.pending-countdown { display:flex; align-items:center; gap:7rpx; margin:0 16rpx 13rpx; padding:9rpx 11rpx; color:#3569e8; background:#f0f4ff; border-radius:7rpx; font-size:17rpx; font-weight:800; }
+.pulse-dot { width:9rpx; height:9rpx; flex:none; background:#3569e8; border-radius:50%; animation:pulse-dot 1.2s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { opacity:.45; transform:scale(.85); } 50% { opacity:1; transform:scale(1.15); } }
+.order-detail { padding:15rpx 16rpx 16rpx; background:#f8f9fc; border-top:1rpx solid #e7ebf2; }
+.detail-line { display:flex; align-items:flex-start; justify-content:space-between; gap:18rpx; min-height:40rpx; color:#77859a; font-size:17rpx; }
+.detail-line>text:first-child { flex:none; }
+.detail-line>text:last-child { color:#34475f; text-align:right; word-break:break-all; }
+.detail-line.close-reason>text:last-child { color:#8c6b43; }
+.detail-line.payment-failed-line>text:last-child { color:#b24f58; }
+.detail-line.total-line { align-items:center; margin-top:7rpx; padding-top:12rpx; border-top:1rpx solid #e3e8f0; }
+.detail-line.total-line>text:last-child { color:#243650; font-size:23rpx; font-weight:900; }
+.order-actions { display:grid; grid-template-columns:1fr 1.35fr; gap:9rpx; margin-top:13rpx; }
+.order-actions.single { grid-template-columns:1fr; }
+.order-actions button { height:51rpx; line-height:51rpx; margin:0; padding:0; color:#fff; background:#3569e8; border-radius:8rpx; font-size:18rpx; font-weight:850; }
+.order-actions button::after { display:none; }
+.order-actions button.secondary { color:#64758c; background:#e9edf3; }
+.purchase-notice { padding:27rpx 24rpx 23rpx; }
+.pending-mark { background:linear-gradient(135deg,#3569e8,#6949df); }
+.pending-order-summary { width:100%; box-sizing:border-box; margin-top:18rpx; padding:14rpx 15rpx; background:#f2f5ff; border:1rpx solid #dce5ff; border-radius:9rpx; }
+.pending-order-summary>text { display:block; color:#2c3d55; font-size:20rpx; font-weight:850; }
+.pending-order-summary>view { display:flex; align-items:center; justify-content:space-between; margin-top:8rpx; }
+.pending-order-summary>view text:first-child { color:#243650; font-size:23rpx; font-weight:900; }
+.pending-order-summary>view text:last-child { color:#3569e8; font-size:17rpx; font-weight:800; }
+.order-dialog-mask { padding:34rpx; background:rgba(17,28,48,.6); backdrop-filter:blur(5px); }
+.order-dialog { width:100%; max-width:360px; box-sizing:border-box; overflow:hidden; padding:24rpx; background:#fff; border:1rpx solid rgba(255,255,255,.7); border-radius:14rpx; box-shadow:0 30rpx 76rpx rgba(19,34,61,.3); }
+.order-dialog-top { display:flex; align-items:center; gap:13rpx; }
+.order-dialog-icon { width:59rpx; height:59rpx; display:flex; align-items:center; justify-content:center; flex:none; background:linear-gradient(135deg,#3569e8,#5b54d8); border-radius:13rpx; box-shadow:0 8rpx 18rpx rgba(53,105,232,.22); }
+.dialog-cancel .order-dialog-icon { background:linear-gradient(135deg,#c85056,#a9434a); box-shadow:0 8rpx 18rpx rgba(176,61,69,.19); }
+.order-dialog-heading { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }
+.order-dialog-heading text:first-child { color:#20324a; font-size:26rpx; font-weight:900; }
+.order-dialog-heading text:last-child { color:#8290a2; font-size:17rpx; }
+.order-dialog-top>button { width:42rpx; height:42rpx; display:flex; align-items:center; justify-content:center; flex:none; margin:0; padding:0; background:#f1f3f7; border-radius:50%; }
+.order-dialog-top>button::after { display:none; }
+.order-dialog-product { display:flex; align-items:center; justify-content:space-between; gap:14rpx; margin-top:22rpx; padding:17rpx; background:linear-gradient(120deg,#f3f6ff,#f7f5ff); border:1rpx solid #dfe6fa; border-radius:10rpx; }
+.dialog-cancel .order-dialog-product { background:#f8f7f7; border-color:#e7e3e4; }
+.order-dialog-product>view { display:flex; flex:1; min-width:0; flex-direction:column; gap:6rpx; }
+.order-dialog-product>view text:first-child { overflow:hidden; color:#263953; font-size:21rpx; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.order-dialog-product>view text:last-child { color:#7f8da1; font-size:16rpx; }
+.order-dialog-product>text { flex:none; color:#203753; font-size:29rpx; font-weight:950; }
+.order-dialog-notice { display:flex; align-items:center; gap:8rpx; margin-top:13rpx; padding:11rpx 13rpx; color:#536f9d; background:#edf3ff; border-radius:8rpx; font-size:17rpx; }
+.order-dialog-notice.danger { color:#985159; background:#fff0f1; }
+.payment-methods { margin-top:18rpx; }
+.payment-methods>text { color:#53647b; font-size:18rpx; font-weight:850; }
+.payment-method-list { display:flex; flex-direction:column; gap:9rpx; margin-top:10rpx; }
+.payment-method-list>view { display:flex; align-items:center; gap:11rpx; padding:12rpx 13rpx; background:#f7f8fb; border:2rpx solid transparent; border-radius:9rpx; }
+.payment-method-list>view.active { background:#f2f6ff; border-color:#b9caf3; }
+.payment-method-list>view>view:nth-child(2) { display:flex; flex:1; min-width:0; flex-direction:column; gap:4rpx; }
+.payment-method-list>view>view:nth-child(2) text:first-child { color:#293b54; font-size:20rpx; font-weight:850; }
+.payment-method-list>view>view:nth-child(2) text:last-child { color:#8995a5; font-size:16rpx; }
+.pay-brand { width:45rpx; height:45rpx; display:flex; align-items:center; justify-content:center; flex:none; color:#fff; border-radius:10rpx; font-size:19rpx; font-weight:900; }
+.pay-brand.wechat { background:#19a974; }
+.pay-brand.alipay { background:#1677ff; }
+.payment-result { min-height:56rpx; box-sizing:border-box; display:flex; align-items:center; gap:10rpx; margin-top:13rpx; padding:11rpx 13rpx; border-radius:8rpx; }
+.payment-result.failed { color:#985159; background:#fff0f1; }
+.payment-result.processing { color:#536f9d; background:#edf3ff; }
+.payment-result>view:last-child { display:flex; flex-direction:column; gap:3rpx; }
+.payment-result>view:last-child text:first-child { font-size:18rpx; font-weight:850; }
+.payment-result>view:last-child text:last-child { font-size:16rpx; opacity:.85; }
+.payment-spinner { width:22rpx; height:22rpx; flex:none; box-sizing:border-box; border:3rpx solid #b8c9ee; border-top-color:#3569e8; border-radius:50%; animation:payment-spin .8s linear infinite; }
+@keyframes payment-spin { to { transform:rotate(360deg); } }
+.order-dialog-actions { display:grid; grid-template-columns:1fr 1.35fr; gap:10rpx; margin-top:20rpx; }
+.order-dialog-actions button { height:58rpx; line-height:58rpx; margin:0; padding:0; color:#66768c; background:#edf0f4; border-radius:9rpx; font-size:19rpx; font-weight:850; }
+.order-dialog-actions button:last-child { color:#fff; background:linear-gradient(105deg,#3569e8,#5d51d8); box-shadow:0 7rpx 16rpx rgba(53,105,232,.18); }
+.order-dialog-actions button:last-child.danger { background:linear-gradient(105deg,#c85056,#ad4148); box-shadow:0 7rpx 16rpx rgba(177,62,70,.16); }
+.order-dialog-actions button[disabled] { opacity:.7; }
+.order-dialog-actions button::after { display:none; }
+.top-bar-action { color:#6949df !important; }
+.announcement-list .fold-head .notice-title>text { color:#30425c; font-size:21rpx; line-height:1.45; font-weight:400; }
+.announcement-list .fold-head>view>text { font-size:18rpx; }
+.faq-list .fold-head>view>text { color:#30425c; font-size:21rpx; line-height:1.45; font-weight:400; }
+.announcement-list .item-unread { width:10rpx; height:10rpx; background:#e5484d; box-shadow:0 0 0 3rpx #fff0f0; }
+.announcement-load-more { width:100%; height:50rpx; box-sizing:border-box; display:flex; align-items:center; justify-content:center; gap:5rpx; margin:9rpx 0 17rpx; color:#5b50b9; background:#f2f0ff; border:1rpx solid #ded9fb; border-radius:8rpx; font-size:19rpx; font-weight:850; }
+.about-menu>view>text,.about-menu>view>text:last-child { color:#30425c; font-size:21rpx; }
+.security-list>view>text,.security-list>view>text:last-child { color:#30425c; font-size:21rpx; }
+.security-list .logout-row>text { color:#c85056; }
+.logout-confirm { width:100%; height:56rpx; line-height:56rpx; margin:16rpx 0 0; padding:0; color:#fff; background:#c85056; border-radius:9rpx; font-size:20rpx; font-weight:850; }
+.logout-confirm::after { display:none; }
+.announcement-modal-mask { padding:36rpx; background:rgba(24,22,45,.58); backdrop-filter:blur(5px); }
+.announcement-modal { position:relative; width:100%; max-width:350px; box-sizing:border-box; overflow:hidden; display:flex; align-items:center; flex-direction:column; padding:30rpx 25rpx 24rpx; background:#fff; border:1rpx solid rgba(255,255,255,.8); border-radius:15rpx; box-shadow:0 28rpx 72rpx rgba(41,31,91,.3); }
+.announcement-modal-accent { position:absolute; top:0; right:0; left:0; height:7rpx; background:linear-gradient(90deg,#5944ba,#8065e8); }
+.announcement-modal-icon { width:66rpx; height:66rpx; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#5944ba,#8065e8); border-radius:18rpx; box-shadow:0 10rpx 22rpx rgba(92,70,190,.27); }
+.announcement-modal-title { margin-top:13rpx; color:#242f43; font-size:27rpx; font-weight:900; }
+.announcement-modal-desc { max-width:290px; margin-top:9rpx; color:#718096; font-size:19rpx; line-height:1.6; text-align:center; }
+.announcement-modal-count { width:100%; box-sizing:border-box; display:flex; align-items:baseline; justify-content:center; gap:6rpx; margin-top:18rpx; padding:14rpx; color:#6550c2; background:#f4f1ff; border:1rpx solid #e2dcfb; border-radius:10rpx; }
+.announcement-modal-count text:first-child { font-size:31rpx; font-weight:950; }
+.announcement-modal-count text:last-child { font-size:18rpx; font-weight:750; }
+.announcement-modal-actions { width:100%; display:grid; grid-template-columns:1fr 1.35fr; gap:10rpx; margin-top:19rpx; }
+.announcement-modal-actions button { height:57rpx; line-height:57rpx; margin:0; padding:0; color:#68768a; background:#f0f2f6; border-radius:9rpx; font-size:19rpx; font-weight:850; }
+.announcement-modal-actions button:last-child { color:#fff; background:linear-gradient(105deg,#5944ba,#7659db); box-shadow:0 8rpx 18rpx rgba(94,70,194,.23); }
+.announcement-modal-actions button::after { display:none; }
+.report-archive { margin-top:20rpx; }
+.report-archive-hero { display:flex; align-items:center; gap:13rpx; padding:20rpx; color:#fff; background:linear-gradient(125deg,#273544 0%,#151c31 55%,#22214b 100%); border:1rpx solid #3d4658; border-radius:13rpx; box-shadow:0 13rpx 29rpx rgba(23,29,49,.22); }
+.archive-hero-icon { width:55rpx; height:55rpx; display:flex; align-items:center; justify-content:center; flex:none; background:rgba(214,181,98,.13); border:1rpx solid rgba(226,196,118,.28); border-radius:14rpx; }
+.report-archive-hero>view:nth-child(2) { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }
+.report-archive-hero>view:nth-child(2) text:first-child { color:#f4f0e5; font-size:25rpx; font-weight:900; }
+.report-archive-hero>view:nth-child(2) text:last-child { color:#adb7c8; font-size:17rpx; line-height:1.4; }
+.report-archive-hero>text { color:#d6b562; font-size:20rpx; font-weight:900; }
+.report-year { display:flex; align-items:center; margin:23rpx 2rpx 10rpx; }
+.report-year text:first-child { color:#25364d; font-size:23rpx; font-weight:900; }
+.report-list { overflow:hidden; background:#fff; border:1rpx solid #dfe5ed; border-radius:12rpx; }
+.report-row { display:flex; align-items:center; gap:13rpx; min-height:103rpx; padding:15rpx; border-bottom:1rpx solid #edf0f5; }
+.report-row:last-child { border-bottom:0; }
+.report-row.generating { background:#f7f8fb; }
+.report-month { width:54rpx; height:59rpx; display:flex; align-items:center; justify-content:center; flex:none; flex-direction:column; color:#e2c476; background:linear-gradient(145deg,#263443,#181f35); border-radius:11rpx; }
+.report-month text:first-child { font-size:25rpx; line-height:1; font-weight:950; }
+.report-month text:last-child { margin-top:3rpx; font-size:14rpx; }
+.generating .report-month { color:#9ca7b7; background:#e8ebf0; }
+.report-row-copy { flex:1; min-width:0; }
+.report-row-copy>view:first-child { display:flex; align-items:center; gap:7rpx; }
+.report-row-copy>view:first-child>text:first-child { overflow:hidden; color:#293a51; font-size:21rpx; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.report-row-copy>view:first-child>text:last-child { flex:none; padding:3rpx 6rpx; border-radius:5rpx; font-size:14rpx; font-weight:850; }
+.report-row-copy .ready { color:#9b7621; background:#fbf3dc; }
+.report-row-copy .generating { color:#737f91; background:#e9edf2; }
+.report-meta { display:flex; gap:12rpx; margin-top:8rpx; color:#a17e2a; font-size:19rpx; }
+.generating-progress { display:flex !important; align-items:center; gap:8rpx !important; }
+.generating-progress>view { width:95rpx; height:6rpx; overflow:hidden; background:#e2e6ec; border-radius:6rpx; }
+.generating-progress>view>view { width:43%; height:100%; background:#8b96a7; border-radius:6rpx; }
+.generating-progress>text { color:#66768b; font-size:19rpx; }
+</style>
