@@ -9,8 +9,8 @@ import { useAppStore } from '@/store/app'
 import { applyCourseDebugAccount, canAccessCourse, courseDebugOptions, getCourseAccessLevel } from '@/utils/course-access'
 
 const { state, exam, login, logout, requireLogin } = useAppStore()
-const selectedSubjectId = ref(knowledgeSubjects[0].id)
-const expandedChapterId = ref(knowledgeSubjects[0].chapters[0].id)
+const selectedSubjectId = ref(knowledgeSubjects[0]?.id || '')
+const expandedChapterId = ref(knowledgeSubjects[0]?.chapters[0]?.id || '')
 const promoExpanded = ref(true)
 const accessLevel = ref(getCourseAccessLevel())
 const hasFullAccess = computed(() => accessLevel.value === 'full')
@@ -35,13 +35,13 @@ const selectSubject = (id: string) => {
   expandedChapterId.value = knowledgeSubjects.find(subject => subject.id === id)?.chapters[0]?.id || ''
 }
 const toggleChapter = (id: string) => { expandedChapterId.value = expandedChapterId.value === id ? '' : id }
-const openPurchasePage = () => showToast('权限购买页将在“我的”页面开放')
+const openPurchasePage = () => uni.navigateTo({ url: '/pages/profile-center/index?mode=rights' })
 const openTrialPurchase = () => {
   if (!state.isLoggedIn) {
     requireLogin('/pages/courses/index')
     return
   }
-  uni.showModal({ title: '1元体验', content: '登录后可用 1 元解锁 12 小时精讲课体验。', confirmText: '去体验', success: result => { if (result.confirm) showToast('体验购买页即将开放') } })
+  uni.showModal({ title: '1元体验', content: '登录后可用 1 元解锁 24 小时 VIP 体验。', confirmText: '去体验', success: result => { if (result.confirm) showToast('体验购买页即将开放') } })
 }
 const openFullPurchase = () => {
   if (!state.isLoggedIn) {
@@ -84,14 +84,14 @@ const applyDebug = (key: string) => {
       <view v-else class="promo-mini" @tap="promoExpanded = true"><text>解锁全部精讲课程</text><text>展开查看 ›</text></view>
     </view>
 
-    <view class="continue-card" @tap="openContinue"><view class="continue-mark"><uni-icons :type="typeIcon(continueCourse.type)" size="23" color="#fff" /></view><view class="continue-copy"><view class="continue-label"><text>继续学习</text><text>{{ continueCourse.typeName }}</text></view><text class="continue-title">第{{ continueCourse.sectionNo }}节 {{ continueCourse.sectionName }}</text><text class="continue-meta">{{ continueCourse.subjectName }} · {{ continueCourse.progress }}% · 上次学到 {{ continueCourse.currentMinute }} 分钟</text><view class="continue-progress"><view :style="{ width: `${continueCourse.progress}%` }"></view></view></view><uniIcons type="forward" size="20" color="#fff" /></view>
+    <view v-if="continueCourse" class="continue-card" @tap="openContinue"><view class="continue-mark"><uni-icons :type="typeIcon(continueCourse.type)" size="23" color="#fff" /></view><view class="continue-copy"><view class="continue-label"><text>继续学习</text><text>{{ continueCourse.typeName }}</text></view><text class="continue-title">第{{ continueCourse.sectionNo }}节 {{ continueCourse.sectionName }}</text><text class="continue-meta">{{ continueCourse.subjectName }} · {{ continueCourse.progress }}% · 上次学到 {{ continueCourse.currentMinute }} 分钟</text><view class="continue-progress"><view :style="{ width: `${continueCourse.progress}%` }"></view></view></view><uniIcons type="forward" size="20" color="#fff" /></view>
 
     <view class="section-heading"><view><text class="section-title">选择科目</text><text class="section-subtitle">课程按考试科目和章节整理</text></view><text class="course-count">{{ courseCatalog.filter(course => course.subjectId === selectedSubjectId).length }} 节精讲课</text></view>
     <view class="subject-chips"><view v-for="subject in knowledgeSubjects" :key="subject.id" class="subject-chip" :class="{ active: selectedSubjectId === subject.id }" @tap="selectSubject(subject.id)"><uni-icons :type="subject.id === 'ability' ? 'map' : 'list'" size="16" :color="selectedSubjectId === subject.id ? '#fff' : subject.id === 'ability' ? '#3569e8' : '#e98a3a'" /><text>{{ subject.name }}</text></view></view>
 
     <view class="section-heading catalog-heading"><view><text class="section-title">课程目录</text><text class="section-subtitle">没有精讲课的节会保留目录，并明确标注状态</text></view></view>
     <view class="chapter-list">
-      <view v-for="chapter in selectedSubject.chapters" :key="chapter.id" class="chapter-card">
+      <view v-for="chapter in selectedSubject?.chapters || []" :key="chapter.id" class="chapter-card">
         <view class="chapter-header" @tap="toggleChapter(chapter.id)"><view class="chapter-title"><text>第{{ chapter.no }}章</text><text>{{ chapter.name }}</text></view><view class="chapter-right"><text>{{ chapter.sections.length }} 节</text><uniIcons :type="expandedChapterId === chapter.id ? 'arrowup' : 'arrowdown'" size="17" color="#8793a4" /></view></view>
         <view v-if="expandedChapterId === chapter.id" class="section-list">
           <view v-for="section in chapter.sections" :key="section.id" class="lesson-section" :class="{ 'has-course': selectedCourseMap.get(section.id) }" @tap="selectedCourseMap.get(section.id) && openCourse(selectedCourseMap.get(section.id))">

@@ -4,6 +4,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { knowledgeSubjects } from '@/mock/data'
 import { backOrFallback } from '@/utils/navigation'
+import { api, token, selectedExamId, showApiError } from '@/services/api'
 
 type ContentPart = { id: string; text: string; blank: boolean }
 const pointId = ref('')
@@ -55,6 +56,7 @@ const showPoint = (index: number) => {
   pointId.value = target.point.id
   revealed.value = new Set()
   uni.setStorageSync(recentPointKey, target.point.id)
+  recordRecite()
   uni.pageScrollTo({ scrollTop: 0, duration: 180 })
 }
 const previousPoint = () => { if (hasPrevious.value) showPoint(currentIndex.value - 1) }
@@ -64,12 +66,15 @@ const nextPoint = () => {
 }
 onLoad((options) => {
   if (options?.id) pointId.value = decodeURIComponent(options.id)
+  if(!record.value)return
   uni.setStorageSync(recentPointKey, point.value.id)
+  recordRecite()
 })
+function recordRecite(){if(token()&&record.value)void api('/learning-events','POST',{examId:selectedExamId(),kind:'recite',sourceId:point.value.id}).catch(showApiError)}
 </script>
 
 <template>
-  <view class="recite-detail page safe-top">
+  <view v-if="record" class="recite-detail page safe-top">
     <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>智能背题</text><view /></view>
     <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
     <view class="point-hero">

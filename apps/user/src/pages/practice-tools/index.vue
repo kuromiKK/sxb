@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { courseCatalog, knowledgeSubjects, practiceQuestions } from '@/mock/data'
+import { api, token, selectedExamId, showApiError } from '@/services/api'
 import { backOrFallback } from '@/utils/navigation'
 import { getFavoriteRecords, removeFavorites as removeFavoriteRecords, type FavoriteRecord, type FavoriteType } from '@/utils/favorites'
 import { useAppStore } from '@/store/app'
@@ -12,7 +13,7 @@ const mode = ref((uni.getStorageSync('sxb-practice-tool-mode') || 'wrong') as 'w
 const tabLabels = [{ key: 'wrong', label: '错题本', icon: 'refresh' }, { key: 'favorite', label: '收藏', icon: 'star' }, { key: 'note', label: '笔记', icon: 'compose' }] as const
 const tabColors = { wrong: '#e17832', favorite: '#7655df', note: '#1a9a7b' } as const
 const { exam } = useAppStore()
-const storedWrong = ref<string[]>(uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006'])
+const storedWrong = ref<string[]>(uni.getStorageSync('sxb-wrong-questions') || [])
 const clearWrongVisible = ref(false)
 const visibleWrongCount = ref(12)
 type FavoriteFilter = 'all' | FavoriteType
@@ -32,7 +33,7 @@ const visibleNoteCount = ref(12)
 const noteTypeLabels: Record<NoteFilter, string> = { all: '全部', question: '题目', knowledge: '知识点', course: '精讲课' }
 const readAiReviewQuota = () => {
   const saved = uni.getStorageSync('sxb-ai-review-quota')
-  return saved === '' || saved === null || saved === undefined ? 20 : Number(saved)
+  return saved === '' || saved === null || saved === undefined ? 0 : Number(saved)
 }
 const aiReviewQuota = ref(readAiReviewQuota())
 const noteSources = [
@@ -79,13 +80,14 @@ onShow(() => {
   storedWrong.value = uni.getStorageSync('sxb-wrong-questions') || []
   storedFavorites.value = getFavoriteRecords()
   storedNotes.value = migrateLegacyNotes(noteSources)
-  aiReviewQuota.value = readAiReviewQuota()
+  aiReviewQuota.value = 0
+  if(token())void api(`/review/${selectedExamId()}`).then(r=>{aiReviewQuota.value=r.remaining}).catch(showApiError)
 })
 const setMode = (next: typeof mode.value) => { mode.value = next; uni.setStorageSync('sxb-practice-tool-mode', next) }
 const setFavoriteFilter = (next: FavoriteFilter) => { favoriteFilter.value = next; visibleFavoriteCount.value = 12; selectedFavoriteIds.value = [] }
 const toggleFavoriteSelection = (id: string) => { selectedFavoriteIds.value = selectedFavoriteIds.value.includes(id) ? selectedFavoriteIds.value.filter(item => item !== id) : [...selectedFavoriteIds.value, id] }
 const toggleSelectAll = () => { selectedFavoriteIds.value = selectedFavoriteIds.value.length === visibleFavorites.value.length ? [] : visibleFavorites.value.map(item => item.id) }
-const removeFavorites = (ids: string[]) => { storedFavorites.value = removeFavoriteRecords(ids); selectedFavoriteIds.value = []; uni.showToast({ title: `已取消${ids.length}条收藏`, icon: 'none' }) }
+const removeFavorites = async (ids: string[]) => { storedFavorites.value = await removeFavoriteRecords(ids); selectedFavoriteIds.value = []; uni.showToast({ title: `已取消${ids.length}条收藏`, icon: 'none' }) }
 const removeFavorite = (id: string) => removeFavorites([id])
 const batchRemoveFavorites = () => {
   if (!selectedFavoriteIds.value.length) return uni.showToast({ title: '请先选择收藏内容', icon: 'none' })
@@ -103,21 +105,15 @@ const openFavorite = (item: { id: string; type: FavoriteType }) => {
   if (item.type === 'course') return uni.navigateTo({ url: `/pages/course-detail/index?id=${encodeURIComponent(item.id)}` })
   return uni.navigateTo({ url: `/pages/knowledge-detail/index?id=${encodeURIComponent(item.id)}` })
 }
-const clearWrong = () => {
-  const status: Record<string, string> = uni.getStorageSync('sxb-question-status') || {}
-  const answered: Record<string, string> = uni.getStorageSync(`sxb-answered-${exam.value.id}`) || {}
-  storedWrong.value.forEach(id => {
-    status[id] = 'unanswered'
-    delete answered[id]
-    uni.removeStorageSync(`sxb-question-selection-${exam.value.id}-${id}`)
-  })
-  uni.setStorageSync('sxb-question-status', status)
-  uni.setStorageSync(`sxb-answered-${exam.value.id}`, answered)
-  storedWrong.value = []
-  visibleWrongCount.value = 12
-  clearWrongVisible.value = false
-  uni.setStorageSync('sxb-wrong-questions', [])
-  uni.showToast({ title: '错题本已清空', icon: 'none' })
+const clearWrong = async () => {
+  try {
+    await api(`/wrong/${selectedExamId()}`,'DELETE')
+    storedWrong.value = []
+    visibleWrongCount.value = 12
+    clearWrongVisible.value = false
+    uni.setStorageSync('sxb-wrong-questions', [])
+    uni.showToast({ title: '错题本已清空，学习记录保留', icon: 'none' })
+  }catch(error){showApiError(error)}
 }
 const reviewWrongQuestions = () => {
   if (!questions.value.length) return uni.showToast({ title: '当前没有需要复习的错题', icon: 'none' })
@@ -131,7 +127,7 @@ const requestDeleteNotes = () => {
   if (!selectedNoteIds.value.length) return uni.showToast({ title: '请先选择要删除的笔记', icon: 'none' })
   deleteNotesVisible.value = true
 }
-const confirmDeleteNotes = () => { storedNotes.value = removeNotes(selectedNoteIds.value); selectedNoteIds.value = []; deleteNotesVisible.value = false; uni.showToast({ title: '笔记已删除', icon: 'none' }) }
+const confirmDeleteNotes = async () => { storedNotes.value = await removeNotes(selectedNoteIds.value); selectedNoteIds.value = []; deleteNotesVisible.value = false; uni.showToast({ title: '笔记已删除', icon: 'none' }) }
 const openNoteDetail = (id: string) => manageNotes.value ? toggleNoteSelection(id) : uni.navigateTo({ url: `/pages/note-detail/index?id=${encodeURIComponent(id)}` })
 const openAiReview = () => {
   uni.setStorageSync('sxb-practice-tool-return-mode', 'note')

@@ -23,3 +23,9 @@ Thumbs.db
 coverage/
 .cache/
 *.tsbuildinfo
+
+# Persistent local database, encrypted settings and runtime output
+.local/
+test-results/
+playwright-report/
+tmp/

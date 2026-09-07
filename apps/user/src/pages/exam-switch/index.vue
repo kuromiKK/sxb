@@ -11,7 +11,7 @@ const activeCategory = ref(examCategories[0].id)
 const keyword = ref('')
 const active = computed(() => examCategories.find(item => item.id === activeCategory.value) || examCategories[0])
 const filteredGroups = computed(() => active.value.groups.map(group => ({ ...group, exams: group.exams.filter(item => !keyword.value || `${item.name}${item.subtitle}`.includes(keyword.value)) })).filter(group => group.exams.length))
-const choose = (id: string) => { selectExam(id); uni.showToast({ title: '考试已切换', icon: 'success' }); setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 320) }
+const choose = async (id: string) => { uni.showLoading({ title: '切换中' }); try { await selectExam(id); uni.reLaunch({ url: '/pages/index/index' }) } catch (e) { uni.showToast({ title: e instanceof Error ? e.message : '切换失败', icon: 'none' }) } finally { uni.hideLoading() } }
 const goBack = () => backOrFallback('/pages/index/index')
 onShow(() => { activeCategory.value = examCategories.find(category => category.groups.some(group => group.exams.some(item => item.id === exam.value.id)))?.id || examCategories[0].id })
 </script>

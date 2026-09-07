@@ -5,7 +5,8 @@ import QRCode from 'qrcode'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { backOrFallback } from '@/utils/navigation'
-import { getMonthlyReport } from '@/utils/monthlyReports'
+import { emptyMonthlyReport, type MonthlyReport } from '@/utils/monthlyReports'
+import { api, selectedExamId, showApiError } from '@/services/api'
 
 const reportId = ref('2026-07')
 const saving = ref(false)
@@ -20,8 +21,9 @@ const currentSlide = ref(0)
 const slideCount = 7
 const slideQuotes = ['每一次学习，都在积累底气。', '每一次出现，都是学习习惯的证据。', '稳定，比偶尔的高峰更重要。', '看见薄弱处，进步才有方向。', '课程、笔记与错题，共同组成知识体系。', '复盘不是回头看，是为了走得更稳。', '新的一个月，继续向上。']
 const reportQrCode = ref('')
-const report = computed(() => getMonthlyReport(reportId.value) || getMonthlyReport('2026-07')!)
-const publicReportUrl = computed(() => `https://www.shangxingbao.com/report/${report.value.id}`)
+const loadedReport = ref<MonthlyReport>()
+const report = computed(() => loadedReport.value || emptyMonthlyReport(reportId.value))
+const publicReportUrl = computed(() => '')
 const maxDaily = computed(() => Math.max(...report.value.dailyQuestions, 1))
 const maxSubject = computed(() => Math.max(...report.value.subjects.map(item => item.total), 1))
 const calendarDays = computed(() => {
@@ -30,7 +32,7 @@ const calendarDays = computed(() => {
     '2026-06': [1, 2, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 18, 19, 21, 23, 24],
     '2026-07': [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26],
   }
-  const learnedDays = new Set(learnedDayMap[report.value.id] || report.value.dailyQuestions.map((value, index) => value > 0 ? index + 1 : 0).filter(Boolean))
+  const learnedDays = new Set(report.value.studiedDays || report.value.dailyQuestions.map((value, index) => value > 0 ? index + 1 : 0).filter(Boolean))
   const daysInMonth = new Date(report.value.year, report.value.month, 0).getDate()
   const mondayFirstOffset = (new Date(report.value.year, report.value.month - 1, 1).getDay() + 6) % 7
   return [
@@ -65,11 +67,17 @@ const deviceStyle = computed(() => {
   }
 })
 
-onLoad((options) => {
-  if (options?.id && getMonthlyReport(options.id)?.status === 'ready') reportId.value = options.id
+onLoad(async (options) => {
+  reportId.value = options?.id || new Date().toISOString().slice(0,7)
+  try {
+    const data=await api<MonthlyReport>(`/reports/${selectedExamId()}/${reportId.value}`)
+    if(data.status!=='ready')throw new Error('本月报告将在次月1日生成')
+    loadedReport.value=data
+  } catch(e){showApiError(e);backOrFallback('/pages/profile-center/index?mode=report')}
 })
 
 watch(publicReportUrl, async (url) => {
+  if(!url)return
   reportQrCode.value = await QRCode.toDataURL(url, { width: 240, margin: 1, color: { dark: '#182033', light: '#ffffff' } })
 }, { immediate: true })
 
@@ -358,23 +366,12 @@ const savePoster = async () => {
 }
 
 const shareReport = async () => {
-  // #ifdef H5
-  const shareData = { title: `${report.value.year}年${report.value.month}月学习报告`, text: report.value.headline, url: window.location.href }
-  if (navigator.share) {
-    try { await navigator.share(shareData); return } catch { return }
-  }
-  await navigator.clipboard?.writeText(window.location.href)
-  toast('报告链接已复制')
-  // #endif
-  // #ifdef MP-WEIXIN
-  uni.showShareMenu({ withShareTicket: true })
-  toast('请点击右上角分享')
-  // #endif
+  toast('公开分享页尚未开放，请使用下载图标保存报告图片后分享')
 }
 </script>
 
 <template>
-  <view class="report-page safe-top" :class="[{ 'multi-page': viewMode === 'multi' }, `device-${devicePreset}`]" :style="deviceStyle">
+  <view v-if="loadedReport" class="report-page safe-top" :class="[{ 'multi-page': viewMode === 'multi' }, `device-${devicePreset}`]" :style="deviceStyle">
     <view class="report-top"><button @tap="back"><uni-icons type="back" size="21" color="#dbe1eb" /></button><text>{{ report.month }}月学习报告</text><view v-if="viewMode === 'multi'" class="top-report-actions"><button :disabled="saving" @tap="savePoster"><uni-icons type="download" size="22" color="#e7ebf1" /></button><button @tap="shareReport"><uni-icons type="redo" size="22" color="#e7ebf1" /></button></view><view v-else></view></view>
     <view v-if="viewMode === 'long'" class="long-report">
     <view class="report-hero"><view class="hero-label"><text>MONTHLY REPORT</text><text>{{ report.generatedAt }} 生成</text></view><text class="hero-month">{{ report.year }}年 {{ report.month }}月</text><text class="hero-headline">{{ report.headline }}</text><view class="hero-metrics"><view><text>{{ report.metrics.studyDays }}</text><text>学习天数</text></view><view><text>{{ report.metrics.questions }}</text><text>完成题目</text></view><view><text>{{ formatMinutes(report.metrics.minutes) }}</text><text>学习时长</text></view><view><text>+{{ report.metrics.masteryGain }}%</text><text>掌握提升</text></view></view></view>

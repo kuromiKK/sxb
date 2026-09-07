@@ -8,6 +8,7 @@ import { useAppStore } from '@/store/app'
 import { hasFullCourseAccess } from '@/utils/course-access'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
+import { api, token, selectedExamId, showApiError } from '@/services/api'
 
 const pointId = ref('kp-1-1-1')
 const favorite = ref(false)
@@ -21,19 +22,11 @@ const point = computed<KnowledgePoint>(() => record.value.point)
 const currentIndex = computed(() => allPoints.findIndex(item => item.point.id === point.value.id))
 const hasPrevious = computed(() => currentIndex.value > 0)
 const hasNext = computed(() => currentIndex.value >= 0 && currentIndex.value < allPoints.length - 1)
-const sectionCourse = computed(() => courseCatalog.find(course => course.sectionId === record.value.section.id))
+const sectionCourse = computed(() => courseCatalog.find(course => (course as any).knowledgePointId === pointId.value) || courseCatalog.find(course => course.sectionId === record.value.section.id))
 const practiceProgress = computed(() => point.value.questionTotal
   ? Math.min(Math.round(point.value.questionDone / point.value.questionTotal * 100), 100)
   : 0)
-const contentParagraphs = computed(() => {
-  const title = point.value.title
-  return [
-    point.value.content,
-    `理解“${title}”时，先明确它在本节知识结构中的位置，再把核心概念、适用对象和主要目标分别梳理出来。这样能够避免只记住零散表述，却无法判断题目真正考查的方向。`,
-    `在实际服务情境中，这个知识点通常会和需求评估、专业关系、服务计划以及资源链接等内容连续出现。学习时要注意不同环节之间的先后关系，结合案例判断社会工作者应当采取的专业行动。`,
-    `考试中常见的干扰项会把服务对象的需要、机构的工作边界和社会工作者的角色混在一起。复习时建议先用自己的话复述，再对照课程中的关键词检查遗漏，并把容易混淆的表述记录到笔记中。`,
-  ]
-})
+const contentParagraphs = computed(() => point.value.content.split(/\n+/).filter(Boolean))
 
 onLoad((options) => {
   if (options?.id) pointId.value = decodeURIComponent(options.id)
@@ -41,6 +34,7 @@ onLoad((options) => {
 })
 const back = () => backOrFallback('/pages/knowledge/index')
 function loadPointState() {
+  if(token() && record.value)void api('/learning-events','POST',{examId:selectedExamId(),kind:'knowledge',sourceId:pointId.value}).catch(showApiError)
   favorite.value = getFavoriteIds().includes(pointId.value)
   note.value = getNoteBySource(pointId.value, 'knowledge')?.content || uni.getStorageSync(`sxb-knowledge-note-${pointId.value}`) || ''
   saved.value = false
@@ -70,16 +64,16 @@ const openCourse = () => {
   }
   uni.navigateTo({ url: `/pages/course-detail/index?id=${encodeURIComponent(sectionCourse.value.id)}` })
 }
-const toggleFavorite = () => {
+const toggleFavorite = async () => {
+  await setFavorite(pointId.value, 'knowledge', !favorite.value)
   favorite.value = !favorite.value
-  setFavorite(pointId.value, 'knowledge', favorite.value)
   uni.showToast({ title: favorite.value ? '已收藏知识点' : '已取消收藏', icon: 'none' })
 }
-const saveNote = () => { if (!note.value.trim()) return uni.showToast({ title: '请先填写笔记内容', icon: 'none' }); saveNoteRecord(pointId.value, 'knowledge', note.value); saved.value = true; uni.showToast({ title: '笔记已保存', icon: 'success' }); setTimeout(() => { saved.value = false }, 1600) }
+const saveNote = async () => { if (!note.value.trim()) return uni.showToast({ title: '请先填写笔记内容', icon: 'none' }); await saveNoteRecord(pointId.value, 'knowledge', note.value); saved.value = true; uni.showToast({ title: '笔记已保存', icon: 'success' }); setTimeout(() => { saved.value = false }, 1600) }
 </script>
 
 <template>
-  <view class="detail-page safe-top">
+  <view v-if="record" class="detail-page safe-top">
     <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">知识点详情</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
     <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
     <view class="point-hero"><view class="hero-top"><view class="hero-icon"><uni-icons type="map" size="24" color="#fff" /></view><view class="hero-title-wrap"><text class="hero-title">{{ point.title }}</text><view class="hero-tags"><text class="star-tag" :class="`star-${point.stars}`">{{ point.stars }}星</text><text class="mastery-tag">掌握 {{ point.mastery }}%</text></view></view></view><view class="hero-stats"><view><text>{{ point.questionTotal }}</text><text>包含题目</text></view><view><text>{{ point.questionDone }}</text><text>已做题目</text></view><view><text>{{ point.questionTotal ? Math.round(point.questionDone / point.questionTotal * 100) : 0 }}%</text><text>完成进度</text></view></view></view>

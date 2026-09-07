@@ -2,14 +2,14 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
+import { api, selectedExamId, showApiError } from '@/services/api'
 import { getNotes, type NoteRecord, type NoteSourceType } from '@/utils/notes'
 
 type SelectableNote = NoteRecord & { title: string; demo?: boolean }
-type GeneratedRecord = { id: string; title: string; noteCount: number; createdAt: number }
+type GeneratedRecord = { id: string; title: string; noteCount: number; createdAt: number; result?: string }
 type FilterKey = 'all' | NoteSourceType
 
-const savedQuota = uni.getStorageSync('sxb-ai-review-quota')
-const remaining = ref(savedQuota === '' || savedQuota === null || savedQuota === undefined ? 20 : Number(savedQuota))
+const remaining = ref(0)
 const selected = ref<string[]>([])
 const generated = ref(false)
 const generating = ref(false)
@@ -19,45 +19,17 @@ const exchangeVisible = ref(false)
 const filter = ref<FilterKey>('all')
 const labels: Record<FilterKey, string> = { all: '全部', question: '题目', knowledge: '知识点', course: '精讲课' }
 const filters: FilterKey[] = ['all', 'question', 'knowledge', 'course']
-const demoTitles = ['社会工作服务的目标与功能', '服务对象自决原则', '社会工作对服务对象的功能', '社会工作对社会的功能', '接案前的准备工作', '接案会谈的关注内容', '预估的目的和任务', '专业关系中的沟通策略', '社会工作价值观', '社会工作者的主要角色', '资源链接与能力建设', '服务计划的目标制定']
-const demoNotes: SelectableNote[] = demoTitles.map((title, index) => ({
-  id: `demo-note-${index}`,
-  sourceId: `demo-${index}`,
-  sourceType: (['knowledge', 'question', 'course'][index % 3] as NoteSourceType),
-  title,
-  content: index % 3 === 0
-    ? `需要重点理解${title}的概念、适用边界和常见考法。`
-    : index % 3 === 1
-      ? `${title}容易与相近概念混淆，答题时先判断服务阶段和社会工作者的角色。`
-      : `课程中强调${title}应结合实际情境理解，不能只记忆结论。`,
-  createdAt: Date.now() - index * 1000,
-  updatedAt: Date.now() - index * 1000,
-  demo: true,
-}))
 const notes = ref<SelectableNote[]>([])
-const generatedRecords = ref<GeneratedRecord[]>(uni.getStorageSync('sxb-ai-review-records') || [])
-
+const generatedRecords = ref<GeneratedRecord[]>([])
+async function refreshReview() {
+  const data=await api(`/review/${selectedExamId()}`)
+  remaining.value=data.remaining
+  generatedRecords.value=data.records.map((r:any)=>({id:r.id,title:r.is_test?'【测试内容】复习资料':'我的复习资料',noteCount:r.context?.noteCount||0,createdAt:Date.parse(r.created_at),result:r.result}))
+}
 onLoad(() => {
-  const real = getNotes().map((item, index) => ({ ...item, title: `我的笔记 ${index + 1}` }))
-  notes.value = [...real, ...demoNotes.slice(0, Math.max(12 - real.length, 0))]
-
-  // Keep the demonstration history consistent with the consumed quota.
-  const generatedCount = Math.max(20 - remaining.value, 0)
-  if (generatedRecords.value.length < generatedCount) {
-    const missing = generatedCount - generatedRecords.value.length
-    generatedRecords.value = [
-      ...Array.from({ length: missing }, (_, index) => ({
-        id: `review-history-${Date.now()}-${index}`,
-        title: '社会工作核心知识复习资料',
-        noteCount: 10,
-        createdAt: Date.now() - (index + 1) * 86400000,
-      })),
-      ...generatedRecords.value,
-    ]
-    uni.setStorageSync('sxb-ai-review-records', generatedRecords.value)
-  }
+  notes.value=getNotes().map((item,index)=>({...item,title:`我的笔记 ${index+1}`}))
+  void refreshReview().catch(showApiError)
 })
-
 const filtered = computed(() => notes.value.filter(item => filter.value === 'all' || item.sourceType === filter.value))
 const filterCount = (key: FilterKey) => key === 'all' ? notes.value.length : notes.value.filter(item => item.sourceType === key).length
 const canGenerate = computed(() => selected.value.length >= 10 && selected.value.length <= 30 && remaining.value > 0)
@@ -99,38 +71,28 @@ const headerBack = () => {
   }
   back()
 }
-const generate = () => {
-  if (!canGenerate.value) return
-  generating.value = true
-  setTimeout(() => {
-    generating.value = false
-    resultNoteCount.value = selectedNotes.value.length
-    remaining.value -= 1
-    uni.setStorageSync('sxb-ai-review-quota', remaining.value)
-    const record: GeneratedRecord = {
-      id: `review-${Date.now()}`,
-      title: '社会工作核心知识复习资料',
-      noteCount: resultNoteCount.value,
-      createdAt: Date.now(),
-    }
-    generatedRecords.value = [record, ...generatedRecords.value]
-    uni.setStorageSync('sxb-ai-review-records', generatedRecords.value)
-    generated.value = true
-  }, 900)
+const generate = async () => {
+  if(!canGenerate.value||generating.value)return
+  generating.value=true
+  try {
+    const result=await api(`/review/${selectedExamId()}`,'POST',{noteIds:selected.value})
+    if(result.status!=='success')throw new Error(result.error||'生成失败，请稍后重试')
+    resultNoteCount.value=selectedNotes.value.length
+    reviewSections.value=[{title:result.mode==='mock'?'本地测试响应':'专属复习资料',content:result.result,points:[]}]
+    generated.value=true
+    await refreshReview()
+  }catch(error){showApiError(error)}finally{generating.value=false}
 }
 const regenerate = () => { generated.value = false }
 const openGeneratedRecord = (record: GeneratedRecord) => {
   resultNoteCount.value = record.noteCount
+  reviewSections.value=[{title:record.title,content:record.result||'',points:[]}]
   historyVisible.value = false
   generated.value = true
 }
 
-const reviewSections = [
-  { title: '一、核心结论', content: '社会工作既关注服务对象个人问题的改善，也重视社会关系、社会公平和社会治理。复习时应先识别题目考查的是服务对象层面的功能，还是社会层面的功能。', points: ['助人自助是专业服务的重要原则', '服务对象是改变过程的主体', '专业支持不能替代服务对象作出决定'] },
-  { title: '二、易错辨析', content: '尊重自决不等于社会工作者完全不提供意见。社会工作者需要说明可选方案、可能后果和风险，在提供支持后由服务对象作出决定。', points: ['注意区分“提供专业支持”和“替服务对象决定”'] },
-  { title: '三、典型考法', content: '题目经常通过绝对化表述设置干扰项，例如“完全不干预”“替服务对象承担全部责任”“跳过评估直接制定计划”。遇到这类表述时，应结合专业流程和角色边界判断。', points: [] },
-  { title: '四、复习清单', content: '', points: ['能否区分个人功能与社会功能？', '能否解释服务对象自决的边界？', '是否掌握接案与预估的先后关系？', '能否识别社会工作者的专业角色？'] },
-]
+const reviewSections = ref<Array<{title:string;content:string;points:string[]}>>([])
+const escapeHtml = (text:string) => text.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 
 const downloadFile = (url: string, name: string) => {
   const link = document.createElement('a')
@@ -165,7 +127,7 @@ const saveAsImage = () => {
   ctx.fillText('社会工作核心知识复习资料', 102, 158)
   ctx.fillStyle = '#cdbd98'
   ctx.font = '28px sans-serif'
-  ctx.fillText(`引用 ${resultNoteCount.value} 条笔记 · 4 个复习专题 · 8 项重点内容`, 102, 213)
+  ctx.fillText(`引用 ${resultNoteCount.value} 条笔记 · 根据实际笔记生成`, 102, 213)
 
   const wrapText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
     let line = ''
@@ -182,7 +144,7 @@ const saveAsImage = () => {
   }
 
   let y = 365
-  reviewSections.forEach(section => {
+  reviewSections.value.forEach(section => {
     ctx.fillStyle = gold
     ctx.fillRect(64, y - 35, 8, 44)
     ctx.fillStyle = ink
@@ -224,7 +186,7 @@ const saveAsImage = () => {
 
 const saveAsPdf = () => {
   // #ifdef H5
-  const content = reviewSections.map(section => `<section><h2>${section.title}</h2>${section.content ? `<p>${section.content}</p>` : ''}${section.points.length ? `<ul>${section.points.map(point => `<li>${point}</li>`).join('')}</ul>` : ''}</section>`).join('')
+  const content = reviewSections.value.map(section => `<section><h2>${escapeHtml(section.title)}</h2>${section.content ? `<p>${escapeHtml(section.content)}</p>` : ''}${section.points.length ? `<ul>${section.points.map(point => `<li>${escapeHtml(point)}</li>`).join('')}</ul>` : ''}</section>`).join('')
   const printWindow = window.open('', '_blank')
   if (!printWindow) {
     uni.showToast({ title: '请允许浏览器打开打印窗口', icon: 'none' })
@@ -311,28 +273,10 @@ const saveAsPdf = () => {
       </view>
       <view class="report">
         <view class="report-title"><text>社会工作核心知识复习资料</text><text>AI根据所选笔记整理</text></view>
-        <view class="report-stats">
-          <view><text>{{ resultNoteCount }}</text><text>引用笔记</text></view>
-          <view><text>4</text><text>复习专题</text></view>
-          <view><text>8</text><text>重点内容</text></view>
-        </view>
-        <view class="report-section">
-          <text>一、核心结论</text>
-          <text>社会工作既关注服务对象个人问题的改善，也重视社会关系、社会公平和社会治理。复习时应先识别题目考查的是服务对象层面的功能，还是社会层面的功能。</text>
-          <view><text>助人自助是专业服务的重要原则</text><text>服务对象是改变过程的主体</text><text>专业支持不能替代服务对象作出决定</text></view>
-        </view>
-        <view class="report-section">
-          <text>二、易错辨析</text>
-          <text>尊重自决不等于社会工作者完全不提供意见。社会工作者需要说明可选方案、可能后果和风险，在提供支持后由服务对象作出决定。</text>
-          <view class="warning"><uni-icons type="info" size="17" color="#b78124" /><text>注意区分“提供专业支持”和“替服务对象决定”。</text></view>
-        </view>
-        <view class="report-section">
-          <text>三、典型考法</text>
-          <text>题目经常通过绝对化表述设置干扰项，例如“完全不干预”“替服务对象承担全部责任”“跳过评估直接制定计划”。遇到这类表述时，应结合专业流程和角色边界判断。</text>
-        </view>
-        <view class="report-section">
-          <text>四、复习清单</text>
-          <view><text>能否区分个人功能与社会功能？</text><text>能否解释服务对象自决的边界？</text><text>是否掌握接案与预估的先后关系？</text><text>能否识别社会工作者的专业角色？</text></view>
+        <view class="report-section" v-for="(section,index) in reviewSections" :key="index">
+          <text>{{ section.title }}</text>
+          <text style="white-space:pre-wrap">{{ section.content }}</text>
+          <view v-if="section.points.length"><text v-for="point in section.points" :key="point">{{ point }}</text></view>
         </view>
       </view>
       <view class="export-actions">

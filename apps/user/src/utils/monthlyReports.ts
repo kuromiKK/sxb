@@ -1,3 +1,5 @@
+import { reactive } from 'vue'
+import { api, token, selectedExamId } from '@/services/api'
 export type MonthlyReportStatus = 'ready' | 'generating'
 
 export type MonthlyReport = {
@@ -6,6 +8,8 @@ export type MonthlyReport = {
   month: number
   status: MonthlyReportStatus
   generatedAt?: string
+  studiedDays?: number[]
+  locked?: boolean
   summary: string
   headline: string
   metrics: {
@@ -27,7 +31,7 @@ export type MonthlyReport = {
   nextSteps: string[]
 }
 
-export const monthlyReports: MonthlyReport[] = [
+const demoMonthlyReports: MonthlyReport[] = [
   {
     id: '2026-08', year: 2026, month: 8, status: 'generating',
     summary: '本月学习数据持续汇总中', headline: '坚持学习，8月报告将在9月1日生成',
@@ -107,4 +111,19 @@ export const monthlyReports: MonthlyReport[] = [
   },
 ]
 
+export function emptyMonthlyReport(id: string): MonthlyReport {
+  const [year,month]=id.split('-').map(Number)
+  return {id,year,month,status:'generating',summary:'',headline:'',metrics:{studyDays:0,minutes:0,questions:0,accuracy:0,lessons:0,knowledge:0,masteryGain:0,longestStreak:0},dailyQuestions:[],studiedDays:[],subjects:[],chapters:[],tools:[],highlights:[],concerns:[],nextSteps:[]}
+}
+const lockedMonths=()=>{
+  const now=new Date()
+  return [0,1].map(offset=>{const date=new Date(now.getFullYear(),now.getMonth()-offset,1);const id=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;return {...emptyMonthlyReport(id),status:offset?'ready' as const:'generating' as const,locked:true}})
+}
+export const monthlyReports = reactive<MonthlyReport[]>(lockedMonths())
+export async function refreshMonthlyReports(){
+  const currentToken=token(),examId=selectedExamId()
+  const rows=currentToken?await api<any[]>(`/reports/${examId}`):lockedMonths()
+  if(currentToken!==token()||examId!==selectedExamId())return
+  monthlyReports.splice(0,monthlyReports.length,...rows.map(row=>({...emptyMonthlyReport(row.id),...row})))
+}
 export const getMonthlyReport = (id: string) => monthlyReports.find(item => item.id === id)

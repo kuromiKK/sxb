@@ -1,3 +1,4 @@
+import { writeRecord, deleteRecord } from '@/services/api'
 export type FavoriteType = 'knowledge' | 'course' | 'question'
 
 export type FavoriteRecord = {
@@ -8,7 +9,7 @@ export type FavoriteRecord = {
 
 const RECORDS_KEY = 'sxb-favorite-records'
 const LEGACY_KEY = 'sxb-favorite-items'
-const DEFAULT_IDS = ['kp-1-1-1', 'course-ability-section-1-1', 'q-001']
+const DEFAULT_IDS: string[] = []
 
 export const inferFavoriteType = (id: string): FavoriteType => {
   if (id.startsWith('q-')) return 'question'
@@ -45,14 +46,19 @@ export const getFavoriteRecords = (): FavoriteRecord[] => {
 
 export const getFavoriteIds = () => getFavoriteRecords().map(item => item.id)
 
-export const setFavorite = (id: string, type: FavoriteType, favorite: boolean) => {
+export const setFavorite = async (id: string, type: FavoriteType, favorite: boolean) => {
   const records = getFavoriteRecords().filter(item => item.id !== id)
-  if (favorite) records.push({ id, type, createdAt: Date.now() })
+  if (favorite) {
+    const record = { id, type, createdAt: Date.now() }
+    await writeRecord('favorite', id, record)
+    records.push(record)
+  } else await deleteRecord('favorite', id)
   writeFavoriteRecords(records)
   return records
 }
 
-export const removeFavorites = (ids: string[]) => {
+export const removeFavorites = async (ids: string[]) => {
+  for (const id of ids) await deleteRecord('favorite', id)
   const idSet = new Set(ids)
   const records = getFavoriteRecords().filter(item => !idSet.has(item.id))
   writeFavoriteRecords(records)

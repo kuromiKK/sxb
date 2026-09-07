@@ -24,31 +24,30 @@ const sourceOptions: Array<{ key: PlanSource; label: string }> = [{ key: 'chapte
 const selectedQuestions = computed(() => debugState.value === 'empty' ? [] : getPlanQuestions({ subjectIds: selectedSubjects.value, years: selectedYears.value, sources: selectedSources.value }))
 const allSelected = computed(() => selectedSubjects.value.length === knowledgeSubjects.length && selectedYears.value.length === years.length && selectedSources.value.length === sourceOptions.length)
 const daysLeft = computed(() => debugState.value === 'days30' ? 30 : exam.value.daysLeft)
-const total = computed(() => debugState.value === 'empty' ? 0 : allSelected.value ? 9876 : selectedQuestions.value.length)
+const total = computed(() => debugState.value === 'empty' ? 0 : selectedQuestions.value.length)
 const minimum = computed(() => Math.max(total.value ? Math.ceil(Math.max(total.value - state.todayDone, 0) / Math.max(daysLeft.value, 1)) : 0, 0))
 const sliderMax = computed(() => Math.max(minimum.value + 100, 100))
 const sourceSummary = computed(() => sourceOptions.filter(item => selectedSources.value.includes(item.key)).map(item => item.label).join('、') || '暂未选择')
 const changeTarget = (amount: number) => {
   targetCustomized.value = true
-  target.value = Math.min(Math.max(target.value + amount, minimum.value), sliderMax.value)
+  target.value = Math.min(Math.max(target.value + amount, 0), sliderMax.value)
 }
 const changeSlider = (event: any) => {
   targetCustomized.value = true
-  target.value = Math.max(Number(event.detail.value), minimum.value)
+  target.value = Math.max(Number(event.detail.value), 0)
 }
 const setQuickTarget = (value: number) => {
-  if (value < minimum.value) return
   targetCustomized.value = true
   target.value = value
 }
 watch(minimum, next => {
-  target.value = targetCustomized.value ? Math.max(target.value, next) : next
+  if (!targetCustomized.value) target.value = next
 }, { immediate: true })
 const back = () => backOrFallback(returnUrl.value)
 const toggle = (list: string[], value: string) => { const index = list.indexOf(value); index >= 0 ? list.splice(index, 1) : list.push(value) }
-const save = () => {
-  const next: PracticePlan = { ...plan.value, subjectIds: [...selectedSubjects.value], years: [...selectedYears.value], sources: [...selectedSources.value], total: total.value, minTarget: minimum.value, target: Math.max(target.value, minimum.value), targetCustomized: targetCustomized.value, updatedAt: Date.now() }
-  savePlan(next); state.todayTarget = next.target; plan.value = next
+const save = async () => {
+  const next: PracticePlan = { ...plan.value, subjectIds: [...selectedSubjects.value], years: [...selectedYears.value], sources: [...selectedSources.value], total: total.value, minTarget: minimum.value, target: Math.max(target.value, 0), targetCustomized: targetCustomized.value, updatedAt: Date.now() }
+  await savePlan(next); state.todayTarget = next.target; plan.value = next
   uni.showToast({ title: '学习计划已更新', icon: 'success' })
   setTimeout(() => uni.reLaunch({ url: returnUrl.value }), 700)
 }
@@ -101,14 +100,14 @@ if (!requireLogin('/pages/learning-plan/index')) {
         <view><text>{{ target }}</text><text>题 / 天</text></view>
         <button @tap="changeTarget(1)"><uniIcons type="plus" size="20" color="#fff" /></button>
       </view>
-      <text class="target-minimum">每日最低 {{ minimum }} 题</text>
+      <text class="target-minimum">建议每日 {{ minimum }} 题，可按自己的节奏调整</text>
       <view class="target-slider">
-        <text>{{ minimum }}</text>
-        <slider :value="target" :min="minimum" :max="sliderMax" :step="1" activeColor="#3569e8" backgroundColor="#dfe6f1" block-color="#ffffff" :block-size="24" @change="changeSlider" />
+        <text>0</text>
+        <slider :value="target" :min="0" :max="sliderMax" :step="1" activeColor="#3569e8" backgroundColor="#dfe6f1" block-color="#ffffff" :block-size="24" @change="changeSlider" />
         <text>{{ sliderMax }}</text>
       </view>
       <view class="quick-targets">
-        <text v-for="value in [30, 50, 80, 100]" :key="value" :class="{ active: target === value, disabled: value < minimum }" @tap="setQuickTarget(value)">{{ value }}题</text>
+        <text v-for="value in [0, 30, 50, 100]" :key="value" :class="{ active: target === value }" @tap="setQuickTarget(value)">{{ value }}题</text>
       </view>
     </view>
 

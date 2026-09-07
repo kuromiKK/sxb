@@ -5,6 +5,7 @@ import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
+import { api, account, refreshRights, refreshPersonalData, selectedExamId, showApiError } from '@/services/api'
 import { ensureStudentNickname } from '@/utils/profile'
 
 const { state, exam } = useAppStore()
@@ -16,33 +17,43 @@ const serviceVisible = ref(false)
 const unreadNotice = ref(true)
 const pendingOrder = ref(true)
 type RightsLevel = 'none' | 'basic' | 'trial' | 'pro' | 'flagship'
-const rightsLevel = ref<RightsLevel>((uni.getStorageSync('sxb-demo-rights') || 'pro') as RightsLevel)
+const rightsLevel = ref<RightsLevel>((uni.getStorageSync('sxb-demo-rights') || 'none') as RightsLevel)
 const qrPattern = Array.from({ length: 64 }, (_, index) => [0, 1, 3, 5, 6, 8, 10, 11, 14, 16, 18, 19, 22, 24, 27, 29, 31, 34, 36, 37, 40, 42, 44, 46, 49, 51, 53, 55, 57, 60, 62, 63].includes(index))
 const wrongBadge = computed(() => wrongCount.value > 99 ? '99+' : String(wrongCount.value))
 const rightsOptions: Array<{ key: RightsLevel; name: string; description: string }> = [
-  { key: 'none', name: '暂无权益', description: '仅可浏览公开学习内容' },
-  { key: 'basic', name: '基础版权益', description: '题库与基础学习功能' },
-  { key: 'trial', name: '1元试听权益', description: '限时学习可试听精讲课' },
-  { key: 'pro', name: '专业版权益', description: '全科题库、课程与知识图谱' },
-  { key: 'flagship', name: '旗舰版权益', description: '解锁全部学习服务' },
+  { key: 'none', name: '免费版', description: '仅可浏览公开学习内容' },
+  { key: 'basic', name: '免费版', description: '题库与基础学习功能' },
+  { key: 'trial', name: 'VIP 24小时体验', description: '限时学习可试听精讲课' },
+  { key: 'pro', name: 'VIP', description: '全科题库、课程与知识图谱' },
+  { key: 'flagship', name: 'SVIP', description: '解锁全部学习服务' },
 ]
 const currentRights = computed(() => rightsOptions.find(item => item.key === rightsLevel.value) || rightsOptions[0])
 
-const correctRate = computed(() => {
-  const status: Record<string, string> = uni.getStorageSync('sxb-question-status') || {}
-  const values = Object.values(status).filter(item => item === 'correct' || item === 'wrong')
-  if (!values.length) return 76
-  return Math.round(values.filter(item => item === 'correct').length / values.length * 100)
-})
+const totalAnswers=ref(0)
+const learningDays=ref(0)
+const streakDays=ref(0)
+const correctRate = ref(0)
 
-const loadProfileData = () => {
+const loadProfileData = async () => {
+  await refreshRights()
+  await refreshPersonalData()
+  rightsLevel.value=account.level==='svip'?'flagship':account.level==='vip'?(account.trial?'trial':'pro'):'none'
+  const stats=await api(`/stats/${selectedExamId()}`)
+  totalAnswers.value=stats.daily.reduce((sum:number,r:any)=>sum+r.attempts,0)
+  state.todayDone=stats.todayIds.length
+  correctRate.value=totalAnswers.value?Math.round(stats.daily.reduce((sum:number,r:any)=>sum+r.correct,0)/totalAnswers.value*100):0
+  learningDays.value=stats.studyDays.length
+  const days=new Set(stats.studyDays)
+  let date=new Date();streakDays.value=0
+  const dayKey=(d:Date)=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)
+  if(!days.has(dayKey(date)))date=new Date(date.getTime()-86400000)
+  while(days.has(dayKey(date))){streakDays.value++;date=new Date(date.getTime()-86400000)}
   nickname.value = ensureStudentNickname()
-  wrongCount.value = (uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006']).length
-  favoriteCount.value = (uni.getStorageSync('sxb-favorite-items') || ['kp-1-1-1', 'course-ability-section-1-1', 'q-001']).length
-  const keys: string[] = uni.getStorageInfoSync().keys || []
-  noteCount.value = keys.filter(key => key.startsWith('sxb-question-note-') || key.startsWith('sxb-knowledge-note-') || key.startsWith('sxb-course-note-')).length
+  wrongCount.value = (uni.getStorageSync('sxb-wrong-questions') || []).length
+  favoriteCount.value = (uni.getStorageSync('sxb-favorite-items') || []).length
+  noteCount.value = (uni.getStorageSync('sxb-note-records') || []).length
   unreadNotice.value = uni.getStorageSync('sxb-unread-announcements') !== false
-  pendingOrder.value = uni.getStorageSync('sxb-pending-order') !== false
+  pendingOrder.value = (await api<any[]>('/orders')).some(order=>order.status==='pending_payment')
 }
 
 onShow(() => {
@@ -51,7 +62,7 @@ onShow(() => {
     uni.navigateTo({ url: '/pages/login/index?redirect=%2Fpages%2Fprofile%2Findex' })
     return
   }
-  loadProfileData()
+  void loadProfileData().catch(showApiError)
 })
 
 const open = (path: string) => uni.navigateTo({ url: path })
@@ -69,7 +80,7 @@ const applyDebug = (key: string) => {
 <template>
   <view class="page profile-page safe-top">
     <view class="profile-header">
-      <view class="identity"><text class="welcome">你好，</text><text class="nickname">{{ nickname }}</text><text class="identity-meta">已连续学习 18 天</text></view>
+      <view class="identity"><text class="welcome">你好，</text><text class="nickname">{{ nickname }}</text><text class="identity-meta">已连续学习 {{ streakDays }} 天</text></view>
       <button class="security-button" @tap="openCenter('security')"><uni-icons type="gear" size="22" color="#5e6f88" /></button>
     </view>
 
@@ -81,16 +92,16 @@ const applyDebug = (key: string) => {
 
     <view class="rights-band" @tap="openCenter('rights')">
       <view class="rights-icon"><uni-icons :type="rightsLevel === 'none' ? 'locked' : 'medal'" size="22" color="currentColor" /></view>
-      <view class="rights-copy"><text>{{ currentRights.name }}</text><text>{{ rightsLevel === 'none' ? currentRights.description : `有效至 ${exam.expiry} · ${currentRights.description}` }}</text></view>
+      <view class="rights-copy"><text>{{ currentRights.name }}</text><text>{{ rightsLevel === 'none' ? currentRights.description : `有效至 ${account.expiresAt ? new Date(account.expiresAt).toLocaleDateString() : '待配置'} · ${currentRights.description}` }}</text></view>
       <uni-icons type="right" size="18" color="currentColor" />
     </view>
     </view>
 
     <view class="data-strip">
       <view><text>{{ state.todayDone }}</text><text>今日刷题</text></view>
-      <view><text>286</text><text>累计刷题</text></view>
+      <view><text>{{ totalAnswers }}</text><text>累计刷题</text></view>
       <view><text>{{ correctRate }}%</text><text>答题正确率</text></view>
-      <view><text>18</text><text>学习天数</text></view>
+      <view><text>{{ learningDays }}</text><text>学习天数</text></view>
     </view>
 
     <view class="tools-card"><view class="learning-grid">

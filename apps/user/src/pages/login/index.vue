@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { useAppStore } from '@/store/app'
 import { backOrFallback } from '@/utils/navigation'
+import { api, acceptSession, refreshRights, refreshPersonalData, showApiError } from '@/services/api'
 
 const { login } = useAppStore()
 const phone = ref('')
@@ -11,30 +12,43 @@ const code = ref('')
 const agreed = ref(false)
 const countdown = ref(0)
 const redirect = ref('')
+const testCode = ref('')
+const busy = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
 
 onLoad((options) => { redirect.value = options?.redirect ? decodeURIComponent(options.redirect) : '' })
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 const back = () => backOrFallback('/pages/index/index')
-const sendCode = () => {
+onUnmounted(() => { if (timer) clearInterval(timer) })
+const sendCode = async () => {
   if (countdown.value) return
   if (!/^1\d{10}$/.test(phone.value)) return toast('请输入正确的手机号')
+  try {
+  const result = await api('/auth/code', 'POST', { phone: phone.value })
+  testCode.value = result.testCode || ''
   countdown.value = 60
   timer = setInterval(() => { countdown.value -= 1; if (!countdown.value && timer) clearInterval(timer) }, 1000)
-  toast('验证码已发送，演示验证码为 123456')
+  } catch (error) { showApiError(error) }
 }
 const finish = (identity: string) => {
   login(identity)
   uni.showToast({ title: '登录成功', icon: 'success' })
   setTimeout(() => redirect.value ? openRoute(redirect.value) : uni.reLaunch({ url: '/pages/index/index' }), 350)
 }
-const submit = () => {
+const submit = async () => {
+  if (busy.value) return
   if (!/^1\d{10}$/.test(phone.value)) return toast('请输入正确的手机号')
-  if (code.value !== '123456') return toast('演示验证码请输入 123456')
+  if (!/^\d{4}$/.test(code.value)) return toast('请输入4位验证码')
   if (!agreed.value) return toast('请先同意用户协议和隐私政策')
-  finish(phone.value)
+  busy.value = true
+  try {
+    acceptSession(await api('/auth/phone', 'POST', { phone: phone.value, code: code.value }))
+    await refreshRights()
+    await refreshPersonalData()
+    finish(phone.value)
+  } catch (error) { showApiError(error) } finally { busy.value = false }
 }
-const wechat = () => { if (!agreed.value) return toast('请先同意用户协议和隐私政策'); finish('wechat') }
+const wechat = () => toast('微信登录正在申请，请先使用手机号测试登录')
 const tabRoutes = ['/pages/index/index', '/pages/knowledge/index', '/pages/courses/index', '/pages/practice/index', '/pages/profile/index']
 const openRoute = (url: string) => tabRoutes.includes(url) ? uni.reLaunch({ url }) : uni.navigateTo({ url })
 </script>
@@ -44,10 +58,10 @@ const openRoute = (url: string) => tabRoutes.includes(url) ? uni.reLaunch({ url 
     <button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4b5a70" /></button>
     <view class="login-brand"><view class="brand-mark"><text>上</text></view><view><text class="brand-name">上行宝</text><text class="brand-tag">让备考更有方向</text></view></view>
     <view class="login-title">欢迎回来</view><text class="login-subtitle">登录后，开启你的高效备考之旅</text>
-    <view class="login-form"><view class="field"><uni-icons type="phone" size="21" color="#8793a6" /><input v-model="phone" type="number" maxlength="11" placeholder="请输入手机号" placeholder-class="placeholder" /></view><view class="field"><uni-icons type="locked" size="21" color="#8793a6" /><input v-model="code" type="number" maxlength="6" placeholder="请输入验证码" placeholder-class="placeholder" /><button class="code-button" :disabled="Boolean(countdown)" @tap="sendCode">{{ countdown ? `${countdown}s 后重发` : '获取验证码' }}</button></view><button class="login-button" @tap="submit">登录</button></view>
+    <view class="login-form"><view class="field"><uni-icons type="phone" size="21" color="#8793a6" /><input v-model="phone" type="number" maxlength="11" placeholder="请输入手机号" placeholder-class="placeholder" /></view><view class="field"><uni-icons type="locked" size="21" color="#8793a6" /><input v-model="code" type="number" maxlength="4" placeholder="请输入验证码" placeholder-class="placeholder" /><button class="code-button" :disabled="Boolean(countdown)" @tap="sendCode">{{ countdown ? `${countdown}s 后重发` : '获取验证码' }}</button></view><button class="login-button" :loading="busy" :disabled="busy" @tap="submit">登录</button></view>
     <view class="agreement" @tap="agreed = !agreed"><view class="checkbox" :class="{ checked: agreed }"><uni-icons v-if="agreed" type="checkmarkempty" size="14" color="#fff" /></view><text>我已阅读并同意《用户服务协议》和《隐私政策》，未注册手机号将自动创建账号</text></view>
     <view class="split-line"><text>其他登录方式</text></view><button class="wechat-button" @tap="wechat"><view class="wechat-mark"><uni-icons type="weixin" size="21" color="#fff" /></view><text>微信一键登录</text></button>
-    <text class="login-tip">内部版演示：验证码请输入 123456</text>
+    <text class="login-tip">{{ testCode ? `测试验证码：${testCode}（5分钟内有效，不发送短信）` : '本地测试环境：点击获取验证码后在此显示' }}</text>
   </view>
 </template>
 

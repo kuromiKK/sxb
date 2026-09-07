@@ -9,6 +9,7 @@ import { getWeakQuestions, type WeakPointDebugState } from '@/utils/weak-points'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
+import { api, showApiError, writeRecord } from '@/services/api'
 
 type SessionMode = 'normal' | 'weak' | 'wrong' | 'favorite' | 'recite'
 type AnswerState = 'correct' | 'wrong'
@@ -18,6 +19,7 @@ const questions = ref<PracticeQuestion[]>(practiceQuestions)
 const currentIndex = ref(0)
 const selected = ref<number[]>([])
 const answered = ref(false)
+const submitting = ref(false)
 const answerStates = ref<Record<string, AnswerState>>({})
 const sessionSelections = ref<Record<string, number[]>>({})
 const reciteRevealed = ref(false)
@@ -116,17 +118,13 @@ onLoad((options?: Record<string, string>) => {
   knowledgePointSession.value = Boolean(options.knowledgePointId)
   sessionSource.value = options.knowledgePointId ? '知识点练习' : options.plan ? '智能刷题' : nextMode === 'favorite' ? '我的收藏' : nextMode === 'wrong' ? '错题本' : nextMode === 'weak' ? '薄弱项强化' : nextMode === 'recite' ? '挖空背题' : '章节练习'
   sessionStartedAt.value = Date.now()
-  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006']
-  const favoriteQuestionIds = favoriteIds.value.filter(id => id.startsWith('q-'))
+  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
+  const favoriteQuestionIds = favoriteIds.value.filter(id => practiceQuestions.some(q => q.id === id))
   let list = practiceQuestions
   if (options.plan) list = getPlanQuestions(loadPlan(exam.value.id, exam.value.daysLeft))
   else if (options.knowledgePointId) list = practiceQuestions.filter(item => item.knowledgePointId === options.knowledgePointId)
   else if (options.sectionId) {
     list = practiceQuestions.filter(item => item.sectionId === options.sectionId)
-    if (!list.length) {
-      const demoQuestion = createSectionQuestion(options.sectionId)
-      if (demoQuestion) list = [demoQuestion]
-    }
   }
   if (!options.knowledgePointId && nextMode === 'weak') {
     const homeDebugState = uni.getStorageSync('sxb-debug-state-刷题首页')
@@ -156,17 +154,18 @@ onHide(() => { if (elapsedTimer) clearInterval(elapsedTimer) })
 onBeforeUnmount(() => { if (elapsedTimer) clearInterval(elapsedTimer) })
 
 const loadCurrentState = () => {
+  if (!questions.value.length || !current.value) return
   const storedSelection = uni.getStorageSync(`sxb-question-selection-${exam.value.id}-${current.value.id}`) || []
   const sessionSelection = sessionSelections.value[current.value.id]
   const isRetryMode = mode.value === 'weak' || mode.value === 'wrong'
   selected.value = sessionSelection ? [...sessionSelection] : isRetryMode ? [] : [...storedSelection]
-  answered.value = isRetryMode ? Boolean(sessionSelection) : Boolean(answerStates.value[current.value.id])
+  answered.value = Boolean(sessionSelection)
   if (answered.value) selected.value = sessionSelections.value[current.value.id] || []
   reciteRevealed.value = false
   noteText.value = getNoteBySource(current.value.id, 'question')?.content || uni.getStorageSync(`sxb-question-note-${current.value.id}`) || ''
 }
 const chooseOption = (index: number) => {
-  if (answered.value || mode.value === 'recite') return
+  if (answered.value || submitting.value || mode.value === 'recite') return
   if (current.value.type === 'single') {
     selected.value = [index]
     submitAnswer()
@@ -178,8 +177,20 @@ const recordDailyQuestion = () => {
   const before = recordToday(exam.value.id, current.value.id)
   if (before.length > state.todayDone) state.todayDone = before.length
 }
-const submitAnswer = () => {
-  if (!selected.value.length || answered.value) return
+const answerRequestIds = new Map<string, string>()
+const submitAnswer = async () => {
+  if (!selected.value.length || answered.value || submitting.value) return
+  submitting.value = true
+  const question = current.value
+  const examId = exam.value.id
+  const selection = [...selected.value]
+  const requestKey = `${examId}:${question.id}:${selection.join(',')}`
+  if (!answerRequestIds.has(requestKey)) answerRequestIds.set(requestKey, `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  try {
+  const resultFromServer = await api('/answers', 'POST', { examId, questionId: question.id, selection, requestId: answerRequestIds.get(requestKey) })
+  if (current.value.id !== question.id || exam.value.id !== examId) return
+  current.value.answer = resultFromServer.answer
+  current.value.explanation = resultFromServer.explanation
   answered.value = true
   sessionSelections.value[current.value.id] = [...selected.value]
   uni.setStorageSync(`sxb-question-selection-${exam.value.id}-${current.value.id}`, selected.value)
@@ -189,12 +200,14 @@ const submitAnswer = () => {
   status[current.value.id] = result
   uni.setStorageSync('sxb-question-status', status)
   saveAnswered(exam.value.id, current.value.id, result)
-  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006']
+  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
   const nextWrongIds = result === 'correct' ? wrongIds.filter(id => id !== current.value.id) : Array.from(new Set([...wrongIds, current.value.id]))
   uni.setStorageSync('sxb-wrong-questions', nextWrongIds)
   recordDailyQuestion()
+  } catch (error) { showApiError(error) } finally { submitting.value = false }
 }
-const markRecite = (remembered: boolean) => {
+const markRecite = async (remembered: boolean) => {
+  try { await writeRecord('recite', current.value.id, { remembered }) } catch (error) { showApiError(error); return }
   answerStates.value[current.value.id] = remembered ? 'correct' : 'wrong'
   const reviewIds: string[] = uni.getStorageSync('sxb-recite-review') || []
   uni.setStorageSync('sxb-recite-review', remembered ? reviewIds.filter(id => id !== current.value.id) : Array.from(new Set([...reviewIds, current.value.id])))
@@ -202,9 +215,9 @@ const markRecite = (remembered: boolean) => {
   if (currentIndex.value < questions.value.length - 1) setTimeout(() => goTo(currentIndex.value + 1), 280)
 }
 const optionClass = (index: number) => ({ selected: selected.value.includes(index), correct: answered.value && current.value.answer.includes(index), wrong: answered.value && selected.value.includes(index) && !current.value.answer.includes(index) })
-const goTo = (index: number) => { if (index < 0 || index >= questions.value.length) return; currentIndex.value = index; loadCurrentState() }
+const goTo = (index: number) => { if (submitting.value || index < 0 || index >= questions.value.length) return; currentIndex.value = index; loadCurrentState() }
 const previous = () => goTo(currentIndex.value - 1)
-const next = () => { if (isLast.value) { completionVisible.value = true; return } goTo(currentIndex.value + 1) }
+const next = () => { if (submitting.value) return; if (isLast.value) { completionVisible.value = true; return } goTo(currentIndex.value + 1) }
 const continueAfterCompletion = () => {
   if (completionKind.value === 'plan') {
     completionVisible.value = false
@@ -219,14 +232,14 @@ const continueAfterCompletion = () => {
   completionVisible.value = false
   uni.redirectTo({ url: `/pages/practice-session/index?sectionId=${encodeURIComponent(nextRecord.section.id)}&returnUrl=${encodeURIComponent(returnUrl.value)}` })
 }
-const toggleFavorite = () => {
+const toggleFavorite = async () => {
+  await setFavorite(current.value.id, 'question', !isFavorite.value)
   favoriteIds.value = isFavorite.value ? favoriteIds.value.filter(id => id !== current.value.id) : [...favoriteIds.value, current.value.id]
-  setFavorite(current.value.id, 'question', isFavorite.value)
   uni.showToast({ title: isFavorite.value ? '已收藏题目' : '已取消收藏', icon: 'none' })
 }
 const openKnowledge = () => uni.navigateTo({ url: `/pages/knowledge-detail/index?id=${encodeURIComponent(current.value.knowledgePointId)}` })
 const openNote = () => { noteText.value = getNoteBySource(current.value.id, 'question')?.content || uni.getStorageSync(`sxb-question-note-${current.value.id}`) || ''; noteVisible.value = true }
-const saveNote = () => { if (!noteText.value.trim()) return uni.showToast({ title: '请先填写笔记内容', icon: 'none' }); saveNoteRecord(current.value.id, 'question', noteText.value); noteVisible.value = false; uni.showToast({ title: '题目笔记已保存', icon: 'success' }) }
+const saveNote = async () => { if (!noteText.value.trim()) return uni.showToast({ title: '请先填写笔记内容', icon: 'none' }); await saveNoteRecord(current.value.id, 'question', noteText.value); noteVisible.value = false; uni.showToast({ title: '题目笔记已保存', icon: 'success' }) }
 const back = () => {
   completionVisible.value = false
   noteVisible.value = false

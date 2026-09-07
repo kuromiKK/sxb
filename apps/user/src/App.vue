@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { onLaunch } from '@dcloudio/uni-app'
+import { refreshCatalog } from '@/services/catalog'
+import { refreshRights, refreshPersonalData, showApiError } from '@/services/api'
 
 onLaunch(() => {
-  console.log('上行宝用户端启动')
+  uni.showLoading({ title: '加载中' })
+  void refreshCatalog().then(refreshRights).then(refreshPersonalData).then(() => {
+    const pages = getCurrentPages()
+    const current = pages[pages.length - 1] as any
+    const route = current?.$page?.fullPath || '/pages/index/index'
+    uni.reLaunch({ url: route })
+  }).catch(error => {
+    showApiError(error)
+    uni.showModal({ title: '学习数据未能加载', content: '当前显示内容尚未同步，不能作为真实学习数据。请确认本地服务正在运行后重试。', showCancel: false, confirmText: '知道了' })
+  }).finally(() => uni.hideLoading())
 })
 </script>
 

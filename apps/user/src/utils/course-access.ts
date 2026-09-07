@@ -1,3 +1,4 @@
+import { account, token } from '@/services/api'
 type CourseRightsLevel = 'none' | 'basic' | 'trial' | 'pro' | 'flagship'
 export type CourseAccessLevel = 'none' | 'trial' | 'full'
 
@@ -9,7 +10,7 @@ export const courseDebugOptions = [
 ]
 
 export const getCourseAccessLevel = (): CourseAccessLevel => {
-  const rights = (uni.getStorageSync('sxb-demo-rights') || 'pro') as CourseRightsLevel
+  const rights = (token() && account.level !== 'free' ? 'pro' : 'none') as CourseRightsLevel
   if (rights === 'trial') return 'trial'
   if (rights === 'pro' || rights === 'flagship') return 'full'
   return 'none'
@@ -27,6 +28,9 @@ export const applyCourseDebugAccount = (
   login: (identity: string) => void,
   logout: () => void,
 ) => {
+  uni.showToast({ title: '请使用测试订单验证权限，不能在前台授予会员', icon: 'none' })
+  return getCourseAccessLevel()
+  /* Legacy presentation states cannot grant server permissions.
   if (key === 'logged-out') {
     uni.setStorageSync('sxb-demo-rights', 'none')
     logout()
@@ -37,4 +41,5 @@ export const applyCourseDebugAccount = (
   const rights: CourseRightsLevel = key === 'trial' ? 'trial' : key === 'full' ? 'flagship' : 'none'
   uni.setStorageSync('sxb-demo-rights', rights)
   return getCourseAccessLevel()
+  */
 }

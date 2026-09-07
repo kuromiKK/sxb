@@ -1,5 +1,6 @@
 import { practiceQuestions, type PracticeQuestion } from '@/mock/data'
 import { getFavoriteIds } from '@/utils/favorites'
+import { writeRecord } from '@/services/api'
 
 export type PlanSource = 'chapter' | 'favorite' | 'wrong'
 export type PracticePlan = {
@@ -30,8 +31,8 @@ export const getPlanKey = (examId: string) => `sxb-practice-plan-${examId}`
 export const getAnsweredKey = (examId: string) => `sxb-answered-${examId}`
 
 export const getAnswered = (examId: string): Record<string, 'correct' | 'wrong'> => storage(getAnsweredKey(examId), {})
-export const getWrongIds = () => storage('sxb-wrong-questions', ['q-002', 'q-004', 'q-006']) as string[]
-export const getFavoriteQuestionIds = () => getFavoriteIds().filter(id => id.startsWith('q-'))
+export const getWrongIds = () => storage('sxb-wrong-questions', []) as string[]
+export const getFavoriteQuestionIds = () => getFavoriteIds().filter(id => practiceQuestions.some(q => q.id === id))
 
 export const getPlanQuestions = (plan: Pick<PracticePlan, 'subjectIds' | 'years' | 'sources'>): PracticeQuestion[] => {
   const subjectIds = new Set(plan.subjectIds)
@@ -64,11 +65,11 @@ export const loadPlan = (examId: string, daysLeft: number) => {
   const questions = getPlanQuestions(saved as PracticePlan)
   const minTarget = calculateMinimum(questions.length, 0, daysLeft)
   const targetCustomized = saved.targetCustomized === true
-  const target = targetCustomized ? Math.max(Number(saved.target) || minTarget, minTarget) : minTarget
+  const target = targetCustomized ? Math.max(Number(saved.target) || 0, 0) : minTarget
   return { ...base, ...saved, total: questions.length, minTarget, target, targetCustomized }
 }
 
-export const savePlan = (plan: PracticePlan) => uni.setStorageSync(getPlanKey(plan.examId), { ...plan, updatedAt: Date.now() })
+export const savePlan = async (plan: PracticePlan) => { await writeRecord('plan', 'current', plan); uni.setStorageSync(getPlanKey(plan.examId), { ...plan, updatedAt: Date.now() }) }
 export const getTodayAnsweredIds = (examId: string) => storage(`sxb-today-questions-${examId}-${todayKey()}`, []) as string[]
 export const recordToday = (examId: string, questionId: string) => {
   const key = `sxb-today-questions-${examId}-${todayKey()}`

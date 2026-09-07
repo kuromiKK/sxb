@@ -9,9 +9,10 @@ import { useAppStore } from '@/store/app'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
 import { applyCourseDebugAccount, canAccessCourse, courseDebugOptions, getCourseAccessLevel } from '@/utils/course-access'
+import { api, writeRecord, showApiError, refreshRights } from '@/services/api'
 
 const { state, login, logout, requireLogin } = useAppStore()
-const courseId = ref(courseCatalog[0].id)
+const courseId = ref(courseCatalog[0]?.id || '')
 const note = ref('')
 const noteSaved = ref(false)
 const isPlaying = ref(false)
@@ -24,7 +25,7 @@ const favorite = ref(false)
 const pageReady = ref(false)
 const articleExpanded = ref(false)
 
-const course = computed<CourseLesson>(() => courseCatalog.find(item => item.id === courseId.value) || courseCatalog[0])
+const course = computed<CourseLesson>(() => courseCatalog.find(item => item.id === courseId.value) || courseCatalog[0] || {id:courseId.value,progress:0,currentMinute:0} as CourseLesson)
 const record = computed(() => {
   for (const subject of knowledgeSubjects) {
     const chapter = subject.chapters.find(item => item.id === course.value.chapterId)
@@ -36,32 +37,14 @@ const record = computed(() => {
   return undefined
 })
 const knowledgePoints = computed(() => record.value?.section.points || [])
-const articleSections = computed(() => [
-  {
-    title: '一、核心原则与基本定位',
-    paragraphs: [
-      `${course.value.sectionName}是理解本节内容的主线。学习时不能只记住单独结论，还要把原则、政策方向和专业实践放在同一条逻辑链中理解。`,
-    ],
-  },
-  {
-    title: '二、从知识结构理解考点',
-    paragraphs: knowledgePoints.value.map((point, index) => `${index + 1}. ${point.title}。这一知识点在答题时需要先识别题干情境，再判断其对应的原则、行动要求和实践边界。`),
-  },
-  {
-    title: '三、实务场景中的判断方法',
-    paragraphs: [
-      '面对案例题时，先确认服务行动是否符合政策方向，再判断专业方法能否回应服务对象的真实需要。原则不是抽象口号，而是方案设计、资源链接、服务实施和效果评估的共同依据。',
-      '当多个选项表述接近时，应优先选择既体现基本原则，又能落实到具体服务过程的选项；仅有态度表达、缺少行动依据的表述通常不够完整。',
-    ],
-  },
-  {
-    title: '四、复习与记忆路径',
-    paragraphs: [
-      '建议按照“原则是什么、为什么坚持、实践中怎么体现、题目如何设置干扰项”四步复习。先建立框架，再补充细节，可以减少概念混淆。',
-      '完成阅读后，可结合下方知识点逐项回看，并在课程笔记中记录容易混淆的关键词，形成自己的复习提示。',
-    ],
-  },
-])
+const articleSections = computed<Array<{title:string;paragraphs:string[]}>>(() => (course.value as any).articleSections || [{title:course.value.sectionName,paragraphs:[course.value.intro || '课程内容待发布']}])
+const mediaUrl = computed(() => String((course.value as any).mediaUrl || ''))
+const mediaProgress = async (event:any) => {
+  const seconds=Number(event.detail.currentTime)||0
+  const duration=Number(event.detail.duration)||1
+  currentMinute.value=Math.floor(seconds/60)
+  courseProgress.value=Math.min(100,Math.round(seconds/duration*100))
+}
 const accessLevel = ref(getCourseAccessLevel())
 const canAccess = computed(() => accessLevel.value === 'full' || (accessLevel.value === 'trial' && course.value.canTrial))
 const currentIndex = computed(() => courseCatalog.findIndex(item => item.id === course.value.id))
@@ -81,13 +64,18 @@ const markCurrentCourseCompleted = () => {
   courseProgress.value = 100
 }
 
-onLoad((options) => {
+onLoad(async (options) => {
   if (options?.id) courseId.value = decodeURIComponent(options.id)
   const currentUrl = `/pages/course-detail/index?id=${encodeURIComponent(course.value.id)}`
   if (!state.isLoggedIn) {
     requireLogin(currentUrl)
     return
   }
+  try {
+    await refreshRights()
+    const detail = await api(`/courses/${courseId.value}`)
+    Object.assign(course.value, detail)
+  } catch (error) { showApiError(error); return }
   accessLevel.value = getCourseAccessLevel()
   if (!canAccess.value) {
     uni.reLaunch({
@@ -111,31 +99,31 @@ const typeIcon = (type: CourseLesson['type']) => type === 'video' ? 'videocam' :
 const showToast = (title: string) => uni.showToast({ title, icon: 'none' })
 const back = () => backOrFallback('/pages/courses/index')
 const togglePlay = () => {
-  isPlaying.value = !isPlaying.value
-  if (isPlaying.value) showToast('开始播放课程')
+  showToast('课程媒体尚未上传，请联系内容管理员')
 }
 const seek = (event: any) => {
   const nextProgress = Number(event?.detail?.value || 0)
   courseProgress.value = nextProgress
   currentMinute.value = Math.round(course.value.totalMinutes * nextProgress / 100)
 }
-const saveNote = () => {
+const saveNote = async () => {
   if (!state.isLoggedIn) {
     requireLogin(`/pages/course-detail/index?id=${encodeURIComponent(course.value.id)}`)
     return
   }
   if (!note.value.trim()) return showToast('请先填写笔记内容')
-  saveNoteRecord(course.value.id, 'course', note.value)
+  await saveNoteRecord(course.value.id, 'course', note.value)
   noteSaved.value = true
   uni.showToast({ title: '课程笔记已保存', icon: 'success' })
   setTimeout(() => { noteSaved.value = false }, 1600)
 }
-const toggleFavorite = () => {
+const toggleFavorite = async () => {
+  await setFavorite(courseId.value, 'course', !favorite.value)
   favorite.value = !favorite.value
-  setFavorite(courseId.value, 'course', favorite.value)
   showToast(favorite.value ? '已收藏精讲课' : '已取消收藏')
 }
-const finishCourse = () => {
+const finishCourse = async () => {
+  await writeRecord('courseProgress', course.value.id, { completed: true, progress: 100, minutes: currentMinute.value })
   markCurrentCourseCompleted()
   uni.showToast({ title: '已完成本节课程', icon: 'success' })
 }
@@ -146,20 +134,28 @@ const openCodeModal = () => {
   inputCode.value = ''
   codeModalVisible.value = true
 }
-const verifyDownload = () => {
+const verifyDownload = async () => {
   if (inputCode.value.trim() !== verificationCode.value) return showToast('验证码不正确，请重新输入')
   codeModalVisible.value = false
-  downloaded.value = true
-  showToast('验证通过，讲义下载已开始')
+  try {
+    const result=await api(`/handouts/handout-${course.value.id}/download`)
+    // #ifdef H5
+    window.location.assign(result.url)
+    // #endif
+    // #ifndef H5
+    uni.downloadFile({url:result.url,success:r=>{if(r.statusCode===200)uni.openDocument({filePath:r.tempFilePath,showMenu:true});else showToast('下载失败')},fail:()=>showToast('下载失败')})
+    // #endif
+    downloaded.value=true
+  } catch(error){showApiError(error)}
 }
 const refreshCode = () => { verificationCode.value = String(Math.floor(1000 + Math.random() * 9000)); inputCode.value = '' }
-const goCourse = (target?: CourseLesson, completeCurrent = false) => {
+const goCourse = async (target?: CourseLesson, completeCurrent = false) => {
   if (!target) return
   if (!canAccessCourse(target.canTrial)) {
     showToast('当前账号暂无该课程权限')
     return
   }
-  if (completeCurrent) markCurrentCourseCompleted()
+  if (completeCurrent) await finishCourse()
   uni.redirectTo({ url: `/pages/course-detail/index?id=${encodeURIComponent(target.id)}` })
 }
 const applyDebug = (key: string) => {
@@ -185,7 +181,8 @@ const applyDebug = (key: string) => {
     <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">精讲课</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
     <view class="crumb"><text>{{ course.subjectName }}</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.chapterNo }}章</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.sectionNo }}节</text></view>
 
-    <view v-if="course.type !== 'article'" class="media-panel" :class="`media-${course.type}`">
+    <video v-if="mediaUrl" :src="mediaUrl" controls style="width:100%;height:220px" @timeupdate="mediaProgress" @ended="finishCourse" />
+    <view v-else-if="course.type !== 'article'" class="media-panel" :class="`media-${course.type}`">
       <view class="media-visual"><view class="media-orbit"></view><view class="media-main-icon"><uni-icons :type="typeIcon(course.type)" size="35" color="#fff" /></view><text>{{ course.type === 'video' ? '视频精讲' : '音频精讲' }}</text></view><view class="media-controls"><text>00:{{ String(currentMinute).padStart(2, '0') }}</text><slider :value="courseProgress" min="0" max="100" activeColor="#f2b04f" backgroundColor="rgba(255,255,255,.24)" block-size="13" @change="seek" /><text>{{ course.totalMinutes }}:00</text><button class="media-play" @tap="togglePlay"><uniIcons :type="isPlaying ? 'pause' : 'play-filled'" size="16" color="#fff" /></button></view>
     </view>
 

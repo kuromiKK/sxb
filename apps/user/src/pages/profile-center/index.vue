@@ -6,7 +6,9 @@ import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
 import { backOrFallback } from '@/utils/navigation'
 import { createRightsOrder, getActivePendingOrder, loadOrders, normalizeOrders, persistOrders, sortOrders, type PaymentMethod, type RightsOrder } from '@/utils/orders'
-import { monthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
+import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
+import { api, account, refreshRights, showApiError, token } from '@/services/api'
+import { refreshOrders } from '@/utils/orders'
 
 type CenterMode = 'report' | 'record' | 'handouts' | 'rights' | 'orders' | 'announcements' | 'faq' | 'security' | 'about' | 'agreement' | 'privacy'
 const { exam, logout } = useAppStore()
@@ -56,39 +58,55 @@ const titles: Record<CenterMode, string> = {
 }
 const title = computed(() => titles[mode.value])
 
-const records = [
-  { icon: 'list', color: '#3569e8', title: '完成章节练习 8 题', meta: '社会工作服务的目标与功能 · 今天 18:42' },
-  { icon: 'sound', color: '#e98a3a', title: '学习精讲课 27 分钟', meta: '第1节 社会工作服务的目标与功能 · 今天 16:10' },
-  { icon: 'map', color: '#7655df', title: '查看知识点', meta: '社会层面的目标与社会工作服务功能 · 昨天 21:36' },
-  { icon: 'refresh', color: '#1a9a7b', title: '完成错题重练 6 题', meta: '社会工作综合能力（初级） · 8月9日' },
-]
-const savedHandoutRecords: Record<string, Pick<HandoutRecord, 'downloadedAt' | 'downloadedVersion'>> = uni.getStorageSync('sxb-handout-download-records') || {}
-const handouts = ref<HandoutRecord[]>(([
-  { id: 'handout-goals', title: '社会工作服务目标与功能讲义.pdf', size: '2.8 MB', downloadedAt: '2026-08-10', downloadedVersion: '1.2', systemVersion: '1.2', systemState: 'active' },
-  { id: 'handout-principles', title: '社会工作发展的基本原则.pdf', size: '3.1 MB', downloadedAt: '2026-08-08', downloadedVersion: '1.0', systemVersion: '1.4', systemState: 'active' },
-  { id: 'handout-relationships', title: '专业关系建立与发展讲义.pdf', size: '4.6 MB', downloadedAt: '2026-08-05', downloadedVersion: '1.0', systemVersion: '1.0', systemState: 'removed' },
-] satisfies HandoutRecord[]).map(item => ({ ...item, ...(savedHandoutRecords[item.id] || {}) })))
-const announcementsBase = [
-  { id: 'notice-1', title: '内部版 0.1 学习功能更新', date: '2026-08-11', content: '本次更新开放知识图谱、精讲课和刷题模块，已完成的题目、错题、收藏与笔记会保存在当前设备。' },
-  { id: 'notice-2', title: '初级社会工作师备考提醒', date: '2026-08-08', content: '建议先确认当前考试和每日刷题计划，再按章节完成练习。考试日期变化时，系统会同步调整倒计时。' },
-  { id: 'notice-3', title: '课程讲义下载说明', date: '2026-08-02', content: '带有“有讲义”标识的精讲课支持下载。下载前需要输入页面展示的验证码。' },
-]
-const announcements = Array.from({ length: 36 }, (_, index) => announcementsBase[index % announcementsBase.length]).map((item, index) => ({ ...item, id: `${item.id}-${index}`, date: `2026-08-${String(11 - (index % 10)).padStart(2, '0')}` }))
-const unreadAnnouncementIds = ref<string[]>(uni.getStorageSync('sxb-unread-announcement-ids') || [announcements[0].id, announcements[1].id])
-const faqsBase = [
-  { id: 'faq-1', title: '为什么做过的题不能修改答案？', content: '首次提交后会立即记录正确或错误状态，避免重复修改影响学习数据。如需重新作答，可以从错题本或章节练习重新开始。' },
-  { id: 'faq-2', title: '错题答对后还会保留吗？', content: '不会。错题重新答对后会自动移出错题本；清空错题本则会把错题恢复为未作答状态。' },
-  { id: 'faq-3', title: '收藏支持哪些内容？', content: '目前支持收藏题目、知识点和精讲课，所有收藏内容可以在“我的收藏”统一查看。' },
-  { id: 'faq-4', title: '课程讲义在小程序里如何查看？', content: '小程序会先下载到临时文件，再调用文档预览能力打开。是否能长期保存取决于微信和手机系统。' },
-  { id: 'faq-5', title: '更换考试后学习数据会丢失吗？', content: '不会。不同考试的数据会分别记录，切换回来后可以继续原来的学习进度。' },
-]
-const faqs = Array.from({ length: 30 }, (_, index) => ({ ...faqsBase[index % faqsBase.length], id: `${faqsBase[index % faqsBase.length].id}-${index}` }))
-const visibleAnnouncements = computed(() => announcements.slice(0, visibleCount.value))
-const visibleFaqs = computed(() => faqs.slice(0, visibleCount.value))
+const records = ref<Array<{icon:string;color:string;title:string;meta:string}>>([])
+const recordStats = ref({ days: 0, answers: 0, minutes: 0 })
+const me = ref<any>({})
+const inviterVisible = ref(false)
+const inviterCode = ref('')
+const inviterBusy = ref(false)
+const maskedPhone = computed(() => String(me.value.phone || '').replace(/(\d{3})\d{4}(\d{4})/, '$1****$2'))
+async function bindInviter() {
+  if (inviterBusy.value) return
+  inviterBusy.value = true
+  try {
+    await api('/me/inviter', 'POST', { code: inviterCode.value.trim() })
+    me.value = await api('/me')
+    inviterVisible.value = false
+    toast('推荐码绑定成功')
+  } catch (error) { showApiError(error) } finally { inviterBusy.value = false }
+}
+const handouts = ref<HandoutRecord[]>([])
+const announcements = ref<Array<{id:string;title:string;date:string;content:string}>>([])
+const unreadAnnouncementIds = ref<string[]>([])
+const faqs = ref<Array<{id:string;title:string;content:string}>>([])
+async function loadCenterData() {
+  const data = await api(`/catalog/${exam.value.id}`)
+  announcements.value = data.announcements.map((item:any)=>({...item,date:new Date(item.updatedAt).toLocaleDateString()}))
+  faqs.value = data.faqs
+  if (!token()) return
+  me.value = await api('/me')
+  await refreshRights()
+  const saved = await api<any[]>(`/records/${exam.value.id}`)
+  const readIds = new Set(saved.filter(item=>item.kind==='announcementRead').map(item=>item.source_id))
+  unreadAnnouncementIds.value = announcements.value.filter(item=>!readIds.has(item.id)).map(item=>item.id)
+  handouts.value = saved.filter(item=>item.kind==='handoutDownload').map(item=>({id:item.source_id,title:item.payload.title,size:'',downloadedAt:new Date(item.updated_at).toLocaleDateString(),downloadedVersion:String(item.payload.version),systemVersion:String(item.payload.version),systemState:'active'}))
+  if(mode.value==='record') {
+    const stats = await api(`/stats/${exam.value.id}`)
+    recordStats.value = { days: stats.studyDays.length, answers: stats.daily.reduce((sum:number,row:any)=>sum+row.attempts,0), minutes: stats.minutes }
+    const history=await api<any[]>(`/history/${exam.value.id}`)
+    const labels:Record<string,string>={answer:'完成答题',knowledge:'查看知识点',courseProgress:'学习课程',note:'记录笔记',favorite:'收藏内容',recite:'背诵知识点',handoutDownload:'下载讲义'}
+    records.value=history.map(item=>({icon:'list',color:'#3569e8',title:labels[item.kind]||'学习记录',meta:`${item.title||''} · ${new Date(item.created_at).toLocaleString()}`}))
+  }
+}
+const visibleAnnouncements = computed(() => announcements.value.slice(0, visibleCount.value))
+const visibleFaqs = computed(() => faqs.value.slice(0, visibleCount.value))
 
 onLoad((options) => {
   const next = options?.mode as CenterMode
   if (next && titles[next]) mode.value = next
+  void loadCenterData().catch(showApiError)
+  if(mode.value==='report')void refreshMonthlyReports().catch(showApiError)
+  if (token()) void refreshOrders().then(items => { orders.value = items }).catch(showApiError)
 })
 
 const orderTimer = setInterval(() => {
@@ -98,11 +116,18 @@ const orderTimer = setInterval(() => {
 onUnmounted(() => clearInterval(orderTimer))
 
 const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy') { switchMode('about'); return } backOrFallback('/pages/profile/index') }
-const toggle = (id: string) => { expanded.value = expanded.value === id ? '' : id; if (mode.value === 'announcements') { unreadAnnouncementIds.value = unreadAnnouncementIds.value.filter(item => item !== id); uni.setStorageSync('sxb-unread-announcement-ids', unreadAnnouncementIds.value); uni.setStorageSync('sxb-unread-announcements', unreadAnnouncementIds.value.length > 0) } }
+const toggle = async (id: string) => {
+  expanded.value = expanded.value === id ? '' : id
+  if(mode.value==='announcements' && token()){
+    await api(`/records/${exam.value.id}`,'PUT',{kind:'announcementRead',sourceId:id,payload:{read:true}})
+    unreadAnnouncementIds.value=unreadAnnouncementIds.value.filter(item=>item!==id)
+  }
+}
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 const switchMode = (next: CenterMode) => { mode.value = next; expanded.value = '' }
 const loadMore = () => { visibleCount.value += 12 }
 const openMonthlyReport = (item: MonthlyReport) => {
+  if(item.locked)return toast('学习报告仅限当前考试SVIP用户')
   if (item.status === 'generating') return toast(`${item.year}年${item.month}月报告将在次月1日生成`)
   uni.navigateTo({ url: `/pages/monthly-report/index?id=${item.id}` })
 }
@@ -110,14 +135,16 @@ const markAllRead = () => {
   if (!unreadAnnouncementIds.value.length) return toast('当前没有未读公告')
   markAllReadStep.value = 1
 }
-const confirmMarkAllRead = () => {
+const confirmMarkAllRead = async () => {
+  if(!token())return toast('请先登录')
+  for(const sourceId of unreadAnnouncementIds.value)await api(`/records/${exam.value.id}`,'PUT',{kind:'announcementRead',sourceId,payload:{read:true}})
   unreadAnnouncementIds.value = []
   uni.setStorageSync('sxb-unread-announcement-ids', [])
   uni.setStorageSync('sxb-unread-announcements', false)
   markAllReadStep.value = 0
   toast('已全部标记为已读')
 }
-const startBind = () => { bindStep.value = 1; bindCode.value = ''; bindPhone.value = ''; bindVisible.value = true }
+const startBind = () => toast('手机号换绑将在短信验证服务接入后开放')
 const sendCode = () => { if (codeSeconds.value) return; codeSeconds.value = 60; toast(`验证码已发送至${bindStep.value === 1 ? '现手机号' : '新手机号'}`); const timer = setInterval(() => { if (codeSeconds.value <= 1) { codeSeconds.value = 0; clearInterval(timer); return } codeSeconds.value -= 1 }, 1000) }
 const nextBind = () => { if (bindStep.value === 1 && bindCode.value.length < 4) return toast('请输入现手机号验证码'); if (bindStep.value === 2 && !/^1\d{10}$/.test(bindPhone.value)) return toast('请输入正确的新手机号'); if (bindStep.value === 3 && bindCode.value.length < 4) return toast('请输入新手机号验证码'); if (bindStep.value < 3) { bindStep.value += 1; bindCode.value = ''; codeSeconds.value = 0; return } bindVisible.value = false; logout(); uni.showToast({ title: '换绑成功，请重新登录', icon: 'none' }); setTimeout(() => uni.reLaunch({ url: '/pages/login/index?redirect=%2Fpages%2Fprofile%2Findex' }), 500) }
 const confirmSignOut = () => {
@@ -147,41 +174,20 @@ const saveHandoutDownloadRecord = (item: HandoutRecord) => {
   stored[item.id] = { downloadedAt: item.downloadedAt, downloadedVersion: item.downloadedVersion }
   uni.setStorageSync('sxb-handout-download-records', stored)
 }
-const startHandoutFileDownload = (item: HandoutRecord) => {
-  // #ifdef H5
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
-    '5 0 obj\n<< /Length 79 >>\nstream\nBT /F1 22 Tf 72 760 Td (SXB Handout Download) Tj 0 -36 Td /F1 12 Tf (Verified learning material) Tj ET\nendstream\nendobj\n',
-  ]
-  let pdf = '%PDF-1.4\n'
-  const offsets = [0]
-  objects.forEach((object) => { offsets.push(pdf.length); pdf += object })
-  const xrefOffset = pdf.length
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`
-  const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = item.title
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-  // #endif
-}
-const verifyHandoutDownload = () => {
-  if (handoutInputCode.value.trim() !== handoutVerificationCode.value) return toast('验证码不正确，请重新输入')
-  const item = activeHandout.value
-  if (!item || item.systemState === 'removed') {
-    handoutVerifyVisible.value = false
-    return toast('讲义状态已变化，请刷新后重试')
-  }
-  item.downloadedVersion = item.systemVersion
-  item.downloadedAt = new Date().toISOString().slice(0, 10)
-  saveHandoutDownloadRecord(item)
-  handoutVerifyVisible.value = false
-  startHandoutFileDownload(item)
-  toast('验证通过，讲义下载已开始')
+const verifyHandoutDownload = async () => {
+  if(handoutInputCode.value.trim()!==handoutVerificationCode.value)return toast('验证码不正确，请重新输入')
+  if(!activeHandout.value)return
+  try {
+    const result=await api(`/handouts/${activeHandout.value.id}/download`)
+    handoutVerifyVisible.value=false
+    // #ifdef H5
+    window.location.assign(result.url)
+    // #endif
+    // #ifndef H5
+    uni.downloadFile({url:result.url,success:r=>{if(r.statusCode===200)uni.openDocument({filePath:r.tempFilePath,showMenu:true});else toast('下载失败')},fail:()=>toast('下载失败')})
+    // #endif
+    await loadCenterData()
+  }catch(error){showApiError(error)}
 }
 const orderStatusLabel = (status: RightsOrder['status']) => status === 'pending' ? '待支付' : status === 'completed' ? '已完成' : '已关闭'
 const formatOrderTime = (timestamp?: number) => timestamp ? new Date(timestamp).toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-') : '—'
@@ -241,7 +247,20 @@ const selectPaymentMethod = (method: PaymentMethod) => {
   selectedPaymentMethod.value = method
   if (paymentPhase.value === 'failed') paymentPhase.value = 'select'
 }
-const finishPaymentAttempt = (item: RightsOrder) => {
+const finishPaymentAttempt = async (item: RightsOrder) => {
+  try {
+    if (selectedPaymentMethod.value !== 'wechat') throw new Error('首版仅支持微信测试支付')
+    const result = await api(`/orders/${item.no}/test-payment`, 'POST', { outcome: simulateNextPaymentFailure.value ? 'failure' : 'success' })
+    simulateNextPaymentFailure.value = false
+    orders.value = await refreshOrders()
+    await refreshRights()
+    if (result.paymentFailed) { paymentPhase.value = 'failed'; return }
+    expandedOrderNo.value = item.no
+    closeOrderDialog()
+    toast('测试支付成功，未扣款')
+  } catch (error) { paymentPhase.value = 'failed'; showApiError(error) }
+  return
+  /* The database is authoritative for order and membership state.
   if (simulateNextPaymentFailure.value) {
     simulateNextPaymentFailure.value = false
     uni.removeStorageSync('sxb-debug-next-payment-failure')
@@ -267,17 +286,19 @@ const finishPaymentAttempt = (item: RightsOrder) => {
   expandedOrderNo.value = item.no
   closeOrderDialog()
   toast('支付成功，权益已生效')
+  */
 }
 const submitPayment = (item: RightsOrder) => {
   if (paymentPhase.value === 'processing') return
   paymentPhase.value = 'processing'
   setTimeout(() => finishPaymentAttempt(item), 900)
 }
-const confirmOrderDialog = () => {
+const confirmOrderDialog = async () => {
+  try {
   if (orderDialogMode.value === 'create') {
-    const order = createRightsOrder()
-    orders.value = [order, ...orders.value]
-    persistOrders(orders.value)
+    const result = await api('/orders', 'POST', { examId: exam.value.id, product: account.level === 'vip' && !account.trial ? 'upgrade' : 'svip' })
+    orders.value = await refreshOrders()
+    const order = orders.value.find(item => item.no === result.order.id)!
     expandedOrderNo.value = order.no
     closeOrderDialog()
     switchMode('orders')
@@ -290,10 +311,12 @@ const confirmOrderDialog = () => {
     submitPayment(item)
     return
   }
-  updateOrder(item.no, { status: 'closed', backendStatus: 'closed', closeReason: '用户主动取消订单' })
+  await api(`/orders/${item.no}/cancel`, 'POST')
+  orders.value = await refreshOrders()
   expandedOrderNo.value = ''
   closeOrderDialog()
   toast('订单已取消')
+  } catch (error) { showApiError(error) }
 }
 const applyOrderDebug = (key: string) => {
   if (key === 'next-payment-failure') {
@@ -303,6 +326,8 @@ const applyOrderDebug = (key: string) => {
     return
   }
   if (key !== 'first-pending') return
+  return toast('请创建新的测试订单，不能修改历史订单状态')
+  /* Historical order state is controlled by the server.
   const now = Date.now()
   const firstOrder = sortOrders(orders.value)[0]
   if (!firstOrder) return
@@ -310,7 +335,7 @@ const applyOrderDebug = (key: string) => {
     if (item.no === firstOrder.no) {
       return {
         ...item,
-        amount: '798.00',
+        amount: '799.00',
         status: 'pending',
         backendStatus: 'pending_payment',
         createdAt: now,
@@ -331,10 +356,11 @@ const applyOrderDebug = (key: string) => {
   orderNow.value = now
   expandedOrderNo.value = firstOrder.no
   toast('第一条订单已设为待支付')
+  */
 }
 const applyAnnouncementDebug = (key: string) => {
   if (key !== 'restore-unread') return
-  unreadAnnouncementIds.value = [announcements[0], announcements[1], announcements[2], announcements[5]]
+  unreadAnnouncementIds.value = [announcements.value[0], announcements.value[1], announcements.value[2], announcements.value[5]]
     .filter(Boolean)
     .map(item => item.id)
   uni.setStorageSync('sxb-unread-announcement-ids', unreadAnnouncementIds.value)
@@ -347,13 +373,13 @@ const applyAnnouncementDebug = (key: string) => {
   <view class="center-page page safe-top">
     <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>{{ title }}</text><view></view><text v-if="mode === 'announcements'" class="top-bar-action" @tap="markAllRead">全部已读</text></view>
 
-    <view v-if="mode === 'report'" class="report-archive"><view class="report-archive-hero"><view class="archive-hero-icon"><uni-icons type="map-filled" size="29" color="#e2c476" /></view><view><text>月度学习报告</text><text>每个自然月生成一次，记录学习成果与下月计划</text></view><text>{{ monthlyReports.filter(item => item.status === 'ready').length }}份</text></view><view class="report-year"><text>2026年</text></view><view class="report-list"><view v-for="item in monthlyReports" :key="item.id" class="report-row" :class="{ generating: item.status === 'generating' }" @tap="openMonthlyReport(item)"><view class="report-month"><text>{{ String(item.month).padStart(2, '0') }}</text><text>月</text></view><view class="report-row-copy"><view><text>{{ item.year }}年{{ item.month }}月学习报告</text><text :class="item.status">{{ item.status === 'ready' ? '已生成' : '生成中' }}</text></view><view v-if="item.status === 'ready'" class="report-meta"><text>学习{{ item.metrics.studyDays }}天</text><text>{{ item.metrics.questions }}题</text><text>掌握 +{{ item.metrics.masteryGain }}%</text></view><view v-else class="generating-progress"><view><view></view></view><text>将在9月1日生成</text></view></view><uni-icons :type="item.status === 'ready' ? 'forward' : 'clock'" size="19" :color="item.status === 'ready' ? '#b99b50' : '#8792a4'" /></view></view></view>
+    <view v-if="mode === 'report'" class="report-archive"><view class="report-archive-hero"><view class="archive-hero-icon"><uni-icons type="map-filled" size="29" color="#e2c476" /></view><view><text>月度学习报告</text><text>每个自然月生成一次，记录学习成果与下月计划</text></view><text>{{ monthlyReports.filter(item => item.status === 'ready').length }}份</text></view><view class="report-year"><text>{{ new Date().getFullYear() }}年</text></view><view class="report-list"><view v-for="item in monthlyReports" :key="item.id" class="report-row" :class="{ generating: item.status === 'generating' }" @tap="openMonthlyReport(item)"><view class="report-month"><text>{{ String(item.month).padStart(2, '0') }}</text><text>月</text></view><view class="report-row-copy"><view><text>{{ item.year }}年{{ item.month }}月学习报告</text><text :class="item.status">{{ item.status === 'ready' ? '已生成' : '生成中' }}</text></view><view v-if="item.status === 'ready'" class="report-meta"><text>学习{{ item.metrics.studyDays }}天</text><text>{{ item.metrics.questions }}题</text><text>掌握 +{{ item.metrics.masteryGain }}%</text></view><view v-else class="generating-progress"><view><view></view></view><text>将在{{ item.month === 12 ? 1 : item.month + 1 }}月1日生成</text></view></view><uni-icons :type="item.status === 'ready' ? 'forward' : 'clock'" size="19" :color="item.status === 'ready' ? '#b99b50' : '#8792a4'" /></view></view></view>
 
-    <view v-else-if="mode === 'record'" class="content-block"><view class="summary-band"><view><text>18</text><text>累计学习天数</text></view><view><text>286</text><text>累计刷题</text></view><view><text>327</text><text>学习分钟</text></view></view><view class="list-card"><view v-for="item in records" :key="item.title" class="record-row"><view class="row-icon" :style="{ background: `${item.color}16` }"><uni-icons :type="item.icon" size="20" :color="item.color" /></view><view><text>{{ item.title }}</text><text>{{ item.meta }}</text></view></view></view></view>
+    <view v-else-if="mode === 'record'" class="content-block"><view class="summary-band"><view><text>{{ recordStats.days }}</text><text>累计学习天数</text></view><view><text>{{ recordStats.answers }}</text><text>累计刷题</text></view><view><text>{{ recordStats.minutes }}</text><text>学习分钟</text></view></view><view class="list-card"><view v-for="item in records" :key="item.title" class="record-row"><view class="row-icon" :style="{ background: `${item.color}16` }"><uni-icons :type="item.icon" size="20" :color="item.color" /></view><view><text>{{ item.title }}</text><text>{{ item.meta }}</text></view></view></view></view>
 
     <view v-else-if="mode === 'handouts'" class="content-block handout-block"><view class="page-note"><uni-icons type="info" size="18" color="#3569e8" /><text>下面是已经下载过的讲义记录，点击可重复下载。</text></view><view class="list-card handout-list"><view v-for="item in handouts" :key="item.id" class="handout-row" :class="`is-${handoutState(item)}`" @tap="openHandoutDownload(item)"><view class="pdf-icon">PDF</view><view class="handout-record-copy"><text>{{ item.title }}</text><text>{{ item.size }} · 下载于 {{ item.downloadedAt }} · v{{ item.downloadedVersion }}</text></view><view class="handout-row-action"><button :disabled="handoutState(item) === 'removed'" @tap.stop="openHandoutDownload(item)">{{ handoutActionLabel(item) }}</button></view></view></view></view>
 
-    <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>PRO</text><view><text>专业版</text><text>有效至 {{ exam.expiry }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in ['全科历年真题题库', '全部章节与知识点内容', '专业知识图谱', '精讲课程与配套讲义', '错题本、收藏和学习笔记', '学习计划与多端进度记录']" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><button class="primary-button" @tap="startRightsPurchase">续费或升级</button></view>
+    <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>{{ account.level.toUpperCase() }}</text><view><text>{{ account.level === 'svip' ? 'SVIP' : account.level === 'vip' ? 'VIP' : '免费版' }}</text><text>{{ account.expiresAt ? `有效至 ${new Date(account.expiresAt).toLocaleDateString()}` : '当前考试免费权益' }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in ['全科历年真题题库', '全部章节与知识点内容', '专业知识图谱', '精讲课程与配套讲义', '错题本、收藏和学习笔记', '学习计划与多端进度记录']" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><button class="primary-button" @tap="startRightsPurchase">续费或升级</button></view>
 
     <view v-else-if="mode === 'orders'" class="content-block order-block"><view class="order-tip"><uni-icons type="info" size="18" color="#5f748b" /><text>待支付订单30分钟内有效，点击订单可展开查看详情。</text></view><view class="order-list"><view v-for="item in sortedOrders" :key="item.no" class="order-item" :class="[`status-${item.status}`, { expanded: expandedOrderNo === item.no }]" @tap="toggleOrder(item.no)"><view class="order-summary"><view class="order-main"><view class="order-title-line"><text>{{ item.productName }}</text><text class="order-status">{{ orderStatusLabel(item.status) }}</text></view><text class="order-time">{{ formatOrderTime(item.createdAt) }}</text></view><view class="order-price"><text>¥{{ item.amount }}</text><uni-icons :type="expandedOrderNo === item.no ? 'up' : 'down'" size="17" color="#8995a5" /></view></view><view v-if="item.status === 'pending'" class="pending-countdown"><view class="pulse-dot"></view><text>支付剩余 {{ orderCountdown(item) }}</text></view><view v-if="expandedOrderNo === item.no" class="order-detail" @tap.stop><view class="detail-line"><text>订单编号</text><text>{{ item.no }}</text></view><view class="detail-line"><text>购买权益</text><text>{{ item.rightsName }}</text></view><view class="detail-line"><text>权益期限</text><text>{{ item.validity || '—' }}</text></view><view class="detail-line"><text>支付方式</text><text>{{ item.paymentMethod || '待选择' }}</text></view><view v-if="item.paidAt" class="detail-line"><text>支付时间</text><text>{{ formatOrderTime(item.paidAt) }}</text></view><view v-if="item.lastPaymentError" class="detail-line payment-failed-line"><text>最近支付</text><text>{{ paymentMethodLabel(item.lastPaymentMethod) }}失败 · {{ item.lastPaymentError }}</text></view><view v-if="item.closeReason" class="detail-line close-reason"><text>关闭原因</text><text>{{ item.closeReason }}</text></view><view class="detail-line total-line"><text>实付金额</text><text>¥{{ item.amount }}</text></view><view v-if="item.status === 'pending'" class="order-actions"><button class="secondary" @tap="cancelOrder(item)">取消订单</button><button @tap="continuePayment(item)">继续支付</button></view><view v-else-if="item.status === 'completed'" class="order-actions"><button class="secondary" @tap="serviceVisible = true">联系客服</button><button @tap="viewRights">查看当前权益</button></view><view v-else class="order-actions single"><button @tap="repurchase">重新购买</button></view></view></view></view></view>
 
@@ -361,7 +387,7 @@ const applyAnnouncementDebug = (key: string) => {
 
     <view v-else-if="mode === 'faq'" class="content-block"><view class="list-card fold-list faq-list"><view v-for="item in visibleFaqs" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><text>{{ item.title }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><text v-if="expanded === item.id" class="fold-content">{{ item.content }} 如仍未解决，可以从页面底部联系客服获取进一步帮助。</text></view><view v-if="visibleFaqs.length < faqs.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部问题</text></view></view>
 
-    <view v-else-if="mode === 'security'" class="content-block"><view class="list-card settings-list security-list"><view><text>登录手机号</text><text>138****6452</text></view><view><text>微信账号</text><text>已绑定</text></view><view @tap="startBind"><text>更换绑定手机号</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view class="logout-row" @tap="logoutVisible = true"><text>退出登录</text><uni-icons type="right" size="18" color="#c85056" /></view></view></view>
+    <view v-else-if="mode === 'security'" class="content-block"><view class="list-card settings-list security-list"><view><text>登录手机号</text><text>{{ maskedPhone || '未登录' }}</text></view><view><text>微信账号</text><text>尚未接入</text></view><view><text>我的推荐码</text><text>{{ me.invite_code || '-' }}</text></view><view @tap="!me.inviter_id && (inviterVisible = true)"><text>绑定推荐码</text><text>{{ me.inviter_id ? '已绑定' : '未绑定' }}</text></view><view @tap="startBind"><text>更换绑定手机号</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view class="logout-row" @tap="logoutVisible = true"><text>退出登录</text><uni-icons type="right" size="18" color="#c85056" /></view></view></view>
 
     <view v-else-if="mode === 'about'" class="about-block"><view class="brand-mark">上</view><text class="brand-name">上行宝</text><text class="brand-version">内部版 0.1</text><view class="list-card settings-list about-menu"><view @tap="switchMode('agreement')"><text>用户服务协议</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view @tap="switchMode('privacy')"><text>隐私政策</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view><text>当前版本</text><text>0.1.0</text></view></view><text class="copyright">Copyright © 2026 上行宝</text></view>
 
@@ -378,13 +404,12 @@ const applyAnnouncementDebug = (key: string) => {
     <view v-if="orderDialogVisible && orderDialogMode" class="modal-mask order-dialog-mask" @tap="paymentPhase !== 'processing' && closeOrderDialog()">
       <view class="order-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>
         <view class="order-dialog-top"><view class="order-dialog-icon"><uni-icons :type="orderDialogMode === 'cancel' ? 'closeempty' : orderDialogMode === 'pay' ? 'wallet' : 'medal'" size="28" color="#fff" /></view><view class="order-dialog-heading"><text>{{ orderDialogMode === 'pay' ? '订单支付' : orderDialogMode === 'cancel' ? '取消订单' : '创建权益订单' }}</text><text>{{ orderDialogMode === 'pay' ? '选择支付方式并完成付款' : orderDialogMode === 'cancel' ? '订单关闭后可重新选择权益' : '订单创建后30分钟内有效' }}</text></view><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
-        <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '上行宝旗舰版' }}</text><text>{{ orderDialogOrder?.rightsName || '旗舰版权益' }} · 支付成功后12个月</text></view><text>¥{{ orderDialogOrder?.amount || '798.00' }}</text></view>
+        <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '上行宝SVIP' }}</text><text>{{ orderDialogOrder?.rightsName || 'SVIP权益' }} · 以订单对应考期为准</text></view><text>¥{{ orderDialogOrder?.amount || '799.00' }}</text></view>
         <view v-if="orderDialogMode === 'pay'" class="payment-methods">
           <text>选择支付方式</text>
           <view class="payment-method-list">
             <view :class="{ active: selectedPaymentMethod === 'wechat' }" @tap="selectPaymentMethod('wechat')"><view class="pay-brand wechat">微</view><view><text>微信支付</text><text>使用微信安全支付</text></view><uni-icons :type="selectedPaymentMethod === 'wechat' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPaymentMethod === 'wechat' ? '#19a974' : '#b2bbc7'" /></view>
             <!-- #ifdef H5 -->
-            <view :class="{ active: selectedPaymentMethod === 'alipay' }" @tap="selectPaymentMethod('alipay')"><view class="pay-brand alipay">支</view><view><text>支付宝支付</text><text>跳转支付宝完成付款</text></view><uni-icons :type="selectedPaymentMethod === 'alipay' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPaymentMethod === 'alipay' ? '#1677ff' : '#b2bbc7'" /></view>
             <!-- #endif -->
           </view>
         </view>
@@ -392,6 +417,7 @@ const applyAnnouncementDebug = (key: string) => {
         <view class="order-dialog-actions"><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog">{{ orderDialogMode === 'cancel' ? '保留订单' : '暂不操作' }}</button><button :disabled="paymentPhase === 'processing'" :class="{ danger: orderDialogMode === 'cancel' }" @tap="confirmOrderDialog">{{ orderDialogMode === 'pay' ? paymentPhase === 'processing' ? '支付处理中' : paymentPhase === 'failed' ? '重新支付' : `${paymentMethodLabel(selectedPaymentMethod)} ¥${orderDialogOrder?.amount}` : orderDialogMode === 'cancel' ? '确认取消' : '确认创建' }}</button></view>
       </view>
     </view>
+    <view v-if="inviterVisible" class="modal-mask" @tap="inviterVisible = false"><view class="center-modal" @tap.stop><text class="modal-title">绑定推荐码</text><text class="modal-desc">绑定后不可更换</text><input v-model="inviterCode" class="modal-input" type="number" maxlength="12" placeholder="请输入数字推荐码" /><button class="modal-primary" :loading="inviterBusy" :disabled="inviterBusy" @tap="bindInviter">确认绑定</button><button class="modal-cancel" @tap="inviterVisible = false">取消</button></view></view>
     <DebugMenu v-if="mode === 'orders'" page="我的订单" :options="[{ key: 'first-pending', label: '第一条订单设为待支付' }, { key: 'next-payment-failure', label: '下次支付模拟失败' }]" @select="applyOrderDebug" />
     <DebugMenu v-if="mode === 'announcements'" page="公告" :options="[{ key: 'restore-unread', label: '前三条和第6条设为未读' }]" @select="applyAnnouncementDebug" />
   </view>

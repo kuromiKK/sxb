@@ -1,3 +1,4 @@
+import { writeRecord, deleteRecord } from '@/services/api'
 export type NoteSourceType = 'question' | 'knowledge' | 'course'
 
 export type NoteRecord = {
@@ -26,7 +27,7 @@ export const getNoteBySource = (sourceId: string, sourceType: NoteSourceType) =>
 
 export const getNoteById = (id: string) => getNotes().find(item => item.id === id)
 
-export const saveNoteRecord = (sourceId: string, sourceType: NoteSourceType, content: string) => {
+export const saveNoteRecord = async (sourceId: string, sourceType: NoteSourceType, content: string) => {
   const value = content.trim()
   if (!value) return undefined
   const notes = getNotes()
@@ -35,14 +36,16 @@ export const saveNoteRecord = (sourceId: string, sourceType: NoteSourceType, con
   const record: NoteRecord = existing
     ? { ...existing, content: value, updatedAt: now }
     : { id: createNoteId(), sourceId, sourceType, content: value, createdAt: now, updatedAt: now }
+  await writeRecord('note', `${sourceType}:${sourceId}`, record)
   writeNotes([...notes.filter(item => item.id !== record.id), record])
   uni.setStorageSync(legacyKey(sourceId, sourceType), value)
   return record
 }
 
-export const removeNotes = (ids: string[]) => {
+export const removeNotes = async (ids: string[]) => {
   const idSet = new Set(ids)
   const notes = getNotes()
+  for (const item of notes.filter(item => idSet.has(item.id))) await deleteRecord('note', `${item.sourceType}:${item.sourceId}`)
   notes.filter(item => idSet.has(item.id)).forEach(item => uni.removeStorageSync(legacyKey(item.sourceId, item.sourceType)))
   const remaining = notes.filter(item => !idSet.has(item.id))
   writeNotes(remaining)

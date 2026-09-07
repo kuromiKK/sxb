@@ -1,0 +1,42 @@
+{
+  "name": "sxb-platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "node --experimental-strip-types apps/api/src/main.ts",
+    "dev:admin": "vite --config apps/admin/vite.config.ts",
+    "build:admin": "vite build --config apps/admin/vite.config.ts",
+    "check": "tsc --noEmit && vue-tsc --noEmit -p apps/admin/tsconfig.json",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "seed": "node --experimental-strip-types apps/api/src/seed.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/core": "^11.1.6",
+    "@nestjs/platform-express": "^11.1.6",
+    "dotenv": "^17.2.2",
+    "element-plus": "^2.11.2",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "lucide-vue-next": "^0.468.0",
+    "pg": "^8.16.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "vue": "^3.5.21",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.1",
+    "@types/pg": "^8.15.5",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@playwright/test": "^1.55.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4",
+    "vue-tsc": "^3.0.6"
+  }
+}

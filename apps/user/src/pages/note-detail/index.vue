@@ -31,15 +31,15 @@ onLoad(options => {
   content.value = note.value?.content || ''
 })
 const back = () => backOrFallback('/pages/practice-tools/index?mode=note')
-const save = () => {
+const save = async () => {
   if (!note.value || !content.value.trim()) return uni.showToast({ title: '请填写笔记内容', icon: 'none' })
-  note.value = saveNoteRecord(note.value.sourceId, note.value.sourceType, content.value)
+  note.value = await saveNoteRecord(note.value.sourceId, note.value.sourceType, content.value)
   saved.value = true
   uni.showToast({ title: '笔记已更新', icon: 'success' })
   setTimeout(() => { saved.value = false }, 1400)
 }
 const openSource = () => source.value.url ? uni.navigateTo({ url: source.value.url }) : uni.showToast({ title: '原内容暂不可用', icon: 'none' })
-const confirmDelete = () => { if (note.value) removeNotes([note.value.id]); deleteVisible.value = false; uni.showToast({ title: '笔记已删除', icon: 'none' }); setTimeout(back, 350) }
+const confirmDelete = async () => { if (note.value) await removeNotes([note.value.id]); deleteVisible.value = false; uni.showToast({ title: '笔记已删除', icon: 'none' }); setTimeout(back, 350) }
 </script>
 
 <template>
