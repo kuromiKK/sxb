@@ -50,7 +50,7 @@ const applyPriorityDebug = (key: string) => {
 </script>
 
 <template>
-  <view class="knowledge-page page safe-top editorial-page">
+  <view class="knowledge-page page safe-top">
     <view class="knowledge-header">
       <view class="header-copy"><text class="eyebrow">KNOWLEDGE MAP</text><text class="page-title">知识图谱</text><text class="header-sub">按科目、章、节梳理每一个知识点</text></view>
       <view class="exam-countdown"><text>距离考试</text><view><text class="countdown-days">{{ exam.daysLeft }}</text><text>天</text></view></view>

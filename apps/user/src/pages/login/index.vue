@@ -54,7 +54,7 @@ const openRoute = (url: string) => tabRoutes.includes(url) ? uni.reLaunch({ url 
 </script>
 
 <template>
-  <view class="login-page safe-top editorial-page">
+  <view class="login-page safe-top">
     <button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4b5a70" /></button>
     <view class="login-brand"><view class="brand-mark"><text>上</text></view><view><text class="brand-name">上行宝</text><text class="brand-tag">让备考更有方向</text></view></view>
     <view class="login-title">欢迎回来</view><text class="login-subtitle">登录后，开启你的高效备考之旅</text>

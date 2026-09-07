@@ -78,7 +78,7 @@ const applyDebug = (key: string) => {
 </script>
 
 <template>
-  <view class="page profile-page safe-top editorial-page">
+  <view class="page profile-page safe-top">
     <view class="profile-header">
       <view class="identity"><text class="welcome">你好，</text><text class="nickname">{{ nickname }}</text><text class="identity-meta">已连续学习 {{ streakDays }} 天</text></view>
       <button class="security-button" @tap="openCenter('security')"><uni-icons type="gear" size="22" color="#5e6f88" /></button>
