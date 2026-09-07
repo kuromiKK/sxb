@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch, toRaw } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { LayoutDashboard, LibraryBig, BookOpen, GraduationCap, FileText, Users, CreditCard, Sparkles, Settings2, ScrollText, Search, Plus, Upload, Download, ArrowUpRight, ArrowRight, ChevronRight, LogOut, RefreshCw, ShieldCheck, CalendarDays, Check, X, Menu, SlidersHorizontal, ClipboardList, Bell, HelpCircle, Eye, Pencil, CircleCheck, CircleAlert, Activity } from 'lucide-vue-next'
 import { request, send } from './api'
+import AdministratorManagement from './AdministratorManagement.vue'
 
 const token=ref(sessionStorage.getItem('sxb-admin-token')||'')
 const identity=ref<any>(null)
@@ -12,7 +13,7 @@ const navigation=[
   {section:'总览',items:[{id:'dashboard',name:'工作台',icon:LayoutDashboard}]},
   {section:'教学内容',items:[{id:'exams',name:'考试与考期',icon:CalendarDays},{id:'knowledge',name:'知识点结构',icon:LibraryBig},{id:'question',name:'题库管理',icon:BookOpen},{id:'course',name:'课程管理',icon:GraduationCap},{id:'handout',name:'讲义资料',icon:FileText},{id:'article',name:'考试须知',icon:ClipboardList}]},
   {section:'用户与服务',items:[{id:'users',name:'用户管理',icon:Users},{id:'orders',name:'订单与会员',icon:CreditCard},{id:'records',name:'学习记录',icon:Activity},{id:'announcement',name:'公告管理',icon:Bell},{id:'faq',name:'常见问题',icon:HelpCircle}]},
-  {section:'系统管理',items:[{id:'ai',name:'AI 配置中心',icon:Sparkles},{id:'audit',name:'操作日志',icon:ScrollText}]}
+  {section:'系统管理',items:[{id:'administrators',name:'管理员管理',icon:ShieldCheck},{id:'roles',name:'角色管理',icon:Settings2},{id:'ai',name:'AI 配置中心',icon:Sparkles},{id:'audit',name:'操作日志',icon:ScrollText}]}
 ]
 const view=ref(location.hash.slice(1)||'dashboard')
 const currentNav=computed(()=>navigation.flatMap(g=>g.items).find(x=>x.id===view.value)||navigation[0].items[0])
@@ -30,7 +31,7 @@ const tokenNumber=(v:any)=>v===null||v===undefined?'未返回':Number(v).toLocal
 const stateColor=(s:string)=>['published','paid','success'].includes(s)?'success':['review','pending_payment','refunding'].includes(s)?'warning':['failed'].includes(s)?'danger':'info'
 async function login(){loginBusy.value=true;loginError.value='';try{const r=await send('/auth/admin',loginForm);token.value=r.token;identity.value=r.user;sessionStorage.setItem('sxb-admin-token',r.token);loginForm.password='';await load()}catch(e:any){loginError.value=e.message}finally{loginBusy.value=false}}
 async function logout(){try{await send('/auth/logout',{})}finally{token.value='';sessionStorage.removeItem('sxb-admin-token');identity.value=null}}
-function unauthorized(){token.value='';identity.value=null}
+function unauthorized(){token.value='';identity.value=null;sessionStorage.removeItem('sxb-admin-token')}
 function navigate(id:string){view.value=id;location.hash=id;mobileNav.value=false;page.value=1;search.value=''}
 function hashChange(){view.value=location.hash.slice(1)||'dashboard'}
 let revision=0
@@ -39,6 +40,7 @@ async function load(){
   const rev=++revision;busy.value=true;error.value=''
   try{
     if(!exams.value.length)exams.value=await request('/exams')
+    if(view.value==='administrators') return
     if(view.value==='dashboard')dashboard.value=await request('/admin/dashboard')
     else if(view.value==='ai'){const r=await request('/admin/ai');aiFeatures.value=r.features;prices.value=r.prices}
     else if(isContent.value){const r=await request(`/admin/content?kind=${kind.value}&search=${encodeURIComponent(search.value)}&page=${page.value}`);if(rev===revision){rows.value=r.items;total.value=r.total}}
@@ -130,7 +132,9 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
         <div class="page-heading"><div><div class="eyebrow">{{ view==='dashboard'?'WORKSPACE OVERVIEW':view==='ai'?'AI OPERATIONS':'SXB CONSOLE' }}</div><h1>{{ currentNav.name }}</h1><p v-if="view==='dashboard'">{{ new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}) }} · 内容与业务概况</p><p v-else-if="view==='ai'">模型连接、功能权限与调用用量</p><p v-else-if="view==='orders'">会员按考试独立生效 · VIP ¥599 · SVIP ¥799</p></div><div class="heading-actions"><el-tooltip content="刷新数据"><el-button circle :loading="busy" aria-label="刷新数据" @click="load"><RefreshCw :size="17" /></el-button></el-tooltip><el-button v-if="isContent" type="primary" @click="openEditor()"><Plus :size="17" />新增{{ labels[kind] }}</el-button></div></div>
         <el-alert v-if="error" type="error" :closable="false" :title="error" show-icon class="form-error" />
         <div v-loading="busy" class="view-content">
-          <template v-if="view==='dashboard'&&dashboard">
+          <AdministratorManagement v-if="view==='administrators'" :key="revision" :current-id="identity?.id" @session-reset="unauthorized" />
+          <template v-else-if="view==='roles'"><el-table :data="rows"><el-table-column prop="name" label="角色名称" width="160" /><el-table-column prop="description" label="权限范围" min-width="260" /><el-table-column label="类型" width="120"><template #default><el-tag effect="plain">系统内置</el-tag></template></el-table-column></el-table></template>
+          <template v-else-if="view==='dashboard'&&dashboard">
             <div class="metric-strip"><article><span>注册学生</span><strong>{{ dashboard.counts.users.toLocaleString() }}<small>人</small></strong><span class="metric-detail">独立账号，按考试记录权益</span><Users class="metric-icon" :size="23" /></article><article><span>题库内容</span><strong>{{ dashboard.counts.questions.toLocaleString() }}<small>题</small></strong><span class="metric-detail">{{ dashboard.counts.knowledge }} 个知识点</span><BookOpen class="metric-icon teal" :size="23" /></article><article><span>模拟支付金额</span><strong>{{ money(dashboard.counts.paid_cents/100) }}</strong><span class="metric-detail">{{ dashboard.counts.orders }} 笔测试订单 · 未实际扣款</span><CreditCard class="metric-icon amber" :size="23" /></article><article><span>AI 累计估算费用</span><strong>{{ money(dashboard.counts.ai_cost) }}</strong><span class="metric-detail">含测试调用，以中转账单为准</span><Sparkles class="metric-icon violet" :size="23" /></article></div>
             <div class="dashboard-grid"><section class="section-band"><div class="section-title"><h2>内容资源</h2><button class="text-button" @click="navigate('question')">管理题库<ArrowUpRight :size="16" /></button></div><div class="resource-list"><div v-for="item in dashboard.content" :key="item.kind"><span>{{ labels[item.kind]||item.kind }}</span><div class="resource-track"><span :style="{width:Math.max(3,item.count/Math.max(...dashboard.content.map((x:any)=>x.count))*100)+'%'}"></span></div><strong>{{ item.count }}</strong></div></div></section><section class="section-band"><div class="section-title"><h2>待办与快捷入口</h2></div><button class="quick-row" @click="navigate('question')"><span class="quick-icon"><ClipboardList :size="21" /></span><span><strong>待审核内容</strong><small>{{ dashboard.counts.drafts }} 条草稿待完善</small></span><ChevronRight :size="18" /></button><button class="quick-row" @click="navigate('ai')"><span class="quick-icon green"><Sparkles :size="21" /></span><span><strong>AI 服务配置</strong><small>10 个功能点独立配置</small></span><ChevronRight :size="18" /></button><button class="quick-row" @click="navigate('exams')"><span class="quick-icon gold"><CalendarDays :size="21" /></span><span><strong>考试日期</strong><small>初级、中级 · 暂定 5 月 31 日</small></span><ChevronRight :size="18" /></button></section></div>
             <section class="section-band activity-section"><div class="section-title"><h2>最近操作</h2><button class="text-button" @click="navigate('audit')">全部日志<ArrowUpRight :size="16" /></button></div><el-table :data="dashboard.recent" empty-text="暂无操作记录"><el-table-column prop="action" label="操作" width="200" /><el-table-column prop="target_id" label="关联记录" show-overflow-tooltip /><el-table-column label="时间" width="205"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column></el-table></section>

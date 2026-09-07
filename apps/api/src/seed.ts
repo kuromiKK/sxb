@@ -13,7 +13,7 @@ export async function seed() {
   await migrate()
   await initLearningTables()
   if (process.env.ADMIN_PHONE && process.env.ADMIN_PASSWORD) {
-    await db.query(`INSERT INTO users(id,phone,nickname,role,password_hash,invite_code) VALUES($1,$2,'最高管理员','superadmin',$3,$4) ON CONFLICT(phone) DO NOTHING`, [id(), process.env.ADMIN_PHONE, passwordHash(process.env.ADMIN_PASSWORD), String(randomInt(10000000, 99999999))])
+    await db.query(`INSERT INTO users(id,phone,nickname,role,password_hash,invite_code,account_kind) VALUES($1,$2,'最高管理员','superadmin',$3,$4,'admin') ON CONFLICT(phone,account_kind) DO NOTHING`, [id(), process.env.ADMIN_PHONE, passwordHash(process.env.ADMIN_PASSWORD), String(randomInt(10000000, 99999999))])
   }
   if (process.env.APP_MODE === 'production') return
   for (const [examId, name] of [['junior-social-worker','初级社会工作师'],['mid-social-worker','中级社会工作师']]) {

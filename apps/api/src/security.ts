@@ -31,21 +31,22 @@ export function decrypt(value: string) {
   const cipher = createDecipheriv('aes-256-gcm', key, iv); cipher.setAuthTag(tag)
   return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8')
 }
-export async function session(userId: string) {
+export async function session(userId: string, audience: 'student' | 'admin' = 'student') {
   const token = randomBytes(32).toString('hex')
-  await db.query(`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '12 hours')`, [hash(token), userId])
+  await db.query(`INSERT INTO sessions(token_hash,user_id,expires_at,audience) VALUES($1,$2,now()+interval '12 hours',$3)`, [hash(token), userId, audience])
   return token
 }
 export async function requireUser(req: Request, res: Response, next: NextFunction) {
   try {
     const token = req.headers.authorization?.replace(/^Bearer /, '') || ''
-    const { rows } = await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.invite_code,u.inviter_id,u.created_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, [hash(token)])
+    const { rows } = await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.account_kind,u.invite_code,u.inviter_id,u.created_at,s.audience FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.enabled=true AND s.audience=u.account_kind`, [hash(token)])
     if (!rows.length) fail(401, '请先登录或重新登录')
+    if (rows[0].audience === 'admin' && !req.path.startsWith('/admin/') && !['/me','/auth/logout'].includes(req.path)) fail(403, '请使用独立的前台学习账号登录')
     res.locals.user = rows[0]; next()
   } catch (e) { next(e) }
 }
 export function requireAdmin(_req: Request, res: Response, next: NextFunction) {
-  if (res.locals.user?.role !== 'superadmin') return next(Object.assign(new Error('需要最高管理员权限'), { status: 403 }))
+  if (res.locals.user?.role !== 'superadmin' || res.locals.user?.audience !== 'admin') return next(Object.assign(new Error('需要最高管理员权限'), { status: 403 }))
   next()
 }
 export async function audit(actor: string, action: string, target: string, details: any = {}) {

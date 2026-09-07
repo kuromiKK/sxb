@@ -9,6 +9,7 @@ import { contentSchema, kinds, validateContent, catalog, publishedContent } from
 import { listFeatures, saveFeature, callAI, pricePresets } from './ai.ts'
 import { template, preview, commitImport } from './imports.ts'
 import { recordLearning, reportMonths, monthlyReport } from './reports.ts'
+import { administrators } from './administrators.ts'
 
 export const api = Router()
 const phone = z.string().regex(/^1\d{10}$/,'请输入11位手机号')
@@ -17,9 +18,9 @@ api.get('/health', async (_req,res)=>{ await db.query('SELECT 1'); res.json({sta
 api.use('/auth',rateLimit({windowMs:60_000,limit:15,standardHeaders:true,legacyHeaders:false,message:{message:'请求过于频繁，请稍后重试'}}))
 api.post('/auth/admin',async(req,res)=>{
   const b=z.object({phone,password:z.string().min(1).max(200)}).parse(req.body)
-  const u=(await db.query(`SELECT * FROM users WHERE phone=$1 AND role='superadmin'`,[b.phone])).rows[0]
+  const u=(await db.query(`SELECT * FROM users WHERE phone=$1 AND account_kind='admin' AND role='superadmin' AND enabled=true`,[b.phone])).rows[0]
   if(!u || !passwordValid(b.password,u.password_hash||'')) fail(401,'手机号或密码不正确')
-  const token=await session(u.id); await audit(u.id,'admin.login',u.id)
+  const token=await session(u.id,'admin'); await db.query('UPDATE users SET last_login_at=now() WHERE id=$1',[u.id]); await audit(u.id,'admin.login',u.id)
   res.json({token,user:{id:u.id,phone:u.phone,nickname:u.nickname,role:u.role}})
 })
 api.post('/auth/code',async(req,res)=>{
@@ -37,9 +38,10 @@ api.post('/auth/phone',async(req,res)=>{
     if(!code || code.attempts>=5 || Date.parse(code.expires_at)<=Date.now()) return {error:'验证码已失效，请重新获取'}
     if(hash(b.phone+b.code)!==code.code_hash) {await c.query('UPDATE login_codes SET attempts=attempts+1 WHERE phone=$1',[b.phone]); return {error:'验证码不正确'} }
     await c.query('DELETE FROM login_codes WHERE phone=$1',[b.phone])
-    let u=(await c.query('SELECT id,phone,nickname,role FROM users WHERE phone=$1',[b.phone])).rows[0]
-    if(u?.role==='superadmin') return {error:'管理员请使用后台密码登录，测试验证码不能登录管理员'}
+    let u=(await c.query("SELECT id,phone,nickname,role,enabled FROM users WHERE phone=$1 AND account_kind='student'",[b.phone])).rows[0]
+    if(u && !u.enabled) return {error:'账号已停用，请联系客服'}
     if(!u) u=(await c.query(`INSERT INTO users(id,phone,nickname,invite_code) VALUES($1,$2,$3,$4) RETURNING id,phone,nickname,role`,[id(),b.phone,`学生${b.phone.slice(-4)}`,String(randomInt(10000000,99999999))])).rows[0]
+    await c.query('UPDATE users SET last_login_at=now() WHERE id=$1',[u.id])
     return {user:u}
   })
   if(outcome.error) fail(400,outcome.error)
@@ -55,7 +57,7 @@ api.post('/me/inviter',async(req,res)=>{
   await transaction(async c=>{
     const me=(await c.query('SELECT * FROM users WHERE id=$1 FOR UPDATE',[res.locals.user.id])).rows[0]
     if(me.inviter_id) fail(409,'已绑定邀请人，不能重复绑定')
-    const inviter=(await c.query('SELECT id FROM users WHERE invite_code=$1',[code])).rows[0]
+    const inviter=(await c.query("SELECT id FROM users WHERE invite_code=$1 AND account_kind='student'",[code])).rows[0]
     if(!inviter || inviter.id===me.id) fail(400,'推荐码无效，不能绑定自己')
     const cycle=(await c.query(`WITH RECURSIVE ancestors AS (SELECT id,inviter_id FROM users WHERE id=$1 UNION SELECT u.id,u.inviter_id FROM users u JOIN ancestors a ON u.id=a.inviter_id) SELECT id FROM ancestors WHERE id=$2`,[inviter.id,me.id])).rows
     if(cycle.length) fail(400,'不能形成循环邀请关系')
@@ -187,6 +189,8 @@ api.post('/ai/:feature',async(req,res)=>{
 })
 
 api.use('/admin',requireAdmin)
+api.use('/admin/administrators',administrators)
+api.get('/admin/roles',async(_req,res)=>res.json([{id:'superadmin',name:'最高管理员',description:'管理全部教学内容、学生、订单、AI配置和管理员账号',system:true}]))
 api.get('/admin/dashboard',async(_req,res)=>{
   const counts=(await db.query(`SELECT (SELECT count(*)::int FROM users WHERE role='student') AS users,(SELECT count(*)::int FROM content WHERE kind='question') AS questions,(SELECT count(*)::int FROM content WHERE kind='knowledge') AS knowledge,(SELECT count(*)::int FROM content WHERE status='draft') AS drafts,(SELECT count(*)::int FROM orders) AS orders,(SELECT coalesce(sum(amount_cents),0)::int FROM orders WHERE status='paid') AS paid_cents,(SELECT coalesce(sum(cost_yuan),0) FROM ai_calls) AS ai_cost`)).rows[0]
   const recent=(await db.query('SELECT action,target_id,created_at FROM audit_logs ORDER BY created_at DESC LIMIT 8')).rows
@@ -222,7 +226,7 @@ api.put('/admin/content/:id',async(req,res)=>{
   })
   await audit(res.locals.user.id,'content.save',row.id,{title:row.title,status:row.status});res.json({ok:true})
 })
-api.get('/admin/users',async(_req,res)=>res.json((await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.invite_code,u.inviter_id,u.created_at,u.is_test_data,i.nickname AS inviter,(SELECT min(paid_at) FROM orders o WHERE o.user_id=u.id) AS first_paid_at FROM users u LEFT JOIN users i ON i.id=u.inviter_id ORDER BY u.created_at DESC LIMIT 200`)).rows))
+api.get('/admin/users',async(_req,res)=>res.json((await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.invite_code,u.inviter_id,u.created_at,u.is_test_data,i.nickname AS inviter,(SELECT min(paid_at) FROM orders o WHERE o.user_id=u.id) AS first_paid_at FROM users u LEFT JOIN users i ON i.id=u.inviter_id WHERE u.account_kind='student' ORDER BY u.created_at DESC LIMIT 200`)).rows))
 api.get('/admin/orders',async(_req,res)=>{await expireOrders();res.json((await db.query(`SELECT o.*,u.phone,e.name AS exam_name FROM orders o JOIN users u ON u.id=o.user_id JOIN exams e ON e.id=o.exam_id ORDER BY o.created_at DESC LIMIT 200`)).rows)})
 api.patch('/admin/orders/:id',async(req,res)=>{
   const b=z.object({amountCents:z.number().int().min(10000).optional(),status:z.enum(['refunding','refunded','closed']).optional(),reason:z.string().trim().min(3).max(500)}).parse(req.body)
