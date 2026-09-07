@@ -1,0 +1,103 @@
+.home {
+  --pilot-ink: #24364f;
+  --pilot-muted: #5d6e83;
+  --pilot-blue: #3569e8;
+  --pilot-ease: cubic-bezier(.2, .8, .2, 1);
+
+  .exam-entry, .search-button { min-height: 44px; }
+  .search-button { min-width: 44px; }
+  .exam-entry-copy > view { font-size: 16px; font-weight: 600; }
+  .overview-title { font-size: 21px; white-space: normal; line-height: 1.4; font-weight: 700; }
+  .overview-sub { max-width: 250px; font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
+  .mastery-ring { width: 48px; height: 48px; }
+  .mastery-center { width: 38px; height: 38px; }
+  .mastery-center text, .mastery > text:last-child { font-size: 12px; }
+  .section-head { margin: 28px 0 12px; align-items: center; gap: 8px; }
+  .section-head > view { min-width: 0; }
+  .section-title { font-size: 18px; font-weight: 700; }
+  .section-subtitle { font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
+  .plan-edit { flex: none; display: flex; min-height: 44px; margin: 0; padding: 0 0 0 6px; font-size: 13px; background: transparent; font-weight: 500; }
+  .plan-board { padding: 18px; border-left-width: 3px; box-shadow: none; }
+  .remaining > text:first-child { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .remaining > text:nth-child(2), .remaining > text:last-child, .days-left > text:last-child { font-size: 13px; color: var(--pilot-muted); }
+  .days-left > text:first-child { font-size: 25px; font-weight: 700; }
+  .progress-track { height: 6px; margin: 18px 0 10px; }
+  .progress-track view { background: var(--pilot-blue); transform-origin: left; animation: pilot-home-progress 700ms var(--pilot-ease); }
+  .plan-foot { flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--pilot-muted); }
+  .plan-note { margin-top: 14px; padding: 12px; font-size: 13px; line-height: 1.7; background: #f4f7fc; color: var(--pilot-muted); }
+  .study-flow { gap: 14px; }
+  .stage { box-shadow: none; }
+  .stage-header { padding: 16px; align-items: flex-start; gap: 10px; }
+  .stage-header > view:last-child { min-width: 0; }
+  .stage-number { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 700; box-shadow: none; }
+  .stage-title { font-size: 16px; line-height: 1.5; font-weight: 600; }
+  .stage-summary { margin-top: 5px; color: var(--pilot-muted); font-size: 13px; line-height: 1.6; }
+  .action-row { padding: 15px 16px; gap: 10px; align-items: center; }
+  .action-heading { flex-wrap: wrap; gap: 4px 6px; }
+  .action-no { font-size: 12px; font-weight: 600; }
+  .action-name { font-size: 15px; font-weight: 600; white-space: normal; }
+  .action-meta { font-size: 12px; color: var(--pilot-muted); }
+  .action-description { font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
+  .action-buttons { margin: 0; }
+  .start-button { min-width: 74px; min-height: 44px; height: auto; line-height: 1.4; display: flex; align-items: center; justify-content: center; padding: 10px 8px; font-size: 13px; font-weight: 500; border-radius: 6px; }
+  .home-report-swiper { height: 410px; }
+  .home-report-card { height: 410px; padding: 16px 14px 66px; box-shadow: none; }
+  .home-report-head > view text:first-child { font-size: 16px; font-weight: 600; }
+  .home-report-head > view text:last-child { font-size: 12px; color: #b5c0cf; line-height: 1.5; }
+  .home-calendar-week { font-size: 12px; color: #b5c0cf; }
+  .home-calendar-grid { grid-auto-rows: 29px; gap: 6px; }
+  .home-calendar-grid > view { aspect-ratio: auto; font-size: 12px; border-radius: 6px; color: #c6cfdd; }
+  .home-calendar-grid > view.studied { color: #182033; }
+  .home-report-lock { top: 132px; margin: 0; padding: 24px 8px; }
+  .home-report-lock > text:nth-child(2) { font-size: 16px; }
+  .home-report-lock > text:last-child { font-size: 12px; color: #b5c0cf; }
+  .home-report-action { height: 44px; line-height: 44px; font-size: 14px; background: #e5c87f; box-shadow: none; }
+  .home-report-action.pending { background: #d9dee6; color: #536171; }
+  .report-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 6px; }
+  .report-pagination button { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0; padding: 0; border-radius: 50%; background: transparent; }
+  .report-pagination button[disabled] { opacity: .35; }
+  .report-position { color: var(--pilot-muted); min-width: 48px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .price-list { gap: 14px; }
+  .price-card { padding: 18px; background: #fff; box-shadow: none; }
+  .price-card.pro { background: #f8f9ff; }
+  .price-card.flagship { background: #1d2d43; }
+  .price-pattern { display: none; }
+  .plan-heading { padding-right: 56px; }
+  .plan-name { font-size: 18px; font-weight: 700; }
+  .plan-intro { font-size: 13px; line-height: 1.6; }
+  .price > text:first-child, .original { font-size: 14px; }
+  .price > text:nth-child(2) { font-size: 32px; font-weight: 700; }
+  .benefits { gap: 9px; }
+  .benefit-row > text { font-size: 14px; line-height: 1.5; }
+  .benefit-row.unavailable > text { color: #69788c; }
+  .flagship .benefit-row.unavailable > text { color: #a4b1c2; }
+  .benefit-check { width: 18px; height: 18px; }
+  .recommended { font-size: 12px; font-weight: 600; }
+  .plan-button { height: 46px; line-height: 46px; font-size: 15px; font-weight: 600; }
+  .home-payment-top > view:nth-child(2) text:first-child { font-size: 18px; }
+  .home-payment-top > view:nth-child(2) text:last-child, .home-payment-product > view text:last-child,
+  .home-payment-methods > view > view > view:nth-child(2) text:last-child { font-size: 13px; line-height: 1.5; color: var(--pilot-muted); }
+  .home-payment-product > view text:first-child, .home-payment-methods > text,
+  .home-payment-methods > view > view > view:nth-child(2) text:first-child { font-size: 14px; }
+  .home-payment-top > button { width: 44px; height: 44px; }
+  .home-payment-actions button { height: auto; min-height: 44px; line-height: 1.5; padding: 10px 6px; font-size: 14px; }
+  .home-payment-dialog { animation: pilot-home-dialog 280ms var(--pilot-ease); }
+  .report-access-title { font-size: 19px; }
+  .report-access-copy { font-size: 14px; }
+  .report-access-preview { flex-wrap: wrap; gap: 6px; font-size: 14px; }
+  .report-access-preview text:last-child { font-size: 12px; }
+  .report-access-primary, .report-access-cancel { height: 44px; line-height: 44px; font-size: 14px; }
+  .report-access-modal { animation: pilot-home-dialog 280ms var(--pilot-ease); }
+
+  .start-button, .plan-button, .search-button, .exam-entry, .plan-edit, .home-report-action, .report-pagination button {
+    transition: transform 150ms var(--pilot-ease), opacity 150ms ease;
+    &:active:not([disabled]) { transform: scale(.96); opacity: .85; }
+    &:focus-visible { outline: 2px solid var(--pilot-blue); outline-offset: 3px; }
+  }
+}
+@keyframes pilot-home-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes pilot-home-dialog { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .home .progress-track view, .home .home-payment-dialog, .home .report-access-modal { animation: none; }
+  .home .start-button, .home .plan-button, .home .search-button, .home .exam-entry, .home .plan-edit, .home .home-report-action, .home .report-pagination button { transition: none; transform: none !important; }
+}

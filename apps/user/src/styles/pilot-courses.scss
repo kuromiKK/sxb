@@ -1,0 +1,79 @@
+.courses-page {
+  --pilot-ink: #24364f;
+  --pilot-muted: #5d6e83;
+  --pilot-blue: #3569e8;
+  --pilot-ease: cubic-bezier(.2, .8, .2, 1);
+  .eyebrow { font-size: 12px; letter-spacing: 0; color: var(--pilot-muted); }
+  .page-title { font-size: 24px; font-weight: 700; }
+  .header-sub { font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
+  .exam-countdown { padding: 8px; }
+  .exam-countdown > text:first-child { font-size: 12px; }
+  .exam-countdown > view { font-size: 12px; }
+  .countdown-days { font-size: 24px; font-weight: 700; }
+  .access-promo { background: #26385e; padding: 16px; box-shadow: none; border-radius: 8px; }
+  .access-promo::after { display: none; }
+  .promo-head { align-items: flex-start; }
+  .promo-brand { flex: 1; min-width: 0; align-items: flex-start; }
+  .promo-brand > view:last-child { min-width: 0; }
+  .promo-icon { width: 32px; height: 32px; border-radius: 8px; }
+  .promo-kicker { font-size: 12px; color: #c5d1ec; }
+  .promo-title { font-size: 16px; line-height: 1.5; font-weight: 600; }
+  .promo-toggle { min-width: 44px; min-height: 44px; flex: none; line-height: 44px; font-size: 12px; }
+  .promo-desc { font-size: 14px; line-height: 1.7; }
+  .promo-points { gap: 8px 12px; }
+  .promo-points > view { font-size: 12px; }
+  .promo-buttons .full-button { height: 44px; line-height: 44px; font-size: 14px; font-weight: 600; background: #edc775; }
+  .promo-mini { min-height: 44px; font-size: 13px; gap: 8px; }
+  .continue-card { background: #3564cb; padding: 18px 14px; gap: 12px; margin-top: 16px; box-shadow: none; border-radius: 8px; }
+  .continue-mark { width: 42px; height: 42px; border-radius: 50%; }
+  .continue-label text:first-child { font-size: 13px; color: #fff; }
+  .continue-label text:last-child { font-size: 12px; background: rgba(0,0,0,.12); color: #fff; }
+  .continue-title { font-size: 16px; font-weight: 600; line-height: 1.6; white-space: normal; }
+  .continue-meta { font-size: 12px; line-height: 1.65; white-space: normal; color: #e0e9ff; }
+  .continue-progress { height: 4px; margin-top: 12px; }
+  .continue-progress view { background: #edc775; transform-origin: left; animation: pilot-course-progress 700ms var(--pilot-ease); }
+  .section-heading { margin: 26px 0 12px; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .section-title { font-size: 18px; font-weight: 700; }
+  .section-subtitle { font-size: 13px; color: var(--pilot-muted); line-height: 1.6; }
+  .course-count { font-size: 12px; font-weight: 500; color: var(--pilot-muted); }
+  .subject-chips { gap: 8px; }
+  .subject-chip { position: relative; min-height: 46px; padding: 10px 12px; line-height: 1.5; margin: 0; font-size: 14px; border-radius: 6px; text-align: left; gap: 6px; }
+  .subject-chip.active { background: var(--pilot-blue); border-color: var(--pilot-blue); font-weight: 600; }
+  .chapter-list { gap: 12px; animation: pilot-course-reveal 260ms var(--pilot-ease); }
+  .chapter-card { border-radius: 8px; box-shadow: none; }
+  .chapter-header { width: 100%; min-height: 64px; margin: 0; background: #fff; padding: 16px 12px; text-align: left; line-height: 1.5; border-radius: 0; }
+  .chapter-title { gap: 8px; flex: 1; align-items: flex-start; }
+  .chapter-title text:first-child { font-size: 13px; font-weight: 600; padding-top: 2px; }
+  .chapter-title text:last-child { font-size: 16px; white-space: normal; line-height: 1.5; font-weight: 600; }
+  .chapter-right { flex: none; font-size: 12px; color: var(--pilot-muted); }
+  .chapter-chevron { display: flex; transition: transform 240ms var(--pilot-ease); }
+  .chapter-chevron.open { transform: rotate(180deg); }
+  .section-list { padding: 0 12px 8px; animation: pilot-course-reveal 260ms var(--pilot-ease); }
+  .lesson-section { padding: 16px 0; }
+  .lesson-section.has-course { padding-bottom: 16px; }
+  .lesson-heading { flex-wrap: wrap; }
+  .lesson-name { flex-basis: 100%; gap: 8px; }
+  .lesson-name > text:last-child { font-size: 15px; line-height: 1.65; }
+  .lesson-no { font-size: 12px; padding-top: 3px; color: var(--pilot-muted); font-weight: 500; }
+  .no-course { font-size: 12px; color: var(--pilot-muted); }
+  .lesson-info { gap: 8px; margin-top: 12px; }
+  .lesson-info::before { display: none; }
+  .lesson-type { width: 32px; }
+  .lesson-type text { font-size: 12px; font-weight: 500; }
+  .lesson-meta { font-size: 12px; color: var(--pilot-muted); gap: 6px; line-height: 1.5; }
+  .lesson-meta .trial { color: #267589; }
+  .lesson-action, .lesson-action text { font-size: 12px; color: var(--pilot-muted); }
+  .lesson-progress { height: 4px; margin-top: 10px; }
+  .promo-body { animation: pilot-course-reveal 260ms var(--pilot-ease); }
+  .subject-chip, .continue-card, .chapter-header, .promo-toggle, .full-button, .lesson-section.has-course { cursor: pointer; transition: transform 150ms var(--pilot-ease), background-color 150ms ease; }
+  .subject-chip:active, .continue-card:active, .promo-toggle:active, .full-button:active { transform: scale(.97); }
+  .chapter-header:active, .lesson-section.has-course:active { background: #edf3ff; }
+  .subject-chip:focus-visible, .chapter-header:focus-visible, .continue-card:focus-visible, .lesson-section:focus-visible, .promo-toggle:focus-visible, .full-button:focus-visible { outline: 2px solid var(--pilot-blue); outline-offset: -3px; }
+}
+@keyframes pilot-course-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes pilot-course-reveal { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .courses-page .chapter-list, .courses-page .section-list, .courses-page .promo-body, .courses-page .continue-progress view { animation: none; }
+  .courses-page .subject-chip, .courses-page .continue-card, .courses-page .chapter-header, .courses-page .chapter-chevron, .courses-page .promo-toggle, .courses-page .full-button, .courses-page .lesson-section.has-course { transition: none; }
+  .courses-page .subject-chip:active, .courses-page .continue-card:active, .courses-page .promo-toggle:active, .courses-page .full-button:active { transform: none; }
+}

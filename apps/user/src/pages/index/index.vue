@@ -194,7 +194,7 @@ const plans: StudyPlan[] = [
 
     <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">上行宝 · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button class="trial-btn" @tap="openTrial"><text class="trial-price">¥1</text><text>体验当前考试VIP，限24小时</text><uni-icons type="arrowright" size="18" color="#fff" /></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text><text class="trial-price">¥1</text> 体验VIP内容 · 24小时</text><text>展开查看 ›</text></view></view>
 
-    <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><text class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></text></view>
+    <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><button class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></button></view>
     <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>计划进行中</text></view><text class="plan-note">系统会根据考试日期分配每日最低题量，你也可以随时调整科目、年份和错题范围，让计划更贴合自己的节奏。</text></view>
 
     <view class="section-head flow-head"><view><text class="section-title">一套完整的学习流程</text><text class="section-subtitle">这是效率更高的建议路径，也可以从任意环节直接开始</text></view></view>
@@ -220,6 +220,11 @@ const plans: StudyPlan[] = [
         </view>
       </swiper-item>
     </swiper>
+    <view v-if="visibleHomeReports.length > 1" class="report-pagination">
+      <button role="button" tabindex="0" aria-label="上一个月报" :aria-disabled="homeReportSlide === 0" :disabled="homeReportSlide === 0" @keydown.enter="homeReportSlide > 0 && homeReportSlide--" @keydown.space.prevent="homeReportSlide > 0 && homeReportSlide--" @tap="homeReportSlide > 0 && homeReportSlide--"><uni-icons type="back" size="19" color="#536987" /></button>
+      <text class="report-position" aria-live="polite">{{ homeReportSlide + 1 }} / {{ visibleHomeReports.length }}</text>
+      <button role="button" tabindex="0" aria-label="下一个月报" :aria-disabled="homeReportSlide >= visibleHomeReports.length - 1" :disabled="homeReportSlide >= visibleHomeReports.length - 1" @keydown.enter="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++" @keydown.space.prevent="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++" @tap="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++"><uni-icons type="forward" size="19" color="#536987" /></button>
+    </view>
 
     <view class="section-head"><view><text class="section-title">选择你的学习版本</text><text class="section-subtitle">权益可按备考阶段选择，SVIP包含全部服务</text></view></view>
     <view class="price-list"><view v-for="plan in plans" :key="plan.name" class="price-card" :class="plan.color"><view class="price-pattern"></view><text v-if="plan.color === 'flagship'" class="recommended">推荐版本</text><view class="plan-heading"><view class="plan-icon"><uni-icons :type="plan.icon" size="22" :color="plan.color === 'flagship' ? '#f2b04f' : plan.color === 'pro' ? '#6949df' : '#3569e8'" /></view><view><text class="plan-name">{{ plan.name }}</text><text class="plan-intro">{{ plan.intro }}</text></view></view><view class="price"><text>¥</text><text>{{ plan.price }}</text><text class="original">¥{{ plan.price * 2 }}</text></view><view class="benefits"><view v-for="(benefit, index) in benefitCatalog" :key="benefit" class="benefit-row" :class="{ unavailable: index >= plan.includedCount }"><view class="benefit-check"><uni-icons v-if="index < plan.includedCount" type="checkmarkempty" size="14" :color="plan.color === 'flagship' ? '#f2b04f' : '#fff'" /><uni-icons v-else type="closeempty" size="13" color="#a9b3c2" /></view><text>{{ benefit }}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">选择{{ plan.name }}<uni-icons type="arrowright" size="15" :color="plan.color === 'flagship' ? '#1d2d43' : '#fff'" /></button></view></view>
@@ -242,7 +247,7 @@ const plans: StudyPlan[] = [
   </view>
 </template>
 
-<style lang="scss">
+<style scoped lang="scss">
 .home { max-width: 430px; margin: 0 auto; padding-top: calc(env(safe-area-inset-top) + 22rpx); background: #f5f7fb; }
 .top-actions { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
 .exam-entry, .search-button, .text-button { border: 0; padding: 0; margin: 0; }
@@ -356,4 +361,6 @@ const plans: StudyPlan[] = [
 .action-buttons { flex-direction: row; align-items: center; margin-left: 6rpx; }
 .start-button { min-width: 100rpx; height: 40rpx; line-height: 40rpx; padding: 0 9rpx; }
 .start-button::after { display: none; }
+
+@import '@/styles/pilot-home.scss';
 </style>
