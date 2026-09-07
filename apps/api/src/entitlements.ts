@@ -47,8 +47,8 @@ userEntitlements.put<{ userId: string; examId: string }>('/:examId', async (req,
       await c.query('UPDATE manual_entitlements SET revoked=true,version=version+1,actor_id=$3,reason=$4,updated_at=now() WHERE user_id=$1 AND exam_id=$2', [userId, examId, res.locals.user.id, b.reason])
     } else {
       if (!exam.enabled) fail(400, '考试已停用，不能设置新的人工权益')
-      const cycle = (await c.query('SELECT id FROM exam_cycles WHERE id=$1 AND exam_id=$2 AND ends_at>now() FOR SHARE', [b.cycleId, examId])).rows[0]
-      if (!cycle) fail(400, '请选择该考试尚未结束的考期')
+      const cycle = (await c.query('SELECT id FROM exam_cycles WHERE exam_id=$1 AND ends_at>now() ORDER BY ends_at LIMIT 1 FOR SHARE', [examId])).rows[0]
+      if (!cycle || cycle.id !== b.cycleId) fail(400, '只能设置该考试当前统一考期的权益，请刷新后重试')
       await c.query(`INSERT INTO manual_entitlements(user_id,exam_id,cycle_id,level,actor_id,reason,first_granted_at) VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $4='free' THEN NULL ELSE now() END)
         ON CONFLICT(user_id,exam_id) DO UPDATE SET cycle_id=$3,level=$4,actor_id=$5,reason=$6,revoked=false,version=manual_entitlements.version+1,updated_at=now(),first_granted_at=coalesce(manual_entitlements.first_granted_at,CASE WHEN $4='free' THEN NULL ELSE now() END)`,
       [userId, examId, cycle.id, b.level, res.locals.user.id, b.reason])

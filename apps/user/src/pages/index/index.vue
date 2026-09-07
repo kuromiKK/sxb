@@ -7,10 +7,10 @@ import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
 import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
 import { createRightsOrder, loadOrders, persistOrders, type PaymentMethod } from '@/utils/orders'
-import { api, account, refreshRights, showApiError } from '@/services/api'
+import { api, account, learningPlan, refreshLearningPlan, refreshRights, showApiError } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
 
-const { state, exam, todayRemaining, requireLogin, login, logout } = useAppStore()
+const { state, exam, todayRemaining, refreshPlanState, requireLogin, login, logout } = useAppStore()
 const promoExpanded = ref(true)
 const rightsLevel = computed(() => account.level === 'svip' ? 'flagship' : account.level === 'vip' ? 'pro' : 'none')
 const reportAccessVisible = ref(false)
@@ -21,6 +21,7 @@ type HomeReportCard = Pick<MonthlyReport, 'id' | 'year' | 'month' | 'status'> & 
 const selectedReport = ref<HomeReportCard | null>(null)
 const homeReportSlide = ref(0)
 type StudyPlan = { name: string; icon: string; price: number; color: string; includedCount: number; intro: string }
+const uni = (globalThis as any).uni
 const purchaseVisible = ref(false)
 const purchaseProcessing = ref(false)
 const selectedPlan = ref<StudyPlan>()
@@ -151,6 +152,7 @@ const openFlagshipRights = () => {
 onShow(() => {
   state.selectedTab = 0
   void refreshRights().then(refreshMonthlyReports).catch(showApiError)
+  void refreshLearningPlan().then(refreshPlanState).catch(showApiError)
   homeReportSlide.value = 0
 })
 
@@ -195,8 +197,13 @@ const plans: StudyPlan[] = [
     <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">上行宝 · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button class="trial-btn" @tap="openTrial"><text class="trial-price">¥1</text><text>体验当前考试VIP，限24小时</text><uni-icons type="arrowright" size="18" color="#fff" /></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text><text class="trial-price">¥1</text> 体验VIP内容 · 24小时</text><text>展开查看 ›</text></view></view>
 
     <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><button class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></button></view>
-    <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>计划进行中</text></view><text class="plan-note">系统会根据考试日期分配每日最低题量，你也可以随时调整科目、年份和错题范围，让计划更贴合自己的节奏。</text></view>
+    <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>{{ learningPlan.data?.progress.isRest ? '今天休息' : todayRemaining === 0 ? '今日目标已完成' : '计划进行中' }}</text></view><text class="plan-note">按剩余题量和学习日安排，可随时修改科目、章、每日题量与休息日。</text></view>
 
+    <view v-if="learningPlan.data" class="plan-reminders">
+      <view class="plan-live-status">{{ learningPlan.data.progress.stage }} · 第 {{ learningPlan.data.progress.roundNumber }} 轮 · {{ learningPlan.data.progress.round === 'coverage' ? '覆盖学习' : '巩固复习' }}<text v-if="learningPlan.data.progress.isRest"> · 今天休息</text></view>
+      <button class="plan-continue" @tap="gated('/pages/practice-session/index?plan=1')">{{ learningPlan.data.progress.isRest ? '自由练习' : '继续计划刷题' }}<uni-icons type="right" size="16" color="#3569e8" /></button>
+      <button v-for="item in learningPlan.data.reminders" :key="item.title" class="plan-reminder" @tap="(item.requiredLevel === 'vip' && account.level === 'free') || (item.requiredLevel === 'svip' && account.level !== 'svip') ? uni.showModal({title:'会员专属内容',content:'此内容需要对应考试会员权益。',showCancel:false}) : gated(item.url)">{{ item.title }}<uni-icons type="right" size="16" color="#64748b" /></button>
+    </view>
     <view class="section-head flow-head"><view><text class="section-title">一套完整的学习流程</text><text class="section-subtitle">这是效率更高的建议路径，也可以从任意环节直接开始</text></view></view>
     <view class="study-flow"><view v-for="stage in stages" :key="stage.round" class="stage" :class="stage.tone"><view class="stage-header"><view class="stage-number">{{ stage.round }}</view><view><text class="stage-title">{{ stage.title }}</text><text class="stage-summary">{{ stage.summary }}</text></view></view><view class="action-list"><view v-for="action in stage.actions" :key="action.no" class="action-row"><view class="action-copy"><view class="action-heading"><text class="action-no">{{ action.no }}</text><text class="action-name">{{ action.name }}</text><text class="action-meta">{{ action.meta }}</text></view><text class="action-description">{{ action.description }}</text></view><view class="action-buttons"><button class="start-button" @tap="action.route ? gated(action.route) : showMessage(action.message)">立即开始</button></view></view></view></view></view>
 
@@ -363,4 +370,8 @@ const plans: StudyPlan[] = [
 .start-button::after { display: none; }
 
 @import '@/styles/pilot-home.scss';
+</style>
+
+<style scoped>
+.plan-reminders { margin-top:12px; }.plan-live-status { font-size:14px;color:#64748b;line-height:1.6; }.plan-continue,.plan-reminder { display:flex;align-items:center;justify-content:space-between;min-height:44px;margin:8px 0 0;padding:0 12px;background:#fff;color:#3569e8;font-size:15px;border-radius:6px; }.plan-reminder { color:#34465f;border-bottom:1px solid #edf0f5; }.plan-continue::after,.plan-reminder::after { display:none; }
 </style>

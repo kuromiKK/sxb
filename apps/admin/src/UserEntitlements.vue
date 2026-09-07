@@ -16,7 +16,7 @@ const cycleId = ref('')
 const reason = ref('')
 const names: Record<string, string> = { free: '免费用户', vip: 'VIP', svip: 'SVIP' }
 const date = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '无'
-const availableCycles = computed(() => data.value?.cycles.filter((c: any) => c.available) || [])
+const availableCycles = computed(() => data.value?.cycles.filter((c: any) => c.available).slice(0,1) || [])
 const selectedCycle = computed(() => availableCycles.value.find((c: any) => c.id === cycleId.value))
 let revision = 0
 watch(() => props.user?.id, () => { examId.value = props.exams[0]?.id || ''; reason.value = '' })
@@ -71,7 +71,7 @@ async function save(action: 'set' | 'restore') {
           <el-alert v-if="data.manual?.active" title="人工设置优先于订单权益，不产生支付记录。验证支付后的会员变化前，请先恢复订单权益。" type="warning" :closable="false" show-icon />
           <div class="entitlement-form-fields">
             <el-form-item label="调整为" required><el-radio-group v-model="level" :disabled="saving || !data.exam.enabled"><el-radio-button value="free">免费用户</el-radio-button><el-radio-button value="vip">VIP</el-radio-button><el-radio-button value="svip">SVIP</el-radio-button></el-radio-group></el-form-item>
-            <el-form-item label="适用考期" required><el-select v-model="cycleId" placeholder="暂无可用考期" :disabled="saving || !data.exam.enabled"><el-option v-for="cycle in availableCycles" :key="cycle.id" :label="`${cycle.year}年度 · ${date(cycle.ends_at)}结束`" :value="cycle.id" /></el-select></el-form-item>
+            <el-form-item label="当前统一考期"><span>{{ selectedCycle ? `${selectedCycle.year}年度 · ${date(selectedCycle.ends_at)}结束` : '暂无可用考期' }}</span></el-form-item>
           </div>
           <p v-if="selectedCycle" class="entitlement-term">立即生效，所选考期于 {{ date(selectedCycle.ends_at) }} 结束（北京时间）。{{ level==='svip'?'SVIP届时降为VIP，延续至下一考期结束。':'本次人工设置持续至考期结束。' }}人工权益期满后恢复按订单计算。</p>
           <el-alert v-else title="该考试暂无未结束的考期，请先在「考试与考期」中配置。" type="info" :closable="false" />

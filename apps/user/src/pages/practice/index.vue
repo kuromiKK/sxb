@@ -8,12 +8,13 @@ import { useAppStore } from '@/store/app'
 import { getPlanQuestions, loadPlan } from '@/utils/practice-plan'
 import { getWeakKnowledgePoints, type WeakPointDebugState } from '@/utils/weak-points'
 import DebugMenu from '@/components/DebugMenu.vue'
+import { learningPlan, refreshLearningPlan, showApiError } from '@/services/api'
 
-const { state, exam, requireLogin } = useAppStore()
+const { state, exam, requireLogin, todayRemaining, refreshPlanState } = useAppStore()
 const debugState = ref((uni.getStorageSync('sxb-debug-state-刷题首页') || 'normal') as string)
 const plan = computed(() => loadPlan(exam.value.id, exam.value.daysLeft))
 const planQuestions = computed(() => debugState.value === 'empty' ? [] : getPlanQuestions(plan.value))
-const planDone = computed(() => planQuestions.value.filter(item => Boolean((uni.getStorageSync('sxb-question-status') || {})[item.id])).length)
+const planDone = computed(() => learningPlan.data?.exam.id === exam.value.id ? learningPlan.data.progress.completed : 0)
 const selectedSubjectId = ref(knowledgeSubjects[0]?.id || '')
 const expandedChapterId = ref(knowledgeSubjects[0]?.chapters[0]?.id || '')
 const wrongCount = ref(0)
@@ -23,7 +24,7 @@ const wrongBadge = computed(() => wrongCount.value > 99 ? '99+' : String(wrongCo
 
 const selectedSubject = computed(() => knowledgeSubjects.find(item => item.id === selectedSubjectId.value) || knowledgeSubjects[0])
 const subjectLabel = (subject: typeof knowledgeSubjects[number]) => subject.id === 'ability' ? '初级综合' : subject.id === 'practice' ? '初级实务' : subject.name
-const remaining = computed(() => Math.max(state.todayTarget - state.todayDone, 0))
+const remaining = todayRemaining
 const planProgress = computed(() => state.todayTarget ? Math.min(Math.round(state.todayDone / state.todayTarget * 100), 100) : 0)
 const planCompleted = computed(() => debugState.value === 'completed' || (planQuestions.value.length > 0 && planDone.value >= planQuestions.value.length))
 const weakPoints = computed(() => {
@@ -35,6 +36,7 @@ const weakPoints = computed(() => {
 })
 
 onShow(() => {
+  void refreshLearningPlan().then(refreshPlanState).catch(showApiError)
   state.selectedTab = 3
   answerVersion.value++
   wrongCount.value = (uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006']).length
@@ -65,7 +67,7 @@ const applyDebug = (key: string) => { debugState.value = key }
   <view class="practice-page page safe-top">
     <view class="practice-header"><view><text class="eyebrow">PRACTICE LAB</text><text class="page-title">刷题</text><text class="header-sub">把每一道题，做成真正掌握的知识</text></view><view class="exam-badge"><text>距离考试</text><view><text>{{ exam.daysLeft }}</text><text>天</text></view></view></view>
 
-    <view class="plan-card"><view class="plan-top"><view><text class="plan-kicker">今日刷题计划</text><view class="plan-number"><text>{{ remaining }}</text><text>题</text></view><text class="plan-label">今日还需完成</text></view><view class="plan-side"><uni-icons type="calendar" size="22" color="#3569e8" /><text>目标 {{ state.todayTarget }} 题</text><text class="plan-percent">{{ planProgress }}%</text></view></view><view class="plan-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text class="plan-status">{{ planCompleted ? '计划题目已完成' : '计划进行中' }}</text></view><view class="plan-scope"><text>推荐范围</text><text>{{ planQuestions.length }} 题 · {{ plan.sources.map(source => source === 'chapter' ? '章节' : source === 'favorite' ? '收藏' : '错题').join(' + ') }}</text></view><view class="plan-actions"><button class="primary-action" @tap="continuePlan"><uni-icons type="play-filled" size="16" color="#fff" />{{ planCompleted ? '重新练习计划题目' : '继续刷题' }}</button><button class="text-action" @tap="goPlan">修改计划</button></view></view>
+    <view class="plan-card"><view class="plan-top"><view><text class="plan-kicker">今日刷题计划</text><view class="plan-number"><text>{{ remaining }}</text><text>题</text></view><text class="plan-label">今日还需完成</text></view><view class="plan-side"><uni-icons type="calendar" size="22" color="#3569e8" /><text>目标 {{ state.todayTarget }} 题</text><text class="plan-percent">{{ planProgress }}%</text></view></view><view class="plan-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text class="plan-status">{{ learningPlan.data?.progress.isRest ? '今天休息' : remaining === 0 ? '今日目标已完成' : '计划进行中' }}</text></view><view class="plan-scope"><text>推荐范围</text><text>{{ planQuestions.length }} 题 · {{ plan.sources.map(source => source === 'chapter' ? '章节' : source === 'favorite' ? '收藏' : '错题').join(' + ') }}</text></view><view class="plan-actions"><button class="primary-action" @tap="continuePlan"><uni-icons type="play-filled" size="16" color="#fff" />{{ learningPlan.data?.progress.isRest ? '自由练习' : '继续刷题' }}</button><button class="text-action" @tap="goPlan">修改计划</button></view></view>
 
     <view v-if="weakPoints.length" class="weak-card" @tap="goSession('?mode=weak')"><view class="weak-icon"><uni-icons type="fire" size="24" color="#e98a3a" /></view><view class="weak-copy"><text class="weak-title">薄弱项强化</text><text class="weak-desc">集中练习已完成但正确率低于 50% 的知识点</text><text class="weak-meta">当前有 {{ weakPoints.length }} 个薄弱知识点</text></view><uni-icons type="forward" size="20" color="#e98a3a" /></view>
 

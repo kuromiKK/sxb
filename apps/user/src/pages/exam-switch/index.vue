@@ -2,18 +2,21 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { examCategories } from '@/mock/data'
+import { refreshExamTree } from '@/services/catalog'
+import { showApiError } from '@/services/api'
 import { useAppStore } from '@/store/app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { backOrFallback } from '@/utils/navigation'
 
 const { exam, selectExam } = useAppStore()
-const activeCategory = ref(examCategories[0].id)
+const activeCategory = ref(examCategories[0]?.id || '')
+const treeVersion = ref(0)
 const keyword = ref('')
-const active = computed(() => examCategories.find(item => item.id === activeCategory.value) || examCategories[0])
-const filteredGroups = computed(() => active.value.groups.map(group => ({ ...group, exams: group.exams.filter(item => !keyword.value || `${item.name}${item.subtitle}`.includes(keyword.value)) })).filter(group => group.exams.length))
+const active = computed(() => {void treeVersion.value;return examCategories.find(item => item.id === activeCategory.value) || examCategories[0]})
+const filteredGroups = computed(() => (active.value?.groups||[]).map(group => ({ ...group, exams: group.exams.filter(item => !keyword.value || `${item.name}${item.subtitle}`.includes(keyword.value)) })).filter(group => group.exams.length))
 const choose = async (id: string) => { uni.showLoading({ title: '切换中' }); try { await selectExam(id); uni.reLaunch({ url: '/pages/index/index' }) } catch (e) { uni.showToast({ title: e instanceof Error ? e.message : '切换失败', icon: 'none' }) } finally { uni.hideLoading() } }
 const goBack = () => backOrFallback('/pages/index/index')
-onShow(() => { activeCategory.value = examCategories.find(category => category.groups.some(group => group.exams.some(item => item.id === exam.value.id)))?.id || examCategories[0].id })
+onShow(async () => {try{await refreshExamTree();treeVersion.value++;activeCategory.value = examCategories.find(category => category.groups.some(group => group.exams.some(item => item.id === exam.value.id)))?.id || examCategories[0]?.id || ''}catch(e){showApiError(e)} })
 </script>
 
 <template>

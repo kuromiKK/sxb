@@ -1,7 +1,7 @@
 import { computed, reactive } from 'vue'
 import { exam, examCategories, question } from '@/mock/data'
 import { getTodayAnsweredIds, loadPlan, savePlan, type PracticePlan } from '@/utils/practice-plan'
-import { api, token, clearSession, refreshRights, refreshPersonalData, clearPersonalCache, showApiError } from '@/services/api'
+import { api, token, learningPlan, clearSession, refreshRights, refreshPersonalData, clearPersonalCache, showApiError } from '@/services/api'
 import { refreshCatalog } from '@/services/catalog'
 
 const savedExam = uni.getStorageSync('sxb-current-exam')
@@ -22,7 +22,7 @@ const state = reactive({
 })
 
 export const useAppStore = () => {
-  const todayRemaining = computed(() => Math.max(state.todayTarget - state.todayDone, 0))
+  const todayRemaining = computed(() => learningPlan.data?.exam.id === state.currentExam.id ? learningPlan.data.progress.todayRemaining : Math.max(state.todayTarget - state.todayDone, 0))
   const submitAnswer = (index: number) => {
     state.selectedOption = index
     state.answered = true
@@ -42,9 +42,8 @@ export const useAppStore = () => {
     uni.removeStorageSync('sxb-login')
   }
   const selectExam = async (examId: string) => {
-    if (!['junior-social-worker', 'mid-social-worker'].includes(examId)) return
     const selected = examCategories.flatMap(category => category.groups.flatMap(group => group.exams)).find(item => item.id === examId)
-    if (!selected) return
+    if (!selected) throw new Error('考试不存在或已停用，请刷新后重试')
     state.currentExam = { ...exam, ...selected }
     uni.setStorageSync('sxb-current-exam', state.currentExam)
     clearPersonalCache()
@@ -64,9 +63,10 @@ export const useAppStore = () => {
   const plan = computed<PracticePlan>(() => loadPlan(state.currentExam.id, state.currentExam.daysLeft))
   const refreshPlanState = () => {
     state.currentExam = uni.getStorageSync('sxb-current-exam') || exam
-    const next = plan.value
-    state.todayTarget = next.target
-    state.todayDone = getTodayAnsweredIds(state.currentExam.id).length
+    const live = learningPlan.data?.exam.id === state.currentExam.id ? learningPlan.data : null
+    const next = live?.plan || plan.value
+    state.todayTarget = live?.progress.todayTarget ?? next.target
+    state.todayDone = live?.progress.todayDone ?? getTodayAnsweredIds(state.currentExam.id).length
   }
   const saveCurrentPlan = async (next: PracticePlan) => {
     await savePlan(next)

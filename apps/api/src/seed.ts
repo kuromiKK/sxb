@@ -20,6 +20,13 @@ export async function seed() {
     await db.query('INSERT INTO exams(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING', [examId,name])
     for (let year = 2026; year <= 2029; year++) await db.query(`INSERT INTO exam_cycles(id,exam_id,year,ends_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [`${examId}-${year}`,examId,year,`${year}-05-31T23:59:59+08:00`])
   }
+  const categories = [
+    ['social-work', null, '社会工作', 10],
+    ['social-worker-exam', 'social-work', '社会工作者考试', 10],
+  ] as const
+  for (const [categoryId, parentId, name, sort] of categories) await db.query('INSERT INTO exam_categories(id,parent_id,name,sort_order) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [categoryId, parentId, name, sort])
+  await db.query("UPDATE exams SET category_id='social-worker-exam' WHERE id IN ('junior-social-worker','mid-social-worker') AND category_id IS NULL")
+  await db.query("INSERT INTO exam_plan_configs(exam_id,prep_days,sprint_days,default_rest_days) VALUES('junior-social-worker',90,14,1),('mid-social-worker',120,14,1) ON CONFLICT(exam_id) DO NOTHING")
   const put = async (itemId: string, kind: string, title: string, payload: any, parent: string | null = null, examId: string | null = 'junior-social-worker') => db.query(`INSERT INTO content(id,exam_id,kind,parent_id,title,status,payload,source) VALUES($1,$2,$3,$4,$5,'published',$6,'demo_test') ON CONFLICT DO NOTHING`, [itemId,examId,kind,parent,title,JSON.stringify({ ...payload,isTestData: true })])
   for (const subject of knowledgeSubjects) {
     await put(subject.id, 'subject', subject.name, { ...subject, chapters: undefined })

@@ -1,0 +1,19 @@
+<script setup lang="ts">
+import { ref,computed,onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Plus,Pencil } from 'lucide-vue-next'
+import { request,send } from './api'
+const data=ref<any>({categories:[],exams:[]}), busy=ref(false), dialog=ref(false), edit=ref<any>({}), error=ref(''), kind=ref('category')
+const parents=computed(()=>data.value.categories.filter((c:any)=>!c.parent_id))
+async function load(){try{data.value=await request('/admin/exam-management')}catch(e:any){ElMessage.error(e.message)}}
+function open(row?:any,type='category'){kind.value=type;edit.value=type==='exam'?{...row,categoryId:row.category_id}:{id:row?.id||crypto.randomUUID(),name:row?.name||'',parentId:row?.parent_id||null,sortOrder:row?.sort_order||0,enabled:row?.enabled??true};error.value='';dialog.value=true}
+async function save(){busy.value=true;try{const e=edit.value;await send('/admin/exam-management/'+(kind.value==='exam'?'exams/':'categories/')+e.id,kind.value==='exam'?{name:e.name,categoryId:e.categoryId,enabled:e.enabled}:{name:e.name,parentId:e.parentId,sortOrder:e.sortOrder,enabled:e.enabled},'PUT');dialog.value=false;await load();ElMessage.success('已保存')}catch(e:any){error.value=e.message}finally{busy.value=false}}
+onMounted(load)
+</script>
+<template>
+  <section class="category-management"><div class="table-toolbar"><h2>考试分类</h2><el-button @click="open()"><Plus :size="16" />新增分类</el-button></div>
+  <el-table :data="data.categories"><el-table-column prop="name" label="名称" min-width="170"/><el-table-column label="所属一级分类" min-width="170"><template #default="{row}">{{ parents.find((c:any)=>c.id===row.parent_id)?.name||'一级分类' }}</template></el-table-column><el-table-column prop="sort_order" label="排序" width="80"/><el-table-column label="状态" width="90"><template #default="{row}">{{ row.enabled?'启用':'停用' }}</template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="open(row)"><Pencil :size="15"/>编辑</el-button></template></el-table-column></el-table>
+  <h3>考试归属</h3><el-table :data="data.exams"><el-table-column prop="name" label="考试" min-width="180"/><el-table-column label="二级分类" min-width="180"><template #default="{row}">{{ data.categories.find((c:any)=>c.id===row.category_id)?.name||'未分类' }}</template></el-table-column><el-table-column label="状态" width="90"><template #default="{row}">{{ row.enabled?'启用':'停用' }}</template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="open(row,'exam')">编辑</el-button></template></el-table-column></el-table></section>
+  <el-dialog v-model="dialog" :title="kind==='exam'?'编辑考试':'编辑分类'" width="min(520px, 94vw)" :close-on-click-modal="false"><el-form label-position="top"><el-form-item label="名称" required><el-input v-model="edit.name" maxlength="100"/></el-form-item><el-form-item :label="kind==='exam'?'所属二级分类':'所属一级分类（不选则为一级）'"><el-select v-if="kind==='exam'" v-model="edit.categoryId"><el-option v-for="c in data.categories.filter((c:any)=>c.parent_id)" :key="c.id" :label="c.name" :value="c.id"/></el-select><el-select v-else v-model="edit.parentId" clearable @clear="edit.parentId=null"><el-option v-for="c in parents.filter((c:any)=>c.id!==edit.id)" :key="c.id" :label="c.name" :value="c.id"/></el-select></el-form-item><el-form-item v-if="kind==='category'" label="排序"><el-input-number v-model="edit.sortOrder" :min="0" :max="9999"/></el-form-item><el-form-item label="启用"><el-switch v-model="edit.enabled"/></el-form-item><el-alert v-if="error" :title="error" type="error" :closable="false"/></el-form><template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="busy" @click="save">保存</el-button></template></el-dialog>
+</template>
+<style scoped>.category-management{margin-bottom:32px}.category-management h3{font-size:16px;margin:24px 0 12px}</style>

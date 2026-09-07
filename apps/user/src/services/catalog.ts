@@ -1,6 +1,10 @@
 import { knowledgeSubjects, courseCatalog, practiceQuestions, examCategories, exam } from '@/mock/data'
 import { examNotices } from '@/utils/examNotices'
 import { api, selectedExamId } from './api'
+export async function refreshExamTree() {
+  const tree = await api<any[]>('/exam-tree')
+  examCategories.splice(0,examCategories.length,...tree.map(category=>({id:category.id,name:category.name,icon:'folder',groups:category.children.map((group:any)=>({title:group.name,exams:group.exams.map((e:any)=>({id:e.id,name:e.name,subtitle:'',daysLeft:e.currentCycle?Math.max(0,Math.ceil((Date.parse(e.currentCycle.endsAt)-Date.now())/86400000)):0}))}))})))
+}
 
 export async function refreshCatalog() {
   const examId = selectedExamId()
@@ -21,8 +25,7 @@ export async function refreshCatalog() {
     Object.assign(exam, next)
     uni.setStorageSync('sxb-current-exam', next)
   }
-  examCategories.splice(1)
-  examCategories[0].groups[0].exams=exams.map(e=>({id:e.id,name:e.name,subtitle:e.name,daysLeft:(()=>{const cycle=e.cycles.find((c:any)=>Date.parse(c.endsAt)>Date.now());return cycle?Math.max(0,Math.ceil((Date.parse(cycle.endsAt)-Date.now())/86400000)):0})()}))
+  await refreshExamTree()
   uni.setStorageSync('sxb-public-announcements', data.announcements)
   uni.setStorageSync('sxb-public-faqs', data.faqs)
 }

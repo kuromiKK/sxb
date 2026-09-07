@@ -3,6 +3,19 @@ import { knowledgeSubjects, practiceQuestions, courseCatalog, exam } from '@/moc
 
 const TOKEN_KEY = 'sxb-api-token'
 export const account = reactive({ level: 'free', trial: false, expiresAt: '', examId: '', loading: false })
+export const learningPlan = reactive<{ data: any; loading: boolean }>({ data: null, loading: false })
+export async function refreshLearningPlan() {
+  if (!token()) { learningPlan.data = null; return }
+  const examId = selectedExamId(), currentToken = token()
+  learningPlan.loading = true
+  try {
+    const data = await api(`/learning-plan/${examId}`)
+    if (examId !== selectedExamId() || currentToken !== token()) return
+    learningPlan.data = data
+    uni.setStorageSync(`sxb-practice-plan-${examId}`, data.plan)
+    return data
+  } finally { learningPlan.loading = false }
+}
 export const token = () => String(uni.getStorageSync(TOKEN_KEY) || '')
 export const selectedExamId = () => String(uni.getStorageSync('sxb-current-exam')?.id || 'junior-social-worker')
 export function api<T = any>(path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', data?: any): Promise<T> {
@@ -28,6 +41,7 @@ export function clearSession() {
   clearPersonalCache()
 }
 export function clearPersonalCache() {
+  learningPlan.data = null
   const keys = uni.getStorageInfoSync().keys
   keys.filter(key => /^sxb-(favorite|note|wrong|answered|today-questions|practice-plan|rights-orders|pending-order|handout|course-progress|completed-courses|question-selection|question-status|recite|unread|knowledge-note|course-note|question-note)/.test(key)).forEach(key => uni.removeStorageSync(key))
 }
@@ -81,4 +95,5 @@ export async function refreshPersonalData() {
     point.mastery=questions.length?Math.round(questions.filter(q=>answered.get(q.id)).length/questions.length*100):0
   }
   exam.mastery=practiceQuestions.length?Math.round([...answered.values()].filter(Boolean).length/practiceQuestions.length*100):0
+  await refreshLearningPlan()
 }

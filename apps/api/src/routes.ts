@@ -11,6 +11,8 @@ import { template, preview, commitImport } from './imports.ts'
 import { recordLearning, reportMonths, monthlyReport } from './reports.ts'
 import { administrators } from './administrators.ts'
 import { userEntitlements } from './entitlements.ts'
+import { getLearningPlan, saveLearningPlan } from './learning-plan.ts'
+import { examManagement } from './exam-management.ts'
 
 export const api = Router()
 const phone = z.string().regex(/^1\d{10}$/,'请输入11位手机号')
@@ -49,10 +51,24 @@ api.post('/auth/phone',async(req,res)=>{
   res.json({token:await session(outcome.user.id),user:outcome.user})
 })
 api.get('/exams',async(_req,res)=>res.json((await db.query(`SELECT e.*,json_agg(json_build_object('id',c.id,'year',c.year,'endsAt',c.ends_at) ORDER BY c.year) AS cycles FROM exams e JOIN exam_cycles c ON c.exam_id=e.id WHERE e.enabled GROUP BY e.id ORDER BY e.id`)).rows))
+api.get('/exam-tree',async(_req,res)=>{
+  const rows=(await db.query(`SELECT c.id,c.parent_id,c.name,c.sort_order,e.id AS exam_id,e.name AS exam_name,e.enabled,
+    (SELECT json_build_object('id',ec.id,'year',ec.year,'endsAt',ec.ends_at) FROM exam_cycles ec WHERE ec.exam_id=e.id AND ec.ends_at>now() ORDER BY ec.ends_at LIMIT 1) AS current_cycle
+    FROM exam_categories c LEFT JOIN exams e ON e.category_id=c.id AND e.enabled WHERE c.enabled ORDER BY c.parent_id NULLS FIRST,c.sort_order,c.id,e.id`)).rows
+  const nodes=new Map<string,{id:string,parentId:string|null,name:string,sortOrder:number,exams:Array<{id:string,name:string,currentCycle:any}>}>(rows.map(row=>[row.id,{id:row.id,parentId:row.parent_id,name:row.name,sortOrder:row.sort_order,exams:[]}]))
+  for(const row of rows) if(row.exam_id) nodes.get(row.id)?.exams.push({id:row.exam_id,name:row.exam_name,currentCycle:row.current_cycle})
+  res.json([...nodes.values()].map(node=>({...node,children:[...nodes.values()].filter(child=>child.parentId===node.id)})).filter(node=>!node.parentId))
+})
 api.get('/catalog/:examId',async(req,res)=>res.json(await catalog(req.params.examId)))
 api.use(requireUser)
 api.post('/auth/logout',async(req,res)=>{await db.query('DELETE FROM sessions WHERE token_hash=$1',[hash(req.headers.authorization?.replace(/^Bearer /,'')||'')]);res.json({ok:true})})
 api.get('/me',async(_req,res)=>res.json(res.locals.user))
+api.get('/learning-plan/:examId',async(req,res)=>{
+  res.json(await getLearningPlan(res.locals.user.id,req.params.examId))
+})
+api.put('/learning-plan/:examId',async(req,res)=>{
+  res.json(await saveLearningPlan(res.locals.user.id,req.params.examId,req.body))
+})
 api.post('/me/inviter',async(req,res)=>{
   const code=z.object({code:z.string().regex(/^\d{6,12}$/)}).parse(req.body).code
   await transaction(async c=>{
@@ -112,6 +128,7 @@ api.get('/records/:examId',async(req,res)=>{
 api.put('/records/:examId',async(req,res)=>{
   const b=z.object({kind:z.enum(['note','favorite','plan','courseProgress','recite','announcementRead']),sourceId:text,payload:z.record(z.string(),z.any())}).parse(req.body)
   if(JSON.stringify(b.payload).length>50000) fail(400,'记录内容过长')
+  if(b.kind==='plan') fail(400,'请通过学习计划接口保存，不能直接写入计划记录')
   if(!(await db.query('SELECT id FROM exams WHERE id=$1 AND enabled',[req.params.examId])).rows.length)fail(404,'考试不存在')
   if(b.kind!=='plan') {
     const sourceId=['note','favorite'].includes(b.kind)?String(b.payload.sourceId||b.sourceId.replace(/^(question|knowledge|course):/,'')):b.sourceId
@@ -199,6 +216,10 @@ api.get('/admin/dashboard',async(_req,res)=>{
   res.json({counts,recent,content})
 })
 api.get('/admin/exams',async(_req,res)=>res.json((await db.query('SELECT e.name,c.* FROM exam_cycles c JOIN exams e ON c.exam_id=e.id ORDER BY c.year,e.id')).rows))
+api.use('/admin/exam-management',examManagement)
+api.get('/admin/exam-categories',async(_req,res)=>res.json((await db.query('SELECT c.*,count(e.id)::int AS exam_count FROM exam_categories c LEFT JOIN exams e ON e.category_id=c.id GROUP BY c.id ORDER BY c.parent_id NULLS FIRST,c.sort_order,c.id')).rows))
+api.get('/admin/exams/:id/plan-config',async(req,res)=>res.json((await db.query('SELECT exam_id AS "examId",prep_days AS "prepDays",sprint_days AS "sprintDays",default_rest_days AS "defaultRestDays",default_round AS "defaultRound" FROM exam_plan_configs WHERE exam_id=$1',[req.params.id])).rows[0] || {examId:req.params.id,prepDays:90,sprintDays:14,defaultRestDays:1,defaultRound:'coverage'}))
+api.put('/admin/exams/:id/plan-config',async(req,res)=>{const b=z.object({prepDays:z.number().int().min(1).max(365),sprintDays:z.number().int().min(1).max(90),defaultRestDays:z.number().int().min(0).max(3),defaultRound:z.enum(['coverage','consolidation'])}).strict().parse(req.body);if(!(await db.query('SELECT id FROM exams WHERE id=$1',[req.params.id])).rows.length)fail(404,'考试不存在');await db.query(`INSERT INTO exam_plan_configs(exam_id,prep_days,sprint_days,default_rest_days,default_round,actor_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(exam_id) DO UPDATE SET prep_days=$2,sprint_days=$3,default_rest_days=$4,default_round=$5,actor_id=$6,updated_at=now()`,[req.params.id,b.prepDays,b.sprintDays,b.defaultRestDays,b.defaultRound,res.locals.user.id]);await audit(res.locals.user.id,'exam.plan_config',req.params.id,b);res.json({ok:true})})
 api.put('/admin/exams/:id',async(req,res)=>{
   const b=z.object({endsAt:z.iso.datetime({offset:true})}).parse(req.body)
   const row=(await db.query('SELECT * FROM exam_cycles WHERE id=$1',[req.params.id])).rows[0]

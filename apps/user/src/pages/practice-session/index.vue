@@ -4,18 +4,19 @@ import { onHide, onLoad, onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { knowledgeSubjects, practiceQuestions, type PracticeQuestion } from '@/mock/data'
 import { useAppStore } from '@/store/app'
-import { getAnswered, getPlanQuestions, loadPlan, recordToday, saveAnswered } from '@/utils/practice-plan'
+import { getAnswered, recordToday, saveAnswered } from '@/utils/practice-plan'
 import { getWeakQuestions, type WeakPointDebugState } from '@/utils/weak-points'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
-import { api, showApiError, writeRecord } from '@/services/api'
+import { api, refreshLearningPlan, showApiError, writeRecord } from '@/services/api'
 
 type SessionMode = 'normal' | 'weak' | 'wrong' | 'favorite' | 'recite'
 type AnswerState = 'correct' | 'wrong'
 const { state, exam, requireLogin } = useAppStore()
 const mode = ref<SessionMode>('normal')
-const questions = ref<PracticeQuestion[]>(practiceQuestions)
+const questions = ref<PracticeQuestion[]>([])
+const loadingQuestions = ref(true)
 const currentIndex = ref(0)
 const selected = ref<number[]>([])
 const answered = ref(false)
@@ -37,7 +38,7 @@ const favoriteIds = ref<string[]>(getFavoriteIds())
 
 const current = computed(() => questions.value[currentIndex.value] || practiceQuestions[0])
 const progress = computed(() => questions.value.length ? Math.round((currentIndex.value + 1) / questions.value.length * 100) : 0)
-const isFavorite = computed(() => favoriteIds.value.includes(current.value.id))
+const isFavorite = computed(() => current.value ? favoriteIds.value.includes(current.value.id) : false)
 const isCorrect = computed(() => answered.value && selected.value.length === current.value.answer.length && selected.value.every(item => current.value.answer.includes(item)))
 const correctAnswer = computed(() => current.value.answer.map(index => String.fromCharCode(65 + index)).join('、'))
 const selectedAnswer = computed(() => selected.value.length ? selected.value.map(index => String.fromCharCode(65 + index)).join('、') : '未作答')
@@ -73,8 +74,9 @@ const completionKind = computed(() => {
   if (!nextSectionRecord.value) return 'subject'
   return nextSectionRecord.value.chapter.id === record.chapter.id ? 'section' : 'chapter'
 })
-const completionTitle = computed(() => knowledgePointSession.value ? '本知识点练习已完成' : ({ plan: '本次计划已完成', section: '本节练习已完成', chapter: '本章练习已完成', subject: '本科目练习已完成' }[completionKind.value]))
-const completionDesc = computed(() => knowledgePointSession.value ? '已完成本知识点当前收录的全部题目，可以返回知识点继续学习。' : ({ plan: '按照当前学习计划的范围，已完成本轮全部题目。', section: '太棒了，继续保持节奏，下一节还有新的题目等你完成。', chapter: '本章的所有节都已完成，可以进入下一章继续练习。', subject: '当前科目的练习已经全部完成，可以开始第二轮巩固。' }[completionKind.value]))
+const sessionDone = computed(() => questions.value.filter(q => sessionSelections.value[q.id]).length)
+const completionTitle = computed(() => knowledgePointSession.value ? '本知识点练习已完成' : ({ plan: '本次练习结束', section: '本节练习已完成', chapter: '本章练习已完成', subject: '本科目练习已完成' }[completionKind.value]))
+const completionDesc = computed(() => knowledgePointSession.value ? '已完成本知识点当前收录的全部题目，可以返回知识点继续学习。' : ({ plan: `本次作答 ${sessionDone.value} / ${questions.value.length} 题。未答题目会保留在计划中，整轮完成后自动进入巩固。`, section: '太棒了，继续保持节奏，下一节还有新的题目等你完成。', chapter: '本章的所有节都已完成，可以进入下一章继续练习。', subject: '当前科目的练习已经全部完成，可以开始第二轮巩固。' }[completionKind.value]))
 const nextLabel = computed(() => isLast.value ? (knowledgePointSession.value ? '完成练习' : '完成本节') : '下一题')
 const returnLabel = computed(() => knowledgePointSession.value ? '返回知识点' : sessionSource.value === '错题本' ? '返回错题本' : sessionSource.value === '我的收藏' ? '返回收藏' : sessionSource.value === '智能刷题' ? '返回学习计划' : '返回刷题首页')
 
@@ -109,7 +111,7 @@ const createSectionQuestion = (sectionId: string): PracticeQuestion | undefined 
   return undefined
 }
 
-onLoad((options?: Record<string, string>) => {
+onLoad(async (options?: Record<string, string>) => {
   if (!requireLogin(`/pages/practice-session/index${options ? `?${new URLSearchParams(options as Record<string, string>).toString()}` : ''}`)) return
   options = options || {}
   if (options.returnUrl) returnUrl.value = decodeURIComponent(options.returnUrl)
@@ -121,7 +123,13 @@ onLoad((options?: Record<string, string>) => {
   const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
   const favoriteQuestionIds = favoriteIds.value.filter(id => practiceQuestions.some(q => q.id === id))
   let list = practiceQuestions
-  if (options.plan) list = getPlanQuestions(loadPlan(exam.value.id, exam.value.daysLeft))
+  if (options.plan) {
+    try {
+      const live = await refreshLearningPlan()
+      const queue: string[] = live?.questionIds || []
+      list = queue.map(id => practiceQuestions.find(q => q.id === id)).filter(Boolean) as PracticeQuestion[]
+    } catch (error) { showApiError(error); list=[] }
+  }
   else if (options.knowledgePointId) list = practiceQuestions.filter(item => item.knowledgePointId === options.knowledgePointId)
   else if (options.sectionId) {
     list = practiceQuestions.filter(item => item.sectionId === options.sectionId)
@@ -139,6 +147,7 @@ onLoad((options?: Record<string, string>) => {
   if (debugState.value === 'empty') list = []
   if (debugState.value === 'completed' && list.length) currentIndex.value = list.length - 1
   questions.value = list
+  loadingQuestions.value = false
   const storedAnswers = getAnswered(exam.value.id)
   Object.keys(storedAnswers).forEach(id => { answerStates.value[id] = storedAnswers[id] })
   if (options.questionId) currentIndex.value = Math.max(questions.value.findIndex(item => item.id === options.questionId), 0)
@@ -204,6 +213,7 @@ const submitAnswer = async () => {
   const nextWrongIds = result === 'correct' ? wrongIds.filter(id => id !== current.value.id) : Array.from(new Set([...wrongIds, current.value.id]))
   uni.setStorageSync('sxb-wrong-questions', nextWrongIds)
   recordDailyQuestion()
+  await refreshLearningPlan()
   } catch (error) { showApiError(error) } finally { submitting.value = false }
 }
 const markRecite = async (remembered: boolean) => {
@@ -233,6 +243,7 @@ const continueAfterCompletion = () => {
   uni.redirectTo({ url: `/pages/practice-session/index?sectionId=${encodeURIComponent(nextRecord.section.id)}&returnUrl=${encodeURIComponent(returnUrl.value)}` })
 }
 const toggleFavorite = async () => {
+  if (!questions.value.length) return
   await setFavorite(current.value.id, 'question', !isFavorite.value)
   favoriteIds.value = isFavorite.value ? favoriteIds.value.filter(id => id !== current.value.id) : [...favoriteIds.value, current.value.id]
   uni.showToast({ title: isFavorite.value ? '已收藏题目' : '已取消收藏', icon: 'none' })
@@ -249,14 +260,14 @@ const applyDebug = (key: string) => { debugState.value = key; if (key === 'empty
 </script>
 
 <template>
-  <view class="session-page page safe-top"><view class="session-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-title"><text>{{ pageTitle }}</text><text>本次刷题 {{ elapsed }}</text></view><button class="favorite-button" :class="{ active: isFavorite }" @tap="toggleFavorite"><uni-icons :type="isFavorite ? 'star-filled' : 'star'" size="21" :color="isFavorite ? '#e98a3a' : '#8a96a7'" /></button></view><view v-if="!questions.length" class="empty-session"><uni-icons type="checkmarkempty" size="30" color="#1a9a7b" /><text>{{ knowledgePointSession ? '本知识点无题' : isPlanSession ? '当前计划范围暂无可练题目' : '本节暂无可练题目' }}</text><text>{{ knowledgePointSession ? '当前知识点暂未收录练习题，请返回继续学习其他内容' : isPlanSession ? '请回到学习计划调整科目、年份或题目来源' : '当前章节题库正在补充，请返回选择其他章节' }}</text><button @tap="back">返回上一页</button></view><template v-else><view class="progress-head"><text>第 {{ currentIndex + 1 }} / {{ questions.length }} 题</text><text>{{ progress }}%</text></view><view class="progress-track"><view :style="{ width: `${progress}%` }"></view></view><view class="question-params"><text>{{ current.typeName }}</text><text>{{ current.year }}年真题</text><text>{{ current.source }}</text><text>{{ current.difficulty }}</text></view>
+  <view class="session-page page safe-top"><view class="session-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-title"><text>{{ pageTitle }}</text><text>本次刷题 {{ elapsed }}</text></view><button class="favorite-button" :class="{ active: isFavorite }" @tap="toggleFavorite"><uni-icons :type="isFavorite ? 'star-filled' : 'star'" size="21" :color="isFavorite ? '#e98a3a' : '#8a96a7'" /></button></view><view v-if="loadingQuestions" class="empty-session" role="status"><text>正在加载计划题目</text></view><view v-else-if="!questions.length" class="empty-session"><uni-icons type="checkmarkempty" size="30" color="#1a9a7b" /><text>{{ knowledgePointSession ? '本知识点无题' : isPlanSession ? '当前计划范围暂无可练题目' : '本节暂无可练题目' }}</text><text>{{ knowledgePointSession ? '当前知识点暂未收录练习题，请返回继续学习其他内容' : isPlanSession ? '请回到学习计划选择已收录题目的科目和章' : '当前章节题库正在补充，请返回选择其他章节' }}</text><button @tap="back">返回上一页</button></view><template v-else><view class="progress-head"><text>第 {{ currentIndex + 1 }} / {{ questions.length }} 题</text><text>{{ progress }}%</text></view><view class="progress-track"><view :style="{ width: `${progress}%` }"></view></view><view class="question-params"><text>{{ current.typeName }}</text><text>{{ current.year }}年真题</text><text>{{ current.source }}</text><text>{{ current.difficulty }}</text></view>
 
     <template v-if="mode === 'recite'"><view class="recite-card"><view class="recite-label"><uni-icons type="flag" size="18" color="#6949df" /><text>挖空回忆</text></view><text class="question-stem">{{ current.stem }}</text><view class="blank-area"><text v-for="(_, index) in current.answer" :key="index">第 {{ index + 1 }} 处答案</text></view><button v-if="!reciteRevealed" class="reveal-button" @tap="reciteRevealed = true">查看答案</button><view v-else class="recite-answer"><text>参考答案</text><text>{{ current.answer.map(index => current.options[index]).join('；') }}</text><text>{{ current.explanation }}</text><view class="recite-actions"><button @tap="markRecite(false)">还没记住</button><button @tap="markRecite(true)">记住了</button></view></view></view></template>
 
     <template v-else><text class="question-stem">{{ current.stem }}</text><view class="options"><view v-for="(option, index) in current.options" :key="option" class="option" :class="optionClass(index)" @tap="chooseOption(index)"><text class="option-letter">{{ String.fromCharCode(65 + index) }}</text><text class="option-text">{{ option }}</text><uniIcons v-if="answered && current.answer.includes(index)" type="checkmarkempty" size="21" color="#1a9a7b" /><uniIcons v-else-if="answered && selected.includes(index)" type="closeempty" size="21" color="#d45d63" /></view></view><button v-if="current.type === 'multiple' && !answered && selected.length" class="submit-button" @tap="submitAnswer">确认答案</button><view v-if="answered" class="analysis-card" :class="isCorrect ? 'correct' : 'wrong'"><view class="result-line"><view class="result-icon"><uni-icons :type="isCorrect ? 'checkmarkempty' : 'closeempty'" size="20" :color="isCorrect ? '#1a9a7b' : '#d45d63'" /></view><view><text>{{ isCorrect ? '回答正确' : '回答错误' }}</text><text>你的答案：{{ selectedAnswer }}　正确答案：{{ correctAnswer }}</text></view></view><view class="analysis-content"><text class="analysis-title">答案解析</text><text class="analysis-text">{{ current.explanation }}</text></view></view></template>
     <view class="knowledge-float" @tap="openKnowledge"><view class="knowledge-link"><view><text>{{ knowledgeLine }}</text><text class="knowledge-title">{{ current.knowledgePointId.replace('kp-', '').replaceAll('-', '.') }} {{ current.knowledgePointTitle }}</text></view><uni-icons type="forward" size="20" color="#7e8ca0" /></view></view><view class="session-bottom"><button :disabled="currentIndex === 0" @tap="previous"><uni-icons type="back" size="18" color="#526783" />上一题</button><button class="note-bottom" @tap="openNote"><uni-icons type="compose" size="18" color="#7655df" />记笔记</button><button @tap="next">{{ nextLabel }}<uni-icons type="forward" size="18" color="#526783" /></button></view></template>
 
-    <view v-if="completionVisible && questions.length" class="completion-mask"><view class="completion-panel"><view class="completion-icon"><uni-icons type="checkmarkempty" size="28" color="#fff" /></view><text class="completion-title">{{ completionTitle }}</text><text class="completion-desc">{{ completionDesc }}</text><view class="completion-stats"><view><text>{{ questions.length }}</text><text>本组题目</text></view><view><text>{{ progress }}%</text><text>完成进度</text></view></view><button v-if="!knowledgePointSession && completionKind === 'plan'" class="completion-primary" @tap="continueAfterCompletion">重新练习计划题目</button><button v-else-if="!knowledgePointSession && nextSectionRecord" class="completion-primary" @tap="continueAfterCompletion">{{ completionKind === 'chapter' ? '进入下一章' : '继续下一节' }}</button><button class="completion-secondary" @tap.stop="back">{{ returnLabel }}</button></view></view>
+    <view v-if="completionVisible && questions.length" class="completion-mask"><view class="completion-panel"><view class="completion-icon"><uni-icons type="checkmarkempty" size="28" color="#fff" /></view><text class="completion-title">{{ completionTitle }}</text><text class="completion-desc">{{ completionDesc }}</text><view class="completion-stats"><view><text>{{ questions.length }}</text><text>本组题目</text></view><view><text>{{ isPlanSession ? Math.round(sessionDone / Math.max(questions.length, 1) * 100) : progress }}%</text><text>作答进度</text></view></view><button v-if="!knowledgePointSession && completionKind === 'plan'" class="completion-primary" @tap="continueAfterCompletion">继续学习计划</button><button v-else-if="!knowledgePointSession && nextSectionRecord" class="completion-primary" @tap="continueAfterCompletion">{{ completionKind === 'chapter' ? '进入下一章' : '继续下一节' }}</button><button class="completion-secondary" @tap.stop="back">{{ returnLabel }}</button></view></view>
     <DebugMenu page="题目内容页" :options="[{ key: 'normal', label: '正常答题' }, { key: 'empty', label: '暂无题目' }, { key: 'completed', label: '最后一题完成' }]" @select="applyDebug" />
     <view v-if="noteVisible" class="drawer-mask" @tap="noteVisible = false"><view class="note-drawer" @tap.stop><view class="drawer-handle"></view><view class="note-head"><text>题目笔记</text><button @tap="noteVisible = false"><uni-icons type="closeempty" size="20" color="#64758b" /></button></view><text class="note-question">{{ current.stem }}</text><textarea v-model="noteText" maxlength="1000" placeholder="记录解题思路、易错原因或复习提醒" placeholder-class="note-placeholder" /><view class="note-foot"><text>{{ noteText.length }} / 1000</text><button @tap="saveNote">保存笔记</button></view></view></view>
   </view>
