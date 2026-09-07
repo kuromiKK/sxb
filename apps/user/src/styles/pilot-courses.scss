@@ -36,9 +36,12 @@
   .section-title { font-size: 18px; font-weight: 700; }
   .section-subtitle { font-size: 13px; color: var(--pilot-muted); line-height: 1.6; }
   .course-count { font-size: 12px; font-weight: 500; color: var(--pilot-muted); }
-  .subject-chips { gap: 8px; }
-  .subject-chip { position: relative; min-height: 46px; padding: 10px 12px; line-height: 1.5; margin: 0; font-size: 14px; border-radius: 6px; text-align: left; gap: 6px; }
-  .subject-chip.active { background: var(--pilot-blue); border-color: var(--pilot-blue); font-weight: 600; }
+  .subject-scroll { width: 100%; white-space: nowrap; }
+  .subject-chips { display: inline-flex; flex-wrap: nowrap; gap: 20px; min-width: 100%; border-bottom: 1px solid #e3e9f2; }
+  .subject-chip { position: relative; flex: none; min-height: 44px; height: 44px; padding: 0 2px; line-height: 1.5; margin: 0; font-size: 13px; border: 0; border-radius: 0; white-space: nowrap; background: transparent; text-align: left; gap: 5px; }
+  .subject-chip::after { display: none; }
+  .subject-chip.active { background: transparent; color: var(--pilot-blue); border: 0; font-weight: 600; }
+  .subject-chip.active::before { content: ''; position: absolute; bottom: 0; left: 2px; right: 2px; height: 2px; border-radius: 2px; background: var(--pilot-blue); }
   .chapter-list { gap: 12px; animation: pilot-course-reveal 260ms var(--pilot-ease); }
   .chapter-card { border-radius: 8px; box-shadow: none; }
   .chapter-header { width: 100%; min-height: 64px; margin: 0; background: #fff; padding: 16px 12px; text-align: left; line-height: 1.5; border-radius: 0; }

@@ -26,7 +26,7 @@ try {
     return { width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, background: s.backgroundImage }
   })
   const protectedMetrics = await promoMetrics()
-  for (const size of [{ width: 375, height: 812 }, { width: 393, height: 852 }, { width: 430, height: 932 }, { width: 768, height: 1024 }, { width: 932, height: 430 }]) {
+  for (const size of [{ width: 375, height: 812 }, { width: 393, height: 852 }, { width: 430, height: 932 }, { width: 768, height: 1024 }, { width: 932, height: 430 }, { width: 1517, height: 1272 }]) {
     await page.setViewportSize(size)
     for (const [route, root] of [['/', '.home'], ['/pages/courses/index', '.courses-page']]) {
       await page.goto(`${base}/#${route}`)
@@ -38,9 +38,39 @@ try {
       assert.deepEqual(tooSmall, [], `${root} small touch targets`)
       const font = await page.locator(root === '.home' ? '.action-name' : '.lesson-name > uni-text:last-child').first().evaluate(el => getComputedStyle(el).fontSize)
       assert.equal(font, '15px', 'Item titles stay readable independently of width')
+      if (root === '.home') {
+        assert.equal(await page.locator('.plan-edit').evaluate(el => getComputedStyle(el, '::after').display), 'none')
+        const face = await page.locator('.start-button').first().evaluate(el => ({ background: getComputedStyle(el).backgroundColor, inset: getComputedStyle(el, '::before').top }))
+        assert.equal(face.background, 'rgba(0, 0, 0, 0)')
+        assert.equal(face.inset, '8px')
+      } else {
+        const tops = await page.locator('.subject-chip').evaluateAll(els => els.map(el => el.getBoundingClientRect().top))
+        assert(tops.every(top => Math.abs(top - tops[0]) < 1), 'Subjects must stay on one row')
+      }
       await page.screenshot({ path: `.local/qa/pilot/${root.slice(1)}-${size.width}.png`, fullPage: true })
     }
   }
+  await page.setViewportSize({ width: 430, height: 932 })
+  await page.setViewportSize({ width: 375, height: 812 })
+  // The current exam has two short subjects that fit. Add a DOM-only third
+  // label to verify the native scroll container when future exams have more.
+  await page.locator('.subject-chips').evaluate(el => {
+    const extra = el.lastElementChild.cloneNode(true)
+    extra.removeAttribute('id')
+    extra.textContent = '测试科目：法规与政策'
+    el.appendChild(extra)
+  })
+  await page.locator('.subject-scroll').scrollIntoViewIfNeeded()
+  const subjectBox = await page.locator('.subject-scroll').boundingBox()
+  const subjectCDP = await page.context().newCDPSession(page)
+  const subjectY = subjectBox.y + 22
+  const subjectXBefore = await page.locator('.subject-chip').first().evaluate(el => el.getBoundingClientRect().x)
+  await subjectCDP.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 320, y: subjectY }] })
+  for (const x of [280, 230, 180, 130, 70]) await subjectCDP.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: subjectY }] })
+  await subjectCDP.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await page.waitForTimeout(350)
+  assert(await page.locator('.subject-chip').first().evaluate(el => el.getBoundingClientRect().x) < subjectXBefore - 5, 'Subjects respond to horizontal touch swipe')
+  await page.locator('.subject-chips').evaluate(el => el.lastElementChild.remove())
   await page.setViewportSize({ width: 430, height: 932 })
   const firstChapter = page.locator('.chapter-header').first()
   await firstChapter.click()
@@ -72,5 +102,5 @@ try {
     await expect(page.locator('.report-position')).toHaveText('2 / 2')
   }
   assert.deepEqual(errors, [])
-  console.log('Pilot passed: protected promo unchanged, 5 viewports, stable typography, touch sizes, chapter/subject switching, report buttons and touch swipe, reduced motion, no page errors.')
+  console.log('Pilot passed: protected promo unchanged, 6 viewports, compact button faces, borderless edit action, single-row subject touch swipe, chapter/subject switching, report buttons and swipe, reduced motion, no page errors.')
 } finally { await browser.close() }

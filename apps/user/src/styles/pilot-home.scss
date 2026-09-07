@@ -17,6 +17,8 @@
   .section-title { font-size: 18px; font-weight: 700; }
   .section-subtitle { font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
   .plan-edit { flex: none; display: flex; min-height: 44px; margin: 0; padding: 0 0 0 6px; font-size: 13px; background: transparent; font-weight: 500; }
+  .plan-edit, .plan-edit::after { border: 0; box-shadow: none; }
+  .plan-edit::after { display: none; }
   .plan-board { padding: 18px; border-left-width: 3px; box-shadow: none; }
   .remaining > text:first-child { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .remaining > text:nth-child(2), .remaining > text:last-child, .days-left > text:last-child { font-size: 13px; color: var(--pilot-muted); }
@@ -39,7 +41,12 @@
   .action-meta { font-size: 12px; color: var(--pilot-muted); }
   .action-description { font-size: 13px; line-height: 1.65; color: var(--pilot-muted); }
   .action-buttons { margin: 0; }
-  .start-button { min-width: 74px; min-height: 44px; height: auto; line-height: 1.4; display: flex; align-items: center; justify-content: center; padding: 10px 8px; font-size: 13px; font-weight: 500; border-radius: 6px; }
+  .start-button { position: relative; isolation: isolate; min-width: 64px; min-height: 44px; height: 44px; line-height: 1.4; display: flex; align-items: center; justify-content: center; padding: 0 8px; font-size: 12px; font-weight: 500; border: 0; border-radius: 0; background: transparent; color: #3569e8; }
+  .purple .start-button { background: transparent; color: #6949df; }
+  .orange .start-button { background: transparent; color: #a95b1c; }
+  .pink .start-button { background: transparent; color: #b43d6a; }
+  // Compact visible face, with a separate 44px touch target.
+  .start-button::before { content: ''; position: absolute; z-index: -1; inset: 8px 0; border-radius: 4px; background: currentColor; opacity: .08; pointer-events: none; }
   .home-report-swiper { height: 410px; }
   .home-report-card { height: 410px; padding: 16px 14px 66px; box-shadow: none; }
   .home-report-head > view text:first-child { font-size: 16px; font-weight: 600; }
