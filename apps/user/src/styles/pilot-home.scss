@@ -4,6 +4,17 @@
   --pilot-blue: #3569e8;
   --pilot-ease: cubic-bezier(.2, .8, .2, 1);
 
+  .promo-head > view { padding-right: 48px; min-width: 0; }
+  .promo-kicker { font-size: 12px; }
+  .promo-title { font-size: 16px; line-height: 1.55; font-weight: 600; }
+  .promo-desc { font-size: 14px; line-height: 1.7; }
+  .promo-stats text:first-child { font-size: 20px; font-weight: 700; }
+  .promo-stats text:last-child, .promo-tags text { font-size: 12px; }
+  .collapse-btn { font-size: 12px; min-width: 40px; }
+  .trial-btn { height: auto; min-height: 44px; line-height: 1.5; padding: 8px; font-size: 14px; font-weight: 600; }
+  .trial-price { font-size: 17px; }
+  .promo-mini { gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 1.6; }
+
   .exam-entry, .search-button { min-height: 44px; }
   .search-button { min-width: 44px; }
   .exam-entry-copy > view { font-size: 16px; font-weight: 600; }

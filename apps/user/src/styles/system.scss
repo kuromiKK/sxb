@@ -1,0 +1,26 @@
+page, .page, .login-page, .search-page, .report-page {
+  --sxb-text-meta: 12px;
+  --sxb-text-small: 13px;
+  --sxb-text-body: 14px;
+  --sxb-text-item: 15px;
+  --sxb-text-title: 16px;
+  --sxb-text-heading: 18px;
+  --sxb-text-page: 24px;
+  --sxb-text-display: 28px;
+  --sxb-ink: #24364f;
+  --sxb-muted: #5d6e83;
+  --sxb-blue: #3569e8;
+  --sxb-motion: cubic-bezier(.2,.8,.2,1);
+}
+
+/* Component styles own geometry; these rules only define interaction states. */
+button { transition: opacity 150ms ease, transform 150ms var(--sxb-motion); }
+button:active:not([disabled]) { opacity: .82; }
+button:focus-visible, [role='button']:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #3569e8; outline-offset: 2px; }
+button[disabled] { cursor: default; }
+button::after { border: 0; }
+.muted { color: #5d6e83; font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none !important; }
+}

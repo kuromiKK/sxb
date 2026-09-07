@@ -1,0 +1,27 @@
+// Imported into each page's scoped stylesheet to avoid cross-page overrides.
+.page-title { font-size: var(--sxb-text-page); font-weight: 700; line-height: 1.4; }
+.section-title { font-size: var(--sxb-text-heading); font-weight: 600; line-height: 1.5; }
+.header-sub, .section-subtitle, .result-desc, .chapter-desc { color: var(--sxb-muted); line-height: 1.65; }
+.header-copy, .chapter-title, .chapter-label, .lesson-name, .section-name, .result-title { min-width: 0; }
+.chapter-title, .chapter-label, .lesson-name, .section-name, .result-title { white-space: normal; line-height: 1.6; }
+.chapter-title > text:last-child, .chapter-label > text:last-child, .result-title > text:first-child { white-space: normal; }
+.chapter-title > text:first-child, .chapter-label > text:first-child { flex: none; }
+.chapter-right { flex: none; }
+.chapter-card, .subject-panel, .note-card, .result, .tools-card, .plan-card { box-shadow: none; }
+.chapter-card, .subject-panel, .note-card, .tools-card, .plan-card { border-radius: 8px; }
+.back-button, .back-btn, .icon-button { min-width: 44px; min-height: 44px; }
+.text-button, .more-button, .load-more { color: var(--sxb-blue); background: transparent; border: 0; }
+.text-button::after, .more-button::after, .load-more::after { display: none; }
+.tabs { flex-wrap: nowrap; overflow-x: auto; }
+.tabs > text, .tabs > view, .tabs > button { flex-shrink: 0; white-space: nowrap; }
+.search-input input, .field input { min-width: 0; font-size: 16px; }
+.field { min-height: 48px; box-shadow: none; }
+.field input { min-height: 44px; }
+.analysis-card, .note-modal, .rights-modal, .dialog, .sheet { animation: sxb-content-arrive 220ms var(--sxb-motion); }
+.mode-item, .tab-item, .chapter-header, .section-header, .option, .learning-item { transition: opacity 150ms ease; }
+.mode-item:active, .chapter-header:active, .section-header:active, .option:active, .learning-item:active { opacity: .8; }
+@keyframes sxb-content-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .analysis-card, .note-modal, .rights-modal, .dialog, .sheet { animation: none; }
+  .mode-item, .tab-item, .chapter-header, .section-header, .option, .learning-item { transition: none; }
+}

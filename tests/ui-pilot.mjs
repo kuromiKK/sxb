@@ -8,9 +8,9 @@ const homeSource = 'apps/user/src/pages/index/index.vue'
 const original = execFileSync('git', ['show', `1b02c5f:${homeSource}`], { encoding: 'utf8' })
 const current = await readFile(homeSource, 'utf8')
 const promoLine = source => source.split('\n').find(line => line.trim().startsWith('<view class="promo"')).trim()
-assert.equal(promoLine(current), promoLine(original), 'Protected promo markup must remain identical')
+assert.equal(promoLine(current), promoLine(original), 'Promo content and structure must remain identical')
 const promoStyle = source => source.split('\n').find(line => line.startsWith('.promo {')).trim()
-assert.equal(promoStyle(current), promoStyle(original), 'Protected promo styles must remain identical')
+assert.equal(promoStyle(current), promoStyle(original), 'Promo base styles remain; authorized typography lives in pilot-home.scss')
 await mkdir('.local/qa/pilot', { recursive: true })
 const browser = await chromium.launch({ channel: 'chrome' })
 const errors = []
@@ -102,5 +102,5 @@ try {
     await expect(page.locator('.report-position')).toHaveText('2 / 2')
   }
   assert.deepEqual(errors, [])
-  console.log('Pilot passed: protected promo unchanged, 6 viewports, compact button faces, borderless edit action, single-row subject touch swipe, chapter/subject switching, report buttons and swipe, reduced motion, no page errors.')
+  console.log('Pilot passed: promo content preserved, 6 viewports, compact button faces, borderless edit action, single-row subject touch swipe, chapter/subject switching, report buttons and swipe, reduced motion, no page errors.')
 } finally { await browser.close() }

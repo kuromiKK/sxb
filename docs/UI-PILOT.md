@@ -3,8 +3,10 @@
 ## Scope and rollback
 
 - Baseline: `1b02c5f`, tagged `checkpoint/home-courses-before-pilot-20260907`.
-- Only home and course catalogue pages. No API, account, payment, or other page changes.
-- Home `.promo` markup and styles are protected. Screenshot comparison is part of verification.
+- The original pilot covered only home and course catalogue pages.
+- Follow-up authorization on 2026-09-07 extends typography to experience cards and
+  all student pages. Promo content and structure remain unchanged; font overrides
+  are now intentional. See `UI-ROLLOUT.md` for current scope.
 - Revert the single pilot commit to undo the trial without resetting unrelated work.
 
 ## Local design rules
@@ -18,7 +20,7 @@
 - uni-app native swiper, CSS transform/opacity for reveal and press feedback.
 - Press 150ms, content reveal 260ms, dialog 280ms, progress entrance 700ms.
 - No animation on non-interactive cards. Reduced-motion removes nonessential movement.
-- Scope page styles to prevent catalogue selectors from changing the protected home promo.
+- Scope page styles to prevent catalogue selectors from changing the home promo.
 
 UI/UX Pro Max guidance was used for touch targets, readable type, focus feedback and
 reduced motion. Generic database visual suggestions are not an approved brand redesign.
