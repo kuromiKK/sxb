@@ -75,7 +75,7 @@ const applyDebug = (key: string) => {
 </script>
 
 <template>
-  <view class="courses-page page safe-top">
+  <view class="courses-page page safe-top editorial-page">
     <view class="courses-header"><view class="header-copy"><text class="eyebrow">COURSE LIBRARY</text><text class="page-title">精讲课</text><text class="header-sub">按节学习重点课程，把知识真正讲明白</text></view><view class="exam-countdown"><text>距离考试</text><view><text class="countdown-days">{{ exam.daysLeft }}</text><text>天</text></view></view></view>
 
     <view v-if="showAccessPromo" class="access-promo" :class="{ collapsed: !promoExpanded }">

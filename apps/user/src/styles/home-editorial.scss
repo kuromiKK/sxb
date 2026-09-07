@@ -1,0 +1,25 @@
+.home.editorial-page {
+  .daily-intro { margin-top:24px; padding:24px; background:#fff; border:1px solid #d9dfe2; border-radius:12px; }
+  .daily-label { display:block; color:#5d6a78; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+  .daily-title { display:block; margin-top:8px; color:#243448; font-size:28px; line-height:1.25; font-weight:650; }
+  .daily-meta { display:flex; gap:16px; margin-top:12px; color:#5d6a78; font-size:13px; }
+  .daily-action { min-height:46px; display:flex; align-items:center; justify-content:space-between; width:100%; margin:20px 0 0; padding:0 16px; color:#fff; background:#285c85; border-radius:8px; font-size:15px; font-weight:600; }
+  .daily-action::after,.flow-toolbar button::after,.stage-header::after,.action-row::after,.plan-edit::after { border:0; }
+  .overview { display:none; }
+  .promo { margin-top:20px; background:#243448; border-radius:12px; box-shadow:none; }
+  .promo::after { display:none; }
+  .promo-title { font-size:20px; font-weight:600; }
+  .promo-kicker { color:#c6d4dd; font-size:12px; }
+  .promo-desc { color:#d0d9e2; font-size:14px; }
+  .promo-stats { border-color:rgba(255,255,255,.18); }.promo-tags text { color:#e4edf2; background:#38556c; border-radius:6px; }
+  .trial-btn { background:#285c85; box-shadow:none; }.collapse-btn { min-height:44px; color:#fff; background:#38556c; }
+  .section-head { margin-top:32px; }.section-title { font-size:20px; font-weight:650; }.section-subtitle { font-size:13px; }
+  .plan-board { border:1px solid #d9dfe2; border-left:4px solid #285c85; border-radius:12px; box-shadow:none; }.progress-track view { background:#285c85; }
+  .plan-note { color:#5d6a78; background:#f0f3f4; }
+  .flow-toolbar { display:flex; align-items:center; justify-content:space-between; margin:0 0 12px; color:#5d6a78; font-size:12px; }.flow-toolbar button { min-height:44px; margin:0; padding:0 8px; color:#285c85; background:transparent; font-size:13px; }
+  .study-flow { gap:8px; }.stage { border:1px solid #d9dfe2; border-radius:12px; box-shadow:none; }.stage-header { width:100%; min-height:68px; display:flex; align-items:center; gap:12px; margin:0; padding:16px; text-align:left; background:#fff; }.stage-number { width:34px; height:34px; display:grid; place-items:center; color:#285c85!important; background:#eaf0f5!important; border-radius:8px; font-size:12px; }.stage-title { font-size:15px; font-weight:600; }.stage-summary { font-size:12px; color:#5d6a78; }.action-list { background:#fbfcfc; }.action-row { width:100%; min-height:62px; display:flex; align-items:center; gap:12px; margin:0; padding:12px 16px; text-align:left; background:transparent; border-bottom:1px solid #e7ebed; }.action-row:last-child { border-bottom:0; }.action-name { font-size:14px; font-weight:600; }.action-meta,.action-description { font-size:12px; color:#5d6a78; }.action-description { margin-top:2px; }.action-copy { flex:1; min-width:0; }
+  .home-report-swiper { margin-top:0; }.home-report-card { box-shadow:none; border-radius:12px; }
+  .report-controls { display:flex; align-items:center; justify-content:space-between; min-height:52px; margin:4px 0 0; padding:0 8px; color:#5d6a78; font-size:12px; }.report-controls button { width:44px; height:44px; display:grid; place-items:center; margin:0; padding:0; color:#285c85; background:#eaf0f5; border-radius:8px; }.report-controls button[disabled] { color:#a3adb5; background:#f0f2f2; }
+  .price-card { box-shadow:none; border:1px solid #d9dfe2; border-radius:12px; }.price-pattern { display:none; }.plan-button { min-height:46px; background:#285c85!important; border-radius:8px; box-shadow:none; }.price-card.flagship .plan-button { color:#fff!important; background:#243448!important; }
+  .home-payment-mask,.report-access-mask { background:rgba(36,52,72,.48); backdrop-filter:blur(2px); }.home-payment-dialog,.report-access-modal { border-radius:12px; box-shadow:0 18px 48px rgba(36,52,72,.2); }
+}

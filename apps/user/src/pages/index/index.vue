@@ -9,9 +9,24 @@ import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/uti
 import { createRightsOrder, loadOrders, persistOrders, type PaymentMethod } from '@/utils/orders'
 import { api, account, refreshRights, showApiError } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
+import { useInteraction } from '@/utils/interaction'
+import '@/styles/home-editorial.scss'
 
 const { state, exam, todayRemaining, requireLogin, login, logout } = useAppStore()
-const promoExpanded = ref(true)
+const promoExpanded = ref(false)
+const { reducedMotion, confirmFeedback } = useInteraction()
+const openStages = ref<string[]>(['01'])
+const toggleStage = (id:string) => { openStages.value = openStages.value.includes(id) ? openStages.value.filter(value=>value!==id) : [...openStages.value,id] }
+const reportLoading = ref(true)
+const reportError = ref('')
+const reloadReports = async () => {
+  if (!reportLoading.value) reportLoading.value = true
+  reportError.value = ''
+  try { await refreshRights(); await refreshMonthlyReports() }
+  catch(error) { reportError.value = error instanceof Error ? error.message : '加载失败，请重试' }
+  finally { reportLoading.value = false }
+}
+const moveReport = (direction:number) => { homeReportSlide.value = Math.max(0,Math.min(visibleHomeReports.value.length-1,homeReportSlide.value+direction)) }
 const rightsLevel = computed(() => account.level === 'svip' ? 'flagship' : account.level === 'vip' ? 'pro' : 'none')
 const reportAccessVisible = ref(false)
 type HomeReportCard = Pick<MonthlyReport, 'id' | 'year' | 'month' | 'status'> & {
@@ -93,6 +108,7 @@ const confirmPlanPayment = async () => {
     await refreshMonthlyReports()
     purchaseVisible.value = false
     selectedPlan.value = undefined
+    confirmFeedback()
     showMessage('测试支付成功，未扣款，权益已生效')
   } catch (error) { showApiError(error) } finally { purchaseProcessing.value = false }
 }
@@ -150,7 +166,7 @@ const openFlagshipRights = () => {
 }
 onShow(() => {
   state.selectedTab = 0
-  void refreshRights().then(refreshMonthlyReports).catch(showApiError)
+  void reloadReports()
   homeReportSlide.value = 0
 })
 
@@ -184,29 +200,33 @@ const plans: StudyPlan[] = [
 </script>
 
 <template>
-  <view class="home page safe-top">
+  <view class="home page safe-top editorial-page">
     <view class="top-actions">
       <button class="exam-entry" @tap="openExamSwitch"><view class="exam-entry-icon"><uni-icons type="calendar" size="17" color="#3569e8" /></view><view class="exam-entry-copy"><view><text>{{ exam.name }}</text><uni-icons type="arrowdown" size="14" color="#3569e8" /></view></view></button>
       <button class="search-button" aria-label="搜索" @tap="openSearch"><uni-icons type="search" size="23" color="#4c54b5" /></button>
     </view>
 
-    <view class="overview"><view class="overview-copy"><text class="overview-title">距离考试还有 <text>{{ exam.daysLeft }}</text> 天</text><text class="overview-sub">按计划完成每一次练习，上岸会更有把握</text></view><view class="mastery"><view class="mastery-ring" :style="masteryRingStyle"><view class="mastery-center"><text>{{ exam.mastery }}%</text></view></view><text>掌握程度</text></view></view>
+    <view class="daily-intro"><text class="daily-label">上行宝 · 学习手册</text><text class="daily-title">今天，也向前一步。</text><view class="daily-meta"><text>距离考试 {{ exam.daysLeft }} 天</text><text>掌握度 {{ exam.mastery }}%</text></view><button class="daily-action" @tap="gated('/pages/practice/index')"><text>开始今日学习</text><uni-icons type="arrowright" size="20" color="#fff" /></button></view>
 
-    <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">上行宝 · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button class="trial-btn" @tap="openTrial"><text class="trial-price">¥1</text><text>体验当前考试VIP，限24小时</text><uni-icons type="arrowright" size="18" color="#fff" /></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text><text class="trial-price">¥1</text> 体验VIP内容 · 24小时</text><text>展开查看 ›</text></view></view>
+    <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">上行宝 · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button :aria-expanded="promoExpanded" aria-controls="home-promo-content" class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" id="home-promo-content" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button class="trial-btn" @tap="openTrial"><text class="trial-price">¥1</text><text>体验当前考试VIP，限24小时</text><uni-icons type="arrowright" size="18" color="#fff" /></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text><text class="trial-price">¥1</text> 体验VIP内容 · 24小时</text><text>展开查看 ›</text></view></view>
 
-    <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><text class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></text></view>
-    <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>计划进行中</text></view><text class="plan-note">系统会根据考试日期分配每日最低题量，你也可以随时调整科目、年份和错题范围，让计划更贴合自己的节奏。</text></view>
+    <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><button class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></button></view>
+    <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>{{ !state.todayTarget ? '自由学习' : todayRemaining ? '按自己的节奏' : '今日目标已完成' }}</text></view><text class="plan-note">计划只是提醒，你可以随时调整目标，按自己的节奏学习。</text></view>
 
     <view class="section-head flow-head"><view><text class="section-title">一套完整的学习流程</text><text class="section-subtitle">这是效率更高的建议路径，也可以从任意环节直接开始</text></view></view>
-    <view class="study-flow"><view v-for="stage in stages" :key="stage.round" class="stage" :class="stage.tone"><view class="stage-header"><view class="stage-number">{{ stage.round }}</view><view><text class="stage-title">{{ stage.title }}</text><text class="stage-summary">{{ stage.summary }}</text></view></view><view class="action-list"><view v-for="action in stage.actions" :key="action.no" class="action-row"><view class="action-copy"><view class="action-heading"><text class="action-no">{{ action.no }}</text><text class="action-name">{{ action.name }}</text><text class="action-meta">{{ action.meta }}</text></view><text class="action-description">{{ action.description }}</text></view><view class="action-buttons"><button class="start-button" @tap="action.route ? gated(action.route) : showMessage(action.message)">立即开始</button></view></view></view></view></view>
+    <view class="flow-toolbar"><text>4 个阶段 · 不必按顺序完成</text><button @tap="openStages = openStages.length === 4 ? [] : stages.map(s=>s.round)">{{ openStages.length === 4 ? '收起全部' : '展开全部' }}</button></view>
+    <view class="study-flow"><view v-for="stage in stages" :key="stage.round" class="stage" :class="stage.tone"><button class="stage-header" :aria-expanded="openStages.includes(stage.round)" :aria-controls="'stage-'+stage.round" @tap="toggleStage(stage.round)"><text class="stage-number">{{ stage.round }}</text><view><text class="stage-title">{{ stage.title }}</text><text class="stage-summary">{{ stage.summary }}</text></view><uni-icons :type="openStages.includes(stage.round) ? 'minus' : 'plus'" size="18" color="#5d6a78" /></button><view v-if="openStages.includes(stage.round)" :id="'stage-'+stage.round" class="action-list"><button v-for="action in stage.actions" :key="action.no" class="action-row" @tap="action.route ? gated(action.route) : showMessage(action.message)"><view class="action-copy"><view class="action-heading"><text class="action-name">{{ action.name }}</text><text class="action-meta">{{ action.meta }}</text></view><text class="action-description">{{ action.description }}</text></view><uni-icons type="arrowright" size="18" color="#285c85" /></button></view></view></view>
 
     <view class="section-head report-home-head"><view><text class="section-title">学习报告</text><text class="section-subtitle">回顾每个月的学习记录与成长</text></view></view>
-    <swiper
+    <view v-if="reportLoading" class="sxb-state" role="status" aria-live="polite"><text>正在整理学习报告…</text><view class="sxb-skeleton"></view><view class="sxb-skeleton short"></view><view class="sxb-skeleton tall"></view></view>
+    <view v-else-if="reportError" class="sxb-state" role="alert"><text>{{ reportError }}</text><button @tap="reloadReports">重新加载</button></view>
+    <view v-else-if="!visibleHomeReports.length" class="sxb-state">还没有月报，学习记录会从这里开始。</view>
+    <swiper v-else
       class="home-report-swiper"
       :current="homeReportSlide"
       :next-margin="'104rpx'"
       :previous-margin="'0rpx'"
-      :duration="260"
+      :duration="reducedMotion ? 0 : 240"
       @change="homeReportSlide = $event.detail.current"
     >
       <swiper-item v-for="item in visibleHomeReports" :key="item.id" class="home-report-swiper-item">
@@ -220,15 +240,16 @@ const plans: StudyPlan[] = [
         </view>
       </swiper-item>
     </swiper>
+    <view v-if="!reportLoading && !reportError && visibleHomeReports.length" class="report-controls"><button aria-label="上一个月报" :disabled="homeReportSlide === 0" @tap="moveReport(-1)"><uni-icons type="back" size="18" color="currentColor" /></button><text aria-live="polite">{{ homeReportSlide + 1 }} / {{ visibleHomeReports.length }} · 可左右滑动</text><button aria-label="下一个月报" :disabled="homeReportSlide >= visibleHomeReports.length-1" @tap="moveReport(1)"><uni-icons type="forward" size="18" color="currentColor" /></button></view>
 
     <view class="section-head"><view><text class="section-title">选择你的学习版本</text><text class="section-subtitle">权益可按备考阶段选择，SVIP包含全部服务</text></view></view>
-    <view class="price-list"><view v-for="plan in plans" :key="plan.name" class="price-card" :class="plan.color"><view class="price-pattern"></view><text v-if="plan.color === 'flagship'" class="recommended">推荐版本</text><view class="plan-heading"><view class="plan-icon"><uni-icons :type="plan.icon" size="22" :color="plan.color === 'flagship' ? '#f2b04f' : plan.color === 'pro' ? '#6949df' : '#3569e8'" /></view><view><text class="plan-name">{{ plan.name }}</text><text class="plan-intro">{{ plan.intro }}</text></view></view><view class="price"><text>¥</text><text>{{ plan.price }}</text><text class="original">¥{{ plan.price * 2 }}</text></view><view class="benefits"><view v-for="(benefit, index) in benefitCatalog" :key="benefit" class="benefit-row" :class="{ unavailable: index >= plan.includedCount }"><view class="benefit-check"><uni-icons v-if="index < plan.includedCount" type="checkmarkempty" size="14" :color="plan.color === 'flagship' ? '#f2b04f' : '#fff'" /><uni-icons v-else type="closeempty" size="13" color="#a9b3c2" /></view><text>{{ benefit }}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">选择{{ plan.name }}<uni-icons type="arrowright" size="15" :color="plan.color === 'flagship' ? '#1d2d43' : '#fff'" /></button></view></view>
+    <view class="price-list"><view v-for="plan in plans" :key="plan.name" class="price-card" :class="plan.color"><view class="price-pattern"></view><text v-if="plan.color === 'flagship'" class="recommended">推荐版本</text><view class="plan-heading"><view class="plan-icon"><uni-icons :type="plan.icon" size="22" :color="plan.color === 'flagship' ? '#f2b04f' : plan.color === 'pro' ? '#6949df' : '#3569e8'" /></view><view><text class="plan-name">{{ plan.name }}</text><text class="plan-intro">{{ plan.intro }}</text></view></view><view class="price"><text>¥</text><text>{{ plan.price }}</text></view><view class="benefits"><view v-for="(benefit, index) in benefitCatalog" :key="benefit" class="benefit-row" :class="{ unavailable: index >= plan.includedCount }"><view class="benefit-check"><uni-icons v-if="index < plan.includedCount" type="checkmarkempty" size="14" :color="plan.color === 'flagship' ? '#f2b04f' : '#fff'" /><uni-icons v-else type="closeempty" size="13" color="#a9b3c2" /></view><text>{{ benefit }}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">选择{{ plan.name }}<uni-icons type="arrowright" size="15" :color="plan.color === 'flagship' ? '#1d2d43' : '#fff'" /></button></view></view>
     <view v-if="purchaseVisible && selectedPlan" class="home-payment-mask" @tap="closePlanPayment">
-      <view class="home-payment-dialog" @tap.stop>
-        <view class="home-payment-top"><view class="home-payment-icon"><uni-icons type="wallet" size="28" color="#fff" /></view><view><text>订单支付</text><text>选择支付方式并完成付款</text></view><button :disabled="purchaseProcessing" @tap="closePlanPayment"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
+      <view class="home-payment-dialog" role="dialog" aria-modal="true" aria-label="订单支付" @tap.stop>
+        <view class="home-payment-top"><view class="home-payment-icon"><uni-icons type="wallet" size="28" color="#fff" /></view><view><text>订单支付</text><text>本地模拟流程，不产生真实扣款</text></view><button aria-label="关闭支付弹窗" :disabled="purchaseProcessing" @tap="closePlanPayment"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
         <view class="home-payment-product"><view><text>上行宝{{ selectedPlan.name }}</text><text>{{ selectedPlan.color === 'trial' ? '支付后24小时' : '当前考试权益，有效至本考期结束' }}</text></view><text>¥{{ selectedPlan.price }}</text></view>
         <view class="home-payment-methods"><text>选择支付方式</text><view>
-          <view :class="{ active: selectedPurchaseMethod === 'wechat' }" @tap="selectedPurchaseMethod = 'wechat'"><view class="home-pay-brand wechat">微</view><view><text>微信支付</text><text>使用微信安全支付</text></view><uni-icons :type="selectedPurchaseMethod === 'wechat' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPurchaseMethod === 'wechat' ? '#19a974' : '#b2bbc7'" /></view>
+          <view :class="{ active: selectedPurchaseMethod === 'wechat' }" @tap="selectedPurchaseMethod = 'wechat'"><view class="home-pay-brand wechat">微</view><view><text>微信支付</text><text>本地模拟支付</text></view><uni-icons :type="selectedPurchaseMethod === 'wechat' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPurchaseMethod === 'wechat' ? '#19a974' : '#b2bbc7'" /></view>
           <!-- #ifdef H5 -->
           <!-- #endif -->
         </view></view>
