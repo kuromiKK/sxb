@@ -10,7 +10,26 @@ export function effectiveLevel(grant: { level: string; endsAt: string; nextEndsA
   if (grant.level === 'svip' && now < Date.parse(grant.nextEndsAt)) return 'vip'
   return 'free'
 }
+function entitlement(examId: string, level: string, expiry: string | null, trial = false, source = 'order') {
+  return { examId, level, expiresAt: expiry, trial, source, permissions: { questions: true, knowledge: true, notes: true, plan: true, courses: level !== 'free', aiChat: level !== 'free', reports: level === 'svip', aiReview: level === 'svip' } }
+}
+export function manualEffective(row: { level: string; ends_at: string; next_ends_at?: string; revoked: boolean }, now = Date.now()) {
+  if (row.revoked) return null
+  const next = row.next_ends_at || new Date(new Date(row.ends_at).setUTCFullYear(new Date(row.ends_at).getUTCFullYear() + 1)).toISOString()
+  if (now < Date.parse(row.ends_at)) return { level: row.level, expiresAt: row.ends_at }
+  if (row.level === 'svip' && now < Date.parse(next)) return { level: 'vip', expiresAt: next }
+  return null
+}
+export async function manualEntitlement(userId: string, examId: string, connection: Queryable = db) {
+  return (await connection.query(`SELECT m.*,c.ends_at,c.year,n.ends_at AS next_ends_at FROM manual_entitlements m JOIN exam_cycles c ON c.id=m.cycle_id LEFT JOIN exam_cycles n ON n.exam_id=c.exam_id AND n.year=c.year+1 WHERE m.user_id=$1 AND m.exam_id=$2`, [userId, examId])).rows[0] || null
+}
 export async function rights(userId: string, examId: string, connection: Queryable = db) {
+  const row = await manualEntitlement(userId, examId, connection)
+  const manual = row && manualEffective(row)
+  if (manual) return entitlement(examId, manual.level, manual.expiresAt, false, 'manual')
+  return orderRights(userId, examId, connection)
+}
+export async function orderRights(userId: string, examId: string, connection: Queryable = db) {
   const { rows } = await connection.query(`SELECT m.*,c.ends_at,c.year,n.ends_at AS next_ends_at FROM memberships m JOIN exam_cycles c ON c.id=m.cycle_id LEFT JOIN exam_cycles n ON n.exam_id=c.exam_id AND n.year=c.year+1 WHERE m.user_id=$1 AND m.exam_id=$2 AND NOT m.revoked`, [userId, examId])
   let level = 'free'; let expiry: string | null = null; let trial = false
   for (const row of rows) {
@@ -20,7 +39,7 @@ export async function rights(userId: string, examId: string, connection: Queryab
     const end = row.level === 'trial' ? row.trial_ends_at : found === 'vip' && row.level === 'svip' ? next : row.ends_at
     if (ranks[found] > ranks[level] || (found === level && found !== 'free' && Date.parse(end) > Date.parse(expiry || ''))) { level = found; expiry = end; trial = row.level === 'trial' }
   }
-  return { examId, level, expiresAt: expiry, trial, permissions: { questions: true, knowledge: true, notes: true, plan: true, courses: level !== 'free', aiChat: level !== 'free', reports: level === 'svip', aiReview: level === 'svip' } }
+  return entitlement(examId, level, expiry, trial)
 }
 export async function expireOrders(connection: Queryable = db) {
   await connection.query(`UPDATE orders SET status='closed',close_reason='超过30分钟未支付，订单已自动关闭' WHERE status='pending_payment' AND expires_at<=now()`)

@@ -15,7 +15,7 @@ export async function reportMonths(userId: string, examId: string) {
   const today = shanghaiDay(); const year = Number(today.slice(0,4)); const month = Number(today.slice(5,7))
   const member = await rights(userId,examId)
   if (!member.permissions.reports) return [month,month-1].filter(n=>n>0).map(n=>({id:`${year}-${String(n).padStart(2,'0')}`,year,month:n,status:n===month?'generating':'ready',locked:true}))
-  const first = (await db.query('SELECT min(starts_at) AS joined FROM memberships WHERE user_id=$1 AND exam_id=$2',[userId,examId])).rows[0].joined
+  const first = (await db.query('SELECT min(joined) AS joined FROM (SELECT starts_at AS joined FROM memberships WHERE user_id=$1 AND exam_id=$2 UNION ALL SELECT first_granted_at AS joined FROM manual_entitlements WHERE user_id=$1 AND exam_id=$2) history',[userId,examId])).rows[0].joined
   const joined = first ? shanghaiDay(new Date(first)) : today
   const start = joined.slice(0,4) === String(year) ? Number(joined.slice(5,7)) : 1
   const reports = []

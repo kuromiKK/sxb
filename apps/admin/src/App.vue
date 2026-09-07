@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { LayoutDashboard, LibraryBig, BookOpen, GraduationCap, FileText, Users, CreditCard, Sparkles, Settings2, ScrollText, Search, Plus, Upload, Download, ArrowUpRight, ArrowRight, ChevronRight, LogOut, RefreshCw, ShieldCheck, CalendarDays, Check, X, Menu, SlidersHorizontal, ClipboardList, Bell, HelpCircle, Eye, Pencil, CircleCheck, CircleAlert, Activity } from 'lucide-vue-next'
 import { request, send } from './api'
 import AdministratorManagement from './AdministratorManagement.vue'
+import UserEntitlements from './UserEntitlements.vue'
 
 const token=ref(sessionStorage.getItem('sxb-admin-token')||'')
 const identity=ref<any>(null)
@@ -21,6 +22,8 @@ const mobileNav=ref(false)
 const busy=ref(false);const error=ref('');const saving=ref(false)
 const dashboard=ref<any>(null);const rows=ref<any[]>([]);const total=ref(0);const page=ref(1);const search=ref('');const treeKind=ref('knowledge')
 const exams=ref<any[]>([]);const contentOptions=ref<any[]>([]);const aiFeatures=ref<any[]>([]);const prices=ref<any[]>([])
+const entitlementUser=ref<{id:string;nickname:string;phone:string}|null>(null)
+watch(token,value=>{if(!value)entitlementUser.value=null})
 const labels:Record<string,string>={subject:'科目',chapter:'章',section:'节',knowledge:'知识点',question:'题目',course:'课程',handout:'讲义',article:'考试须知',announcement:'公告',faq:'常见问题',draft:'草稿',review:'审核中',published:'已发布',offline:'已下架',pending_payment:'待支付',paid:'支付成功',closed:'已关闭',refunding:'退款中',refunded:'已退款',vip:'VIP',svip:'SVIP',trial:'VIP 24小时体验',upgrade:'VIP 升 SVIP',superadmin:'最高管理员',student:'学生',success:'成功',failed:'失败',note:'笔记',favorite:'收藏',plan:'学习计划',courseProgress:'课程进度',recite:'背诵',announcementRead:'公告已读'}
 const contentViews=['knowledge','question','course','handout','article','announcement','faq']
 const isContent=computed(()=>contentViews.includes(view.value))
@@ -44,6 +47,7 @@ async function load(){
     if(view.value==='dashboard')dashboard.value=await request('/admin/dashboard')
     else if(view.value==='ai'){const r=await request('/admin/ai');aiFeatures.value=r.features;prices.value=r.prices}
     else if(isContent.value){const r=await request(`/admin/content?kind=${kind.value}&search=${encodeURIComponent(search.value)}&page=${page.value}`);if(rev===revision){rows.value=r.items;total.value=r.total}}
+    else if(view.value==='users'){const r=await request(`/admin/users?search=${encodeURIComponent(search.value)}`);if(rev===revision)rows.value=r}
     else {const r=await request('/admin/'+view.value);if(rev===revision)rows.value=r}
   }catch(e:any){if(rev===revision)error.value=e.message}finally{if(rev===revision)busy.value=false}
 }
@@ -150,7 +154,19 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
             <div class="pagination"><span>共 {{ total }} 条内容</span><el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="prev,pager,next" /></div>
           </template>
           <template v-else-if="view==='exams'"><div class="table-toolbar"><h2>考期配置</h2><span class="subtle-label">北京时间 · 结束时间变更将影响会员有效期</span></div><el-table :data="rows"><el-table-column prop="name" label="考试名称" min-width="180" /><el-table-column prop="year" label="考试年度" width="140" /><el-table-column label="考试结束时间" min-width="220"><template #default="{row}">{{ formatDate(row.ends_at) }}</template></el-table-column><el-table-column label="配置状态" width="150"><template #default><el-tag type="warning" effect="plain">暂定日期</el-tag></template></el-table-column><el-table-column label="操作" width="110"><template #default="{row}"><el-button link type="primary" @click="openDate(row)"><Pencil :size="15" />修改</el-button></template></el-table-column></el-table></template>
-          <template v-else-if="view==='users'"><el-table :data="rows" empty-text="暂无学生注册"><el-table-column prop="nickname" label="用户" min-width="140" /><el-table-column prop="phone" label="手机号" width="150" /><el-table-column label="角色" width="130"><template #default="{row}">{{ labels[row.role]||row.role }}</template></el-table-column><el-table-column prop="invite_code" label="推荐码" width="130" /><el-table-column prop="inviter" label="邀请人" min-width="130" /><el-table-column label="注册时间" width="190"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="首次购买" width="190"><template #default="{row}">{{ formatDate(row.first_paid_at) }}</template></el-table-column></el-table></template>
+          <template v-else-if="view==='users'">
+            <div class="table-toolbar"><span class="subtle-label">学员账号 · 最多显示200条匹配结果</span><div class="filter-tools"><el-input v-model="search" clearable placeholder="搜索学员姓名或手机号" class="search-input" @keyup.enter="load" @clear="load"><template #prefix><Search :size="16" /></template></el-input><el-tooltip content="搜索学员"><el-button aria-label="搜索学员" @click="load"><Search :size="16" /></el-button></el-tooltip></div></div>
+            <el-table :data="rows" empty-text="暂无匹配的学员，请先在前台注册">
+              <el-table-column prop="nickname" label="用户" min-width="140" />
+              <el-table-column prop="phone" label="手机号" width="150" />
+              <el-table-column label="角色" width="90"><template #default="{row}">{{ labels[row.role]||row.role }}</template></el-table-column>
+              <el-table-column prop="invite_code" label="推荐码" width="120" />
+              <el-table-column prop="inviter" label="邀请人" min-width="120" />
+              <el-table-column label="注册时间" width="190"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column>
+              <el-table-column label="首次购买" width="190"><template #default="{row}">{{ formatDate(row.first_paid_at) }}</template></el-table-column>
+              <el-table-column label="操作" width="130" fixed="right"><template #default="{row}"><el-button link type="primary" @click="entitlementUser={id:row.id,nickname:row.nickname,phone:row.phone}"><ShieldCheck :size="16" />权益管理</el-button></template></el-table-column>
+            </el-table>
+          </template>
           <template v-else-if="view==='orders'"><div class="table-toolbar"><h2>订单记录</h2><el-tag type="warning" effect="plain">本地模拟支付，无真实扣款</el-tag></div><el-table :data="rows" empty-text="暂无订单，请在用户端购买会员测试"><el-table-column label="订单" min-width="230"><template #default="{row}"><button class="table-title" @click="openOrder(row)">{{ labels[row.product] }}</button><small class="cell-sub">{{ row.id }}</small></template></el-table-column><el-table-column prop="phone" label="用户手机号" width="150" /><el-table-column prop="exam_name" label="考试" width="160" /><el-table-column label="金额" width="120"><template #default="{row}">{{ money(row.amount_cents/100) }}</template></el-table-column><el-table-column label="状态" width="115"><template #default="{row}"><el-tag :type="stateColor(row.status)">{{ labels[row.status] }}</el-tag></template></el-table-column><el-table-column label="创建时间" width="190"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><el-button link type="primary" @click="openOrder(row)">详情</el-button></template></el-table-column></el-table></template>
           <template v-else-if="view==='records'"><el-table :data="rows" empty-text="暂无学习记录"><el-table-column prop="phone" label="学生手机号" width="155" /><el-table-column label="记录类型" width="140"><template #default="{row}">{{ labels[row.kind]||row.kind }}</template></el-table-column><el-table-column prop="source_id" label="关联内容" min-width="180" /><el-table-column label="更新于" width="200"><template #default="{row}">{{ formatDate(row.updated_at) }}</template></el-table-column><el-table-column label="详情" width="80"><template #default="{row}"><el-button link type="primary" @click="inspect=row"><Eye :size="17" /></el-button></template></el-table-column></el-table></template>
           <template v-else-if="view==='audit'"><el-table :data="rows" empty-text="暂无操作日志"><el-table-column prop="action" label="操作" width="180" /><el-table-column prop="phone" label="操作人" width="150" /><el-table-column prop="target_id" label="关联记录" min-width="230" show-overflow-tooltip /><el-table-column label="时间" width="190"><template #default="{row}">{{ formatDate(row.created_at) }}</template></el-table-column><el-table-column label="详情" width="85"><template #default="{row}"><el-button link type="primary" aria-label="查看日志详情" @click="inspect=row"><Eye :size="17" /></el-button></template></el-table-column></el-table></template>
@@ -158,6 +174,7 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
         <footer class="workspace-footer"><span>上行宝管理后台</span><span>本地测试 · 所有模拟交易不产生实际扣款</span></footer>
       </main>
     </div>
+    <UserEntitlements :user="entitlementUser" :exams="exams" @close="entitlementUser=null" />
   </div>
 
   <el-drawer v-model="editor" :title="'编辑'+(labels[edit.kind]||'内容')" size="680px" class="editor-drawer" :close-on-click-modal="false">

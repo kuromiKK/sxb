@@ -10,6 +10,7 @@ import { listFeatures, saveFeature, callAI, pricePresets } from './ai.ts'
 import { template, preview, commitImport } from './imports.ts'
 import { recordLearning, reportMonths, monthlyReport } from './reports.ts'
 import { administrators } from './administrators.ts'
+import { userEntitlements } from './entitlements.ts'
 
 export const api = Router()
 const phone = z.string().regex(/^1\d{10}$/,'请输入11位手机号')
@@ -226,7 +227,11 @@ api.put('/admin/content/:id',async(req,res)=>{
   })
   await audit(res.locals.user.id,'content.save',row.id,{title:row.title,status:row.status});res.json({ok:true})
 })
-api.get('/admin/users',async(_req,res)=>res.json((await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.invite_code,u.inviter_id,u.created_at,u.is_test_data,i.nickname AS inviter,(SELECT min(paid_at) FROM orders o WHERE o.user_id=u.id) AS first_paid_at FROM users u LEFT JOIN users i ON i.id=u.inviter_id WHERE u.account_kind='student' ORDER BY u.created_at DESC LIMIT 200`)).rows))
+api.use('/admin/users/:userId/entitlements',userEntitlements)
+api.get('/admin/users',async(req,res)=>{
+  const search=z.string().max(100).default('').parse(req.query.search)
+  res.json((await db.query(`SELECT u.id,u.phone,u.nickname,u.role,u.invite_code,u.inviter_id,u.created_at,u.is_test_data,i.nickname AS inviter,(SELECT min(paid_at) FROM orders o WHERE o.user_id=u.id) AS first_paid_at FROM users u LEFT JOIN users i ON i.id=u.inviter_id WHERE u.account_kind='student' AND (u.phone ILIKE $1 OR u.nickname ILIKE $1) ORDER BY u.created_at DESC LIMIT 200`,[`%${search}%`])).rows)
+})
 api.get('/admin/orders',async(_req,res)=>{await expireOrders();res.json((await db.query(`SELECT o.*,u.phone,e.name AS exam_name FROM orders o JOIN users u ON u.id=o.user_id JOIN exams e ON e.id=o.exam_id ORDER BY o.created_at DESC LIMIT 200`)).rows)})
 api.patch('/admin/orders/:id',async(req,res)=>{
   const b=z.object({amountCents:z.number().int().min(10000).optional(),status:z.enum(['refunding','refunded','closed']).optional(),reason:z.string().trim().min(3).max(500)}).parse(req.body)

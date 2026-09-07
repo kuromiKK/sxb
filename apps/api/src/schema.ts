@@ -3,7 +3,7 @@ export async function migrate() {
   // Append versioned migrations here; never reset a database on startup.
   await db.query(`CREATE TABLE IF NOT EXISTS schema_versions (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())`)
   const versions = await db.query('SELECT version FROM schema_versions WHERE version=1')
-  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); return }
+  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); return }
   const statements = [
     `CREATE TABLE users (id text PRIMARY KEY, phone text UNIQUE NOT NULL, nickname text NOT NULL, role text NOT NULL DEFAULT 'student' CHECK(role IN ('student','superadmin','editor','support','operator')), password_hash text, invite_code text UNIQUE NOT NULL, inviter_id text REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), is_test_data boolean NOT NULL DEFAULT true)`,
     `CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL, created_at timestamptz DEFAULT now())`,
@@ -33,6 +33,23 @@ export async function migrate() {
   await migrateAIContext()
   await migrateAnswerRequests()
   await migrateAccountKinds()
+  await migrateManualEntitlements()
+}
+
+async function migrateManualEntitlements() {
+  await transaction(async c => {
+    await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
+    if ((await c.query('SELECT version FROM schema_versions WHERE version=5')).rows.length) return
+    await c.query(`CREATE TABLE manual_entitlements (
+      user_id text NOT NULL REFERENCES users(id), exam_id text NOT NULL REFERENCES exams(id),
+      cycle_id text NOT NULL REFERENCES exam_cycles(id), level text NOT NULL CHECK(level IN ('free','vip','svip')),
+      revoked boolean NOT NULL DEFAULT false, version integer NOT NULL DEFAULT 1 CHECK(version>0),
+      first_granted_at timestamptz, updated_at timestamptz NOT NULL DEFAULT now(),
+      actor_id text NOT NULL REFERENCES users(id), reason text NOT NULL,
+      PRIMARY KEY(user_id,exam_id)
+    )`)
+    await c.query('INSERT INTO schema_versions(version) VALUES(5)')
+  })
 }
 
 async function migrateAccountKinds() {
