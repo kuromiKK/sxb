@@ -25,9 +25,9 @@ export async function validateContent(row: z.infer<typeof contentSchema>, c: Que
     if(!row.exam_id)fail(400,'请选择所属考试')
     if(row.payload.document)row.payload.content=(await validateDocument(row.payload.document,row.id,row.exam_id!,c)).text
     if(row.kind==='knowledge') {
-      row.payload.handouts=z.array(z.object({assetId:z.string().min(1).max(160),title:z.string().trim().min(1).max(200)}).strict()).max(20).default([]).parse(row.payload.handouts)
+      row.payload.handouts=z.array(z.object({assetId:z.string().min(1).max(160),title:z.string().trim().min(1).max(200)}).strict()).max(1,'每个知识点只能添加一份讲义').default([]).parse(row.payload.handouts)
       const separated=splitKnowledgeHandouts(row.payload)
-      if(separated.handouts.length>20||new Set(separated.handouts.map(h=>h.assetId)).size!==separated.handouts.length)fail(400,'讲义最多20份，不能重复添加')
+      if(separated.handouts.length>1)fail(400,'每个知识点只能添加一份讲义')
       for(const handout of separated.handouts) {
         const asset=(await c.query("SELECT id FROM media_assets WHERE id=$1 AND content_id=$2 AND exam_id=$3 AND kind='handout'",[handout.assetId,row.id,row.exam_id])).rows[0]
         if(!asset)fail(400,'讲义不存在或不属于当前知识点与考试')
