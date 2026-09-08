@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onLaunch } from '@dcloudio/uni-app'
 import { refreshCatalog } from '@/services/catalog'
-import { refreshRights, refreshPersonalData, showApiError } from '@/services/api'
+import { refreshRights, refreshPersonalData, showApiError, token } from '@/services/api'
 
 onLaunch(() => {
   uni.showLoading({ title: '加载中' })
-  void refreshCatalog().then(refreshRights).then(refreshPersonalData).then(() => {
+  void refreshCatalog().then(() => refreshRights().catch(error => { if (token()) throw error })).then(refreshPersonalData).then(() => {
     const pages = getCurrentPages()
     const current = pages[pages.length - 1] as any
     const route = current?.$page?.fullPath || '/pages/index/index'

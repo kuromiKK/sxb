@@ -2,7 +2,7 @@ import { reactive } from 'vue'
 import { knowledgeSubjects, practiceQuestions, courseCatalog, exam } from '@/mock/data'
 
 const TOKEN_KEY = 'sxb-api-token'
-export const account = reactive({ level: 'free', trial: false, expiresAt: '', examId: '', loading: false })
+export const account = reactive({ level: 'free', trial: false, expiresAt: '', examId: '', loading: false, permissions:{} as Record<string,boolean>, permissionLabels:[] as string[] })
 export const learningPlan = reactive<{ data: any; loading: boolean }>({ data: null, loading: false })
 export async function refreshLearningPlan() {
   if (!token()) { learningPlan.data = null; return }
@@ -37,7 +37,7 @@ export function clearSession() {
   uni.removeStorageSync(TOKEN_KEY)
   uni.removeStorageSync('sxb-login')
   uni.removeStorageSync('sxb-demo-rights')
-  Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: '' })
+  Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: '', permissions:{}, permissionLabels:[] })
   clearPersonalCache()
 }
 export function clearPersonalCache() {
@@ -51,7 +51,7 @@ export function acceptSession(result: { token: string; user: any }) {
   uni.setStorageSync('sxb-login', { ...result.user, loggedAt: Date.now() })
 }
 export async function refreshRights() {
-  if (!token()) return Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: selectedExamId() })
+  if (!token()) return Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: selectedExamId(), permissions:{}, permissionLabels:[] })
   const examId = selectedExamId()
   const requestToken = token()
   const next = await api(`/rights/${examId}`)

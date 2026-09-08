@@ -6,6 +6,9 @@ import { request, send } from './api'
 import AdministratorManagement from './AdministratorManagement.vue'
 import UserEntitlements from './UserEntitlements.vue'
 import ExamCategories from './ExamCategories.vue'
+import RichEditor from './RichEditor.vue'
+import PermissionManagement from './PermissionManagement.vue'
+const resourceBusy=ref(false)
 
 const token=ref(sessionStorage.getItem('sxb-admin-token')||'')
 const identity=ref<any>(null)
@@ -18,6 +21,8 @@ const navigation=[
   {section:'系统管理',items:[{id:'administrators',name:'管理员管理',icon:ShieldCheck},{id:'roles',name:'角色管理',icon:Settings2},{id:'ai',name:'AI 配置中心',icon:Sparkles},{id:'audit',name:'操作日志',icon:ScrollText}]}
 ]
 const view=ref(location.hash.slice(1)||'dashboard')
+navigation[1].items.push({id:'cheatsheet',name:'考前小抄',icon:FileText})
+navigation[3].items.push({id:'permissions',name:'会员权限',icon:ShieldCheck})
 const currentNav=computed(()=>navigation.flatMap(g=>g.items).find(x=>x.id===view.value)||navigation[0].items[0])
 const mobileNav=ref(false)
 const busy=ref(false);const error=ref('');const saving=ref(false)
@@ -26,7 +31,8 @@ const exams=ref<any[]>([]);const contentOptions=ref<any[]>([]);const aiFeatures=
 const entitlementUser=ref<{id:string;nickname:string;phone:string}|null>(null)
 watch(token,value=>{if(!value)entitlementUser.value=null})
 const labels:Record<string,string>={subject:'科目',chapter:'章',section:'节',knowledge:'知识点',question:'题目',course:'课程',handout:'讲义',article:'考试须知',announcement:'公告',faq:'常见问题',draft:'草稿',review:'审核中',published:'已发布',offline:'已下架',pending_payment:'待支付',paid:'支付成功',closed:'已关闭',refunding:'退款中',refunded:'已退款',vip:'VIP',svip:'SVIP',trial:'VIP 24小时体验',upgrade:'VIP 升 SVIP',superadmin:'最高管理员',student:'学生',success:'成功',failed:'失败',note:'笔记',favorite:'收藏',plan:'学习计划',courseProgress:'课程进度',recite:'背诵',announcementRead:'公告已读'}
-const contentViews=['knowledge','question','course','handout','article','announcement','faq']
+labels.cheatsheet='考前小抄'
+const contentViews=['knowledge','question','course','handout','article','announcement','faq','cheatsheet']
 const isContent=computed(()=>contentViews.includes(view.value))
 const kind=computed(()=>view.value==='knowledge'?treeKind.value:view.value)
 const formatDate=(v:any)=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—'
@@ -44,7 +50,7 @@ async function load(){
   const rev=++revision;busy.value=true;error.value=''
   try{
     if(!exams.value.length)exams.value=await request('/exams')
-    if(view.value==='administrators') return
+    if(['administrators','permissions'].includes(view.value)) return
     if(view.value==='dashboard')dashboard.value=await request('/admin/dashboard')
     else if(view.value==='ai'){const r=await request('/admin/ai');aiFeatures.value=r.features;prices.value=r.prices}
     else if(isContent.value){const r=await request(`/admin/content?kind=${kind.value}&search=${encodeURIComponent(search.value)}&page=${page.value}`);if(rev===revision){rows.value=r.items;total.value=r.total}}
@@ -65,6 +71,7 @@ async function openEditor(row?:any){
   payloadText.value=JSON.stringify(edit.value.payload,null,2);advanced.value=false;editError.value='';editor.value=true
 }
 async function saveContent(){
+  if(resourceBusy.value)return
   saving.value=true;editError.value=''
   try{
     const row=structuredClone(toRaw(edit.value))
@@ -142,6 +149,7 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
         <div v-loading="busy" class="view-content">
           <ExamCategories v-if="view==='exams'" />
           <AdministratorManagement v-if="view==='administrators'" :key="revision" :current-id="identity?.id" @session-reset="unauthorized" />
+          <PermissionManagement v-else-if="view==='permissions'" :key="revision" :exams="exams" />
           <template v-else-if="view==='roles'"><el-table :data="rows"><el-table-column prop="name" label="角色名称" width="160" /><el-table-column prop="description" label="权限范围" min-width="260" /><el-table-column label="类型" width="120"><template #default><el-tag effect="plain">系统内置</el-tag></template></el-table-column></el-table></template>
           <template v-else-if="view==='dashboard'&&dashboard">
             <div class="metric-strip"><article><span>注册学生</span><strong>{{ dashboard.counts.users.toLocaleString() }}<small>人</small></strong><span class="metric-detail">独立账号，按考试记录权益</span><Users class="metric-icon" :size="23" /></article><article><span>题库内容</span><strong>{{ dashboard.counts.questions.toLocaleString() }}<small>题</small></strong><span class="metric-detail">{{ dashboard.counts.knowledge }} 个知识点</span><BookOpen class="metric-icon teal" :size="23" /></article><article><span>模拟支付金额</span><strong>{{ money(dashboard.counts.paid_cents/100) }}</strong><span class="metric-detail">{{ dashboard.counts.orders }} 笔测试订单 · 未实际扣款</span><CreditCard class="metric-icon amber" :size="23" /></article><article><span>AI 累计估算费用</span><strong>{{ money(dashboard.counts.ai_cost) }}</strong><span class="metric-detail">含测试调用，以中转账单为准</span><Sparkles class="metric-icon violet" :size="23" /></article></div>
@@ -186,17 +194,22 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
     <el-form label-position="top" class="editor-form">
       <el-form-item label="标题" required><el-input v-model="edit.title" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
       <div class="form-columns"><el-form-item label="所属考试"><el-select v-model="edit.exam_id" :disabled="Boolean(edit.version)" clearable @clear="edit.exam_id=null"><el-option v-for="e in exams" :key="e.id" :label="e.name" :value="e.id" /></el-select></el-form-item><el-form-item label="发布状态"><el-select v-model="edit.status"><el-option v-for="s in ['draft','review','published','offline']" :key="s" :label="labels[s]" :value="s" /></el-select></el-form-item></div>
-      <el-form-item v-if="!['subject','article','announcement','faq'].includes(edit.kind)" :label="edit.kind==='course'?'关联节 / 知识点':'所属父级'" required><el-select v-model="edit.parent_id" filterable><el-option v-for="p in parentOptions" :key="p.id" :label="`${labels[p.kind]} · ${p.title}`" :value="p.id" /></el-select></el-form-item>
+      <el-form-item v-if="!['subject','article','announcement','faq','cheatsheet'].includes(edit.kind)" :label="edit.kind==='course'?'关联节 / 知识点':'所属父级'" required><el-select v-model="edit.parent_id" filterable><el-option v-for="p in parentOptions" :key="p.id" :label="`${labels[p.kind]} · ${p.title}`" :value="p.id" /></el-select></el-form-item>
       <el-form-item v-if="['knowledge','chapter','section'].includes(edit.kind)" label="排序"><el-input-number v-model="edit.payload.no" :min="1" :max="999" /></el-form-item>
       <el-form-item v-if="edit.kind==='knowledge'" label="知识点星级"><el-rate v-model="edit.payload.stars" show-score /></el-form-item>
       <template v-if="edit.kind==='question'"><el-form-item label="题型"><el-radio-group v-model="edit.payload.type"><el-radio-button value="single">单选题</el-radio-button><el-radio-button value="multiple">多选题</el-radio-button><el-radio-button value="subjective">主观题</el-radio-button></el-radio-group></el-form-item><template v-if="edit.payload.type!=='subjective'"><el-form-item label="选项，每行一个，按 A、B、C 顺序" required><el-input v-model="optionText" type="textarea" :rows="5" /></el-form-item><el-form-item label="正确答案，例如 A 或 A,C" required><el-input v-model="answerText" /></el-form-item></template><template v-else><el-form-item label="参考答案" required><el-input v-model="edit.payload.referenceAnswer" type="textarea" :rows="4" /></el-form-item><el-form-item label="评分标准" required><el-input v-model="edit.payload.rubric" type="textarea" :rows="4" /></el-form-item><el-form-item label="满分" required><el-input-number v-model="edit.payload.maxScore" :min="1" :max="200" /></el-form-item></template><el-form-item label="答案解析"><el-input v-model="edit.payload.explanation" type="textarea" :rows="5" /></el-form-item><div class="form-columns"><el-form-item label="真题年份"><el-input v-model="edit.payload.year" placeholder="非真题留空" /></el-form-item><el-form-item label="真题标签"><el-switch :model-value="edit.payload.source==='真题'" @change="edit.payload.source=$event?'真题':''" /></el-form-item></div></template>
       <template v-else-if="edit.kind==='course'"><div class="form-columns"><el-form-item label="课程类型"><el-select v-model="edit.payload.type"><el-option label="图文" value="article" /><el-option label="视频" value="video" /><el-option label="音频" value="audio" /></el-select></el-form-item><el-form-item label="所需会员"><el-select v-model="edit.payload.requiredLevel"><el-option label="VIP" value="vip" /><el-option label="SVIP" value="svip" /></el-select></el-form-item></div><el-form-item label="课程介绍"><el-input v-model="edit.payload.intro" type="textarea" :rows="5" /></el-form-item><el-form-item label="媒体地址（HTTPS）"><el-input v-model="edit.payload.mediaUrl" /></el-form-item><el-form-item label="时长（分钟）"><el-input-number v-model="edit.payload.totalMinutes" :min="1" /></el-form-item></template>
       <template v-else-if="edit.kind==='handout'"><el-form-item label="版本号"><el-input-number v-model="edit.payload.version" :min="1" /></el-form-item><el-form-item label="下载地址（HTTPS）"><el-input v-model="edit.payload.downloadUrl" /></el-form-item></template>
+      <template v-else-if="['knowledge','cheatsheet'].includes(edit.kind)">
+        <el-form-item v-if="edit.kind==='knowledge'" label="这是知识点课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="这是知识点课程" /></el-form-item>
+        <template v-else><el-form-item label="简介" required><el-input v-model="edit.payload.intro" type="textarea" :rows="3" maxlength="500" /></el-form-item><div class="form-columns"><el-form-item label="开放时间" required><el-date-picker v-model="edit.payload.opensAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item><el-form-item label="关闭时间" required><el-date-picker v-model="edit.payload.closesAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item></div></template>
+        <el-form-item label="图文正文"><RichEditor v-if="editor" :key="edit.id" v-model="edit.payload.document" :plain-text="edit.payload.content" :exam-id="edit.exam_id" :content-id="edit.id" @busy="resourceBusy=$event" /></el-form-item>
+      </template>
       <el-form-item v-else label="正文"><el-input v-model="edit.payload.content" type="textarea" :rows="7" /></el-form-item>
       <div class="form-columns"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
       <el-checkbox v-model="advanced" @change="payloadText=JSON.stringify(edit.payload,null,2)">高级结构字段</el-checkbox><el-input v-if="advanced" v-model="payloadText" class="json-field" type="textarea" :rows="12" />
       <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="form-error" />
-    </el-form><template #footer><el-button @click="editor=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveContent">保存内容</el-button></template>
+    </el-form><template #footer><el-button :disabled="resourceBusy" @click="editor=false">取消</el-button><el-button type="primary" :disabled="resourceBusy" :loading="saving" @click="saveContent">保存内容</el-button></template>
   </el-drawer>
   <el-dialog v-model="dateDialog" title="修改考试日期" width="480px"><p class="dialog-context">{{ dateEdit.name }} · {{ dateEdit.year }} 年</p><el-form label-position="top"><el-form-item label="考试结束时间（北京时间）"><el-date-picker v-model="dateEdit.endsAt" type="datetime" format="YYYY-MM-DD HH:mm:ss" /></el-form-item></el-form><el-alert v-if="dateError" :title="dateError" type="error" :closable="false" /><template #footer><el-button @click="dateDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveDate">保存日期</el-button></template></el-dialog>
   <el-dialog v-model="planDialog" title="学习计划默认规则" width="520px"><p class="dialog-context">{{ planEdit.name }} · 用户可在前台自行调整</p><el-form label-position="top"><div class="form-columns"><el-form-item label="备考阶段（天）"><el-input-number v-model="planEdit.prepDays" :min="1" :max="365" /></el-form-item><el-form-item label="冲刺阶段（天）"><el-input-number v-model="planEdit.sprintDays" :min="1" :max="90" /></el-form-item></div><div class="form-columns"><el-form-item label="默认每周休息天数"><el-input-number v-model="planEdit.defaultRestDays" :min="0" :max="3" /></el-form-item><el-form-item label="默认轮次"><el-select v-model="planEdit.defaultRound"><el-option label="第一轮 · 覆盖学习" value="coverage" /><el-option label="第二轮 · 巩固复习" value="consolidation" /></el-select></el-form-item></div><el-alert v-if="planError" :title="planError" type="error" :closable="false" show-icon /></el-form><template #footer><el-button @click="planDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePlanConfig">保存规则</el-button></template></el-dialog>

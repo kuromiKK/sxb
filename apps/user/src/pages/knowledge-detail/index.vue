@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import StudyContent from '@/components/StudyContent.vue'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { backOrFallback } from '@/utils/navigation'
 import { courseCatalog, knowledgeSubjects, type KnowledgePoint } from '@/mock/data'
@@ -17,16 +18,27 @@ const saved = ref(false)
 const { state } = useAppStore()
 
 const allPoints = knowledgeSubjects.flatMap(subject => subject.chapters.flatMap(chapter => chapter.sections.flatMap(section => section.points.map(point => ({ point, subject, chapter, section })))))
-const record = computed(() => allPoints.find(item => item.point.id === pointId.value) || allPoints[0])
-const point = computed<KnowledgePoint>(() => record.value.point)
-const currentIndex = computed(() => allPoints.findIndex(item => item.point.id === point.value.id))
+const record = computed(() => allPoints.find(item => item.point.id === pointId.value))
+const point = computed<KnowledgePoint>(() => record.value?.point as KnowledgePoint)
+const currentIndex = computed(() => allPoints.findIndex(item => item.point.id === pointId.value))
 const hasPrevious = computed(() => currentIndex.value > 0)
 const hasNext = computed(() => currentIndex.value >= 0 && currentIndex.value < allPoints.length - 1)
-const sectionCourse = computed(() => courseCatalog.find(course => (course as any).knowledgePointId === pointId.value) || courseCatalog.find(course => course.sectionId === record.value.section.id))
+const sectionCourse = computed(() => courseCatalog.find(course => course.sectionId === record.value?.section.id && !(course as any).knowledgePointId))
 const practiceProgress = computed(() => point.value.questionTotal
   ? Math.min(Math.round(point.value.questionDone / point.value.questionTotal * 100), 100)
   : 0)
-const contentParagraphs = computed(() => point.value.content.split(/\n+/).filter(Boolean))
+const richContent=ref<any>(),contentBusy=ref(false),contentError=ref('')
+async function loadContent(){
+  const current=pointId.value,wasLoggedIn=Boolean(token())
+  richContent.value=null;contentError.value='';contentBusy.value=true
+  try{
+    const path=`/knowledge-content/${encodeURIComponent(current)}`
+    let result:any
+    try{result=await api(`${path}${wasLoggedIn?'/member':''}`)}catch(error){if(wasLoggedIn&&!token())result=await api(path);else throw error}
+    if(pointId.value===current)richContent.value=result
+  }catch(e:any){if(pointId.value===current)contentError.value=e.message}finally{if(pointId.value===current)contentBusy.value=false}
+}
+onShow(()=>{void loadContent()})
 
 onLoad((options) => {
   if (options?.id) pointId.value = decodeURIComponent(options.id)
@@ -43,6 +55,7 @@ const showPoint = (index: number) => {
   const target = allPoints[index]
   if (!target) return
   pointId.value = target.point.id
+  void loadContent()
   loadPointState()
   uni.pageScrollTo({ scrollTop: 0, duration: 180 })
 }
@@ -77,7 +90,7 @@ const saveNote = async () => { if (!note.value.trim()) return uni.showToast({ ti
     <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">知识点详情</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
     <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
     <view class="point-hero"><view class="hero-top"><view class="hero-icon"><uni-icons type="map" size="24" color="#fff" /></view><view class="hero-title-wrap"><text class="hero-title">{{ point.title }}</text><view class="hero-tags"><text class="star-tag" :class="`star-${point.stars}`">{{ point.stars }}星</text><text class="mastery-tag">掌握 {{ point.mastery }}%</text></view></view></view><view class="hero-stats"><view><text>{{ point.questionTotal }}</text><text>包含题目</text></view><view><text>{{ point.questionDone }}</text><text>已做题目</text></view><view><text>{{ point.questionTotal ? Math.round(point.questionDone / point.questionTotal * 100) : 0 }}%</text><text>完成进度</text></view></view></view>
-    <view class="content-card"><view class="card-title-row"><view class="card-title"><view class="title-bar"></view><text>知识点内容</text></view></view><text v-for="(paragraph, index) in contentParagraphs" :key="index" class="content-text">{{ paragraph }}</text></view>
+    <view class="content-card"><view class="card-title-row"><view class="card-title"><view class="title-bar"></view><text>{{ richContent?.isKnowledgeCourse?'知识点课程':'知识点内容' }}</text></view></view><text v-if="contentBusy" class="content-text">正在加载…</text><view v-else-if="contentError"><text class="content-text">{{ contentError }}</text><button @tap="loadContent">重试</button></view><StudyContent v-else-if="richContent" :blocks="richContent.blocks" /></view>
     <view class="extension-card">
       <view class="extension-title"><text>学习延伸</text><text>继续巩固本知识点</text></view>
       <view class="extension-row practice-row" :class="{ disabled: !point.questionTotal }" @tap="openPractice"><view class="extension-icon practice"><uni-icons type="compose" size="20" :color="point.questionTotal ? '#3569e8' : '#9aa5b4'" /></view><view class="extension-copy practice-copy"><view class="practice-copy-head"><text>本知识点刷题</text><text v-if="point.questionTotal">{{ practiceProgress }}%</text></view><text class="practice-meta">{{ point.questionTotal ? `已完成 ${point.questionDone} / 共 ${point.questionTotal} 题` : '本知识点无题' }}</text><view v-if="point.questionTotal" class="practice-progress"><view :style="{ width: `${practiceProgress}%` }"></view></view></view><uni-icons v-if="point.questionTotal" type="forward" size="18" color="#8a96a7" /></view>
@@ -90,9 +103,11 @@ const saveNote = async () => { if (!note.value.trim()) return uni.showToast({ ti
       <button class="next-button" @tap="nextPoint"><text>{{ hasNext ? '下一知识点' : '返回知识图谱' }}</text><uni-icons :type="hasNext ? 'forward' : 'map'" size="18" color="#fff" /></button>
     </view>
   </view>
+  <view v-else class="missing-point"><text>知识点不存在，或当前考试内容尚未加载。</text><button @tap="back">返回知识图谱</button></view>
 </template>
 
 <style lang="scss" scoped>
+.missing-point { max-width:430px; margin:auto; padding:64px 24px; font-size:16px; line-height:1.8; text-align:center; color:#52647c; }.missing-point button { margin-top:24px; font-size:16px; color:#3569e8; }
 .detail-page { max-width: 430px; min-height: 100vh; margin: 0 auto; box-sizing: border-box; padding: calc(env(safe-area-inset-top) + 18rpx) 20px 42rpx; background: #f5f7fb; }.detail-top { display: flex; align-items: center; justify-content: space-between; height: 58rpx; }.back-button,.favorite-button { width: 58rpx; height: 58rpx; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; background: #edf1fb; border: 0; border-radius: 15rpx; }.back-button::after,.favorite-button::after { display: none; }.favorite-button { background: #fff; border: 1rpx solid #e0e6f0; }.favorite-button.active { background: #fff4e6; border-color: #f8d5a7; }.detail-top-title { color: #1e3048; font-size: var(--sxb-text-item); font-weight: 700; }.crumb { display: flex; align-items: center; gap: 4rpx; margin-top: 18rpx; overflow: hidden; color: #8b96a5; font-size: var(--sxb-text-meta); white-space: nowrap; }.crumb text { overflow: hidden; text-overflow: ellipsis; }.point-hero { margin-top: 17rpx; padding: 22rpx; color: #fff; background: linear-gradient(135deg,#1d3558 0%,#3a4b93 100%); border-radius: 15rpx; box-shadow: 0 12rpx 26rpx rgba(43,58,113,.18); }.hero-top { display: flex; align-items: flex-start; gap: 12rpx; }.hero-icon { width: 48rpx; height: 48rpx; display: flex; align-items: center; justify-content: center; flex: none; background: rgba(255,255,255,.14); border-radius: 13rpx; }.hero-title-wrap { flex: 1; min-width: 0; }.hero-title { display: block; color: #fff; font-size: var(--sxb-text-item); line-height: 1.5; font-weight: 700; }.hero-tags { display: flex; align-items: center; gap: 7rpx; margin-top: 9rpx; }.star-tag,.mastery-tag { display: inline-block; padding: 4rpx 8rpx; border-radius: 5rpx; font-size: var(--sxb-text-meta); line-height: 1.25; font-weight: 700; }.star-tag { color: #d47a25; background: #fff2df; }.mastery-tag { color: #d8e4ff; background: rgba(255,255,255,.12); }.hero-stats { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 20rpx; padding-top: 17rpx; border-top: 1rpx solid rgba(255,255,255,.15); }.hero-stats view { display: flex; flex-direction: column; align-items: center; gap: 4rpx; border-right: 1rpx solid rgba(255,255,255,.14); }.hero-stats view:last-child { border-right: 0; }.hero-stats text:first-child { font-size: var(--sxb-text-title); font-weight: 700; }.hero-stats text:last-child { color: #becbe2; font-size: var(--sxb-text-meta); }.content-card,.note-card { margin-top: 16rpx; padding: 19rpx; background: #fff; border: 1rpx solid #e0e6f0; border-radius: 13rpx; box-shadow: 0 7rpx 19rpx rgba(51,74,115,.04); }.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8rpx; }.card-title { display: flex; align-items: center; gap: 8rpx; color: #22354e; font-size: var(--sxb-text-body); font-weight: 700; }.title-bar { width: 5rpx; height: 24rpx; background: #3569e8; border-radius: 5rpx; }.title-bar.orange { background: #e98a3a; }.content-hint { color: #a0aaba; font-size: var(--sxb-text-meta); }.content-text { display: block; margin-top: 15rpx; color: #4b5c72; font-size: var(--sxb-text-body); line-height: 1.75; }.key-line { display: flex; align-items: flex-start; gap: 6rpx; margin-top: 14rpx; padding: 10rpx 11rpx; color: #8a622b; background: #fff8ed; border-radius: 7rpx; font-size: var(--sxb-text-small); line-height: 1.45; }.course-card { display: flex; align-items: center; gap: 11rpx; margin-top: 16rpx; padding: 16rpx; background: #f0edff; border: 1rpx solid #ded7ff; border-radius: 12rpx; }.course-icon { width: 43rpx; height: 43rpx; display: flex; align-items: center; justify-content: center; flex: none; background: #fff; border-radius: 11rpx; }.course-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3rpx; }.course-label { color: #7969c5; font-size: var(--sxb-text-meta); }.course-title { overflow: hidden; color: #3e347f; font-size: var(--sxb-text-body); font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }.course-meta { color: #8378b4; font-size: var(--sxb-text-meta); }.note-card textarea { width: 100%; min-height: 170rpx; box-sizing: border-box; margin-top: 15rpx; padding: 13rpx; color: #34475f; background: #fafbfe; border: 1rpx solid #e3e8f1; border-radius: 9rpx; font-size: var(--sxb-text-body); line-height: 1.6; }.note-placeholder { color: #a1acba; }.note-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 11rpx; color: #a1aaba; font-size: var(--sxb-text-meta); }.save-note { width: 124rpx; height: 42rpx; display: flex; align-items: center; justify-content: center; gap: 4rpx; margin: 0; padding: 0; color: #fff; background: #3569e8; border-radius: 7rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.save-note::after { display: none; }.save-note.saved { background: #1a9a7b; }.detail-tip { display: flex; align-items: flex-start; gap: 6rpx; margin-top: 17rpx; padding: 11rpx 12rpx; color: #64758b; background: #edf3ff; border-radius: 8rpx; font-size: var(--sxb-text-meta); line-height: 1.45; }
 .content-text + .content-text { margin-top: 13rpx; }
 .extension-card { margin-top:16rpx; padding:0 17rpx; background:#fff; border:1rpx solid #e0e6f0; border-radius:12rpx; box-shadow:0 7rpx 19rpx rgba(51,74,115,.04); }

@@ -1,5 +1,6 @@
 import { db, transaction, type Queryable } from './db.ts'
 import { fail, id } from './security.ts'
+import { resolvePermissions, permissionCatalog } from './permission-policy.ts'
 
 export const prices = { vip: 59900, svip: 79900, trial: 100, upgrade: 20000 } as const
 export type Product = keyof typeof prices
@@ -10,8 +11,10 @@ export function effectiveLevel(grant: { level: string; endsAt: string; nextEndsA
   if (grant.level === 'svip' && now < Date.parse(grant.nextEndsAt)) return 'vip'
   return 'free'
 }
-function entitlement(examId: string, level: string, expiry: string | null, trial = false, source = 'order') {
-  return { examId, level, expiresAt: expiry, trial, source, permissions: { questions: true, knowledge: true, notes: true, plan: true, courses: level !== 'free', aiChat: level !== 'free', reports: level === 'svip', aiReview: level === 'svip' } }
+async function entitlement(examId: string, level: string, expiry: string | null, trial = false, source = 'order', connection:Queryable=db) {
+  const permissions=await resolvePermissions(examId,level,connection)
+  const permissionLabels=permissionCatalog.filter(p=>permissions[p.key]).map(p=>p.name)
+  return { examId, level, expiresAt: expiry, trial, source, permissions, permissionLabels }
 }
 export function manualEffective(row: { level: string; ends_at: string; next_ends_at?: string; revoked: boolean }, now = Date.now()) {
   if (row.revoked) return null
@@ -26,7 +29,7 @@ export async function manualEntitlement(userId: string, examId: string, connecti
 export async function rights(userId: string, examId: string, connection: Queryable = db) {
   const row = await manualEntitlement(userId, examId, connection)
   const manual = row && manualEffective(row)
-  if (manual) return entitlement(examId, manual.level, manual.expiresAt, false, 'manual')
+  if (manual) return entitlement(examId, manual.level, manual.expiresAt, false, 'manual',connection)
   return orderRights(userId, examId, connection)
 }
 export async function orderRights(userId: string, examId: string, connection: Queryable = db) {
@@ -39,7 +42,7 @@ export async function orderRights(userId: string, examId: string, connection: Qu
     const end = row.level === 'trial' ? row.trial_ends_at : found === 'vip' && row.level === 'svip' ? next : row.ends_at
     if (ranks[found] > ranks[level] || (found === level && found !== 'free' && Date.parse(end) > Date.parse(expiry || ''))) { level = found; expiry = end; trial = row.level === 'trial' }
   }
-  return entitlement(examId, level, expiry, trial)
+  return entitlement(examId, level, expiry, trial,'order',connection)
 }
 export async function expireOrders(connection: Queryable = db) {
   await connection.query(`UPDATE orders SET status='closed',close_reason='超过30分钟未支付，订单已自动关闭' WHERE status='pending_payment' AND expires_at<=now()`)

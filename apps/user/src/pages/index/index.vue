@@ -7,7 +7,7 @@ import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
 import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
 import { createRightsOrder, loadOrders, persistOrders, type PaymentMethod } from '@/utils/orders'
-import { api, account, learningPlan, refreshLearningPlan, refreshRights, showApiError } from '@/services/api'
+import { api, account, learningPlan, refreshLearningPlan, refreshRights, showApiError, token, selectedExamId } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
 
 const { state, exam, todayRemaining, refreshPlanState, requireLogin, login, logout } = useAppStore()
@@ -28,7 +28,11 @@ const selectedPlan = ref<StudyPlan>()
 const selectedPurchaseMethod = ref<PaymentMethod>('wechat')
 const planProgress = computed(() => state.todayTarget ? Math.min(Math.round(state.todayDone / state.todayTarget * 100), 100) : 0)
 const masteryRingStyle = computed(() => ({ background: `conic-gradient(#6949df ${Math.max(exam.value.mastery, 4)}%, #e7e9f3 0)` }))
-const isFlagship = computed(() => rightsLevel.value === 'flagship')
+const isFlagship = computed(() => account.permissions.reports === true)
+const contentNotices=ref<any[]>([])
+async function loadContentNotices(){contentNotices.value=[];if(!token())return;const examId=selectedExamId(),currentToken=token();try{const rows=await api(`/content-notices/${examId}`);if(examId===selectedExamId()&&currentToken===token())contentNotices.value=rows}catch(e){showApiError(e)}}
+async function dismissNotice(item:any){try{await api(`/content-notices/${item.id}/seen`,'POST',{});contentNotices.value=contentNotices.value.filter(n=>n.id!==item.id)}catch(e){showApiError(e)}}
+function openReminder(item:any){if(item.requiredPermission&&!account.permissions[item.requiredPermission])uni.showModal({title:'会员专属内容',content:'此内容需要对应考试会员权益。',confirmText:'查看权益',success:(r:any)=>{if(r.confirm)uni.navigateTo({url:'/pages/profile-center/index?mode=rights'})}});else gated(item.url)}
 const homeReports = computed(() => monthlyReports
   .filter(item => !item.locked)
   .sort((a, b) => b.id.localeCompare(a.id)))
@@ -150,6 +154,7 @@ const openFlagshipRights = () => {
   uni.navigateTo({ url: '/pages/profile-center/index?mode=rights' })
 }
 onShow(() => {
+  void loadContentNotices()
   state.selectedTab = 0
   void refreshRights().then(refreshMonthlyReports).catch(showApiError)
   void refreshLearningPlan().then(refreshPlanState).catch(showApiError)
@@ -202,8 +207,9 @@ const plans: StudyPlan[] = [
     <view v-if="learningPlan.data" class="plan-reminders">
       <view class="plan-live-status">{{ learningPlan.data.progress.stage }} · 第 {{ learningPlan.data.progress.roundNumber }} 轮 · {{ learningPlan.data.progress.round === 'coverage' ? '覆盖学习' : '巩固复习' }}<text v-if="learningPlan.data.progress.isRest"> · 今天休息</text></view>
       <button class="plan-continue" @tap="gated('/pages/practice-session/index?plan=1')">{{ learningPlan.data.progress.isRest ? '自由练习' : '继续计划刷题' }}<uni-icons type="right" size="16" color="#3569e8" /></button>
-      <button v-for="item in learningPlan.data.reminders" :key="item.title" class="plan-reminder" @tap="(item.requiredLevel === 'vip' && account.level === 'free') || (item.requiredLevel === 'svip' && account.level !== 'svip') ? uni.showModal({title:'会员专属内容',content:'此内容需要对应考试会员权益。',showCancel:false}) : gated(item.url)">{{ item.title }}<uni-icons type="right" size="16" color="#64748b" /></button>
+      <button v-for="item in learningPlan.data.reminders" :key="item.title" class="plan-reminder" @tap="openReminder(item)">{{ item.title }}<uni-icons type="right" size="16" color="#64748b" /></button>
     </view>
+    <view v-for="item in contentNotices" :key="item.id" class="content-notice"><view class="notice-heading"><uni-icons type="notification" size="20" color="#3569e8" /><text>考前小抄已开放</text></view><text class="notice-title">{{ item.title }}</text><view class="notice-actions"><button @tap="dismissNotice(item)">知道了</button><button @tap="uni.navigateTo({url:'/pages/cheatsheets/index'})">查看资料<uni-icons type="right" size="15" color="#3569e8" /></button></view></view>
     <view class="section-head flow-head"><view><text class="section-title">一套完整的学习流程</text><text class="section-subtitle">这是效率更高的建议路径，也可以从任意环节直接开始</text></view></view>
     <view class="study-flow"><view v-for="stage in stages" :key="stage.round" class="stage" :class="stage.tone"><view class="stage-header"><view class="stage-number">{{ stage.round }}</view><view><text class="stage-title">{{ stage.title }}</text><text class="stage-summary">{{ stage.summary }}</text></view></view><view class="action-list"><view v-for="action in stage.actions" :key="action.no" class="action-row"><view class="action-copy"><view class="action-heading"><text class="action-no">{{ action.no }}</text><text class="action-name">{{ action.name }}</text><text class="action-meta">{{ action.meta }}</text></view><text class="action-description">{{ action.description }}</text></view><view class="action-buttons"><button class="start-button" @tap="action.route ? gated(action.route) : showMessage(action.message)">立即开始</button></view></view></view></view></view>
 
@@ -253,6 +259,10 @@ const plans: StudyPlan[] = [
     <DebugMenu page="首页账号权限" :options="[{ key:'logged-out',label:'未登录用户' },{ key:'unpaid',label:'已登录未付款用户' },{ key:'trial',label:'1元试听用户' },{ key:'basic',label:'免费版用户' },{ key:'pro',label:'VIP用户' },{ key:'flagship',label:'SVIP用户' }]" @select="applyHomeDebug" />
   </view>
 </template>
+
+<style scoped>
+.content-notice{margin:16px 0;padding:18px 0;border-top:1px solid #d9e4f4;border-bottom:1px solid #d9e4f4}.notice-heading{display:flex;align-items:center;gap:8px;font-size:16px;color:#24426d;font-weight:700}.notice-title{display:block;font-size:15px;line-height:1.7;color:#53657e;margin:10px 0}.notice-actions{display:flex;justify-content:flex-end;gap:16px}.notice-actions button{min-height:44px;padding:0 8px;margin:0;display:flex;align-items:center;gap:6px;font-size:15px;color:#3569e8;background:transparent}.notice-actions button::after{display:none}.notice-actions button:first-child{color:#64748b}
+</style>
 
 <style scoped lang="scss">
 .home { max-width: 430px; margin: 0 auto; padding-top: calc(env(safe-area-inset-top) + 22rpx); background: #f5f7fb; }

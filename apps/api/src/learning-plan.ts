@@ -83,18 +83,21 @@ export async function getLearningPlan(userId: string, examId: string) {
   const counts = new Map(allocations.map(a => [a.date,a.count]))
   const stage = daysLeft <= config.sprintDays ? '冲刺阶段' : daysLeft <= config.prepDays ? '备考阶段' : '规划阶段'
   const plan = {examId,subjectIds:content.knowledgeSubjects.filter(s=>s.chapters.some((c:any)=>chapterIds.includes(c.id))).map(s=>s.id),chapterIds,restWeekdays,skipDates,round,includeCourses:saved?.includeCourses!==false,includeWrong:saved?.includeWrong!==false,includeNotes:saved?.includeNotes!==false,includeCheatSheets:saved?.includeCheatSheets!==false,questionIds,total:questionIds.length,target:dailyTarget,dailyTarget,targetCustomized,minTarget:autoDaily,years:[],sources:['chapter'],updatedAt:saved?.updatedAt||0}
-  const reminders: Array<{title:string;url:string;requiredLevel?:string}> = []
+  const reminders: Array<{title:string;url:string;requiredPermission?:string}> = []
   const isRest = !dates.includes(today)
   if (!isRest) {
     const nextQuestion = questions.find(q => q.id === queue[0])
-    const course = content.courseCatalog.find(c => c.sectionId === nextQuestion?.sectionId && !c.knowledgePointId)
-    if (plan.includeCourses && course) reminders.push({title:'复习本节精讲课',url:`/pages/course-detail/index?id=${course.id}`,requiredLevel:'vip'})
+    const wrongQuestion=questions.find(q=>latest.get(q.id)&&!latest.get(q.id).correct)
+    const course = content.courseCatalog.find(c => c.sectionId === (wrongQuestion||nextQuestion)?.sectionId && !c.knowledgePointId)
+    const marked=wrongQuestion&&(await db.query("SELECT id FROM content WHERE id=$1 AND kind='knowledge' AND status='published' AND payload->>'isKnowledgeCourse'='true'",[wrongQuestion.knowledgePointId])).rows[0]
+    if(plan.includeCourses&&marked)reminders.push({title:'复习错题关联知识点课程',url:`/pages/knowledge-detail/index?id=${marked.id}`})
+    else if (plan.includeCourses && course) reminders.push({title:'复习本节精讲课',url:`/pages/course-detail/index?id=${course.id}`,requiredPermission:'courses'})
     if (plan.includeWrong && events.some(e=>latest.get(e.question_id)===e&&!e.correct)) reminders.push({title:'回顾所选章节的错题',url:'/pages/practice-tools/index?mode=wrong'})
     const notes = (await db.query("SELECT source_id FROM user_records WHERE user_id=$1 AND exam_id=$2 AND kind='note' LIMIT 1",[userId,examId])).rows
     if (plan.includeNotes && notes.length) reminders.push({title:'回顾我的学习笔记',url:'/pages/practice-tools/index?mode=note'})
     // A reminder is only emitted when actual published exam material exists.
-    const sheet = content.articles.find(a => a.resourceType === 'cheat-sheet' && a.examId === examId)
-    if (plan.includeCheatSheets && stage==='冲刺阶段' && sheet) reminders.push({title:'考前小抄复习',url:`/pages/exam-notice-detail/index?id=${sheet.id}`,requiredLevel:'svip'})
+    const sheet = (await db.query("SELECT id FROM content WHERE kind='cheatsheet' AND exam_id=$1 AND status='published' AND (payload->>'opensAt')::timestamptz<=now() AND (payload->>'closesAt')::timestamptz>now() LIMIT 1",[examId])).rows[0]
+    if (plan.includeCheatSheets && sheet) reminders.push({title:'考前小抄复习',url:'/pages/cheatsheets/index'})
   }
   return {exam,config,plan,questionIds:queue,progress:{completed:done.size,remaining,roundNumber,round,todayDone:todayIds.size,todayRemaining:counts.get(today)||0,todayTarget:isRest?0:Math.min(remaining+todayIds.size,dailyTarget),daysLeft,activeDays:dates.length,autoDaily,stage,isRest,unscheduled:remaining-allocations.reduce((s,d)=>s+d.count,0)},preview:Array.from({length:Math.min(7,daysLeft)},(_,i)=>{const date=addDays(today,i);return {date,count:counts.get(date)||0,rest:!dates.includes(date)}}),reminders}
 }

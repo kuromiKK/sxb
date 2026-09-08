@@ -3,7 +3,7 @@ export async function migrate() {
   // Append versioned migrations here; never reset a database on startup.
   await db.query(`CREATE TABLE IF NOT EXISTS schema_versions (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())`)
   const versions = await db.query('SELECT version FROM schema_versions WHERE version=1')
-  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); return }
+  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); await migrateStudyContent(); return }
   const statements = [
     `CREATE TABLE users (id text PRIMARY KEY, phone text UNIQUE NOT NULL, nickname text NOT NULL, role text NOT NULL DEFAULT 'student' CHECK(role IN ('student','superadmin','editor','support','operator')), password_hash text, invite_code text UNIQUE NOT NULL, inviter_id text REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), is_test_data boolean NOT NULL DEFAULT true)`,
     `CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL, created_at timestamptz DEFAULT now())`,
@@ -35,6 +35,20 @@ export async function migrate() {
   await migrateAccountKinds()
   await migrateManualEntitlements()
   await migratePlanModel()
+  await migrateStudyContent()
+}
+
+async function migrateStudyContent() {
+  await transaction(async c => {
+    await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
+    if ((await c.query('SELECT version FROM schema_versions WHERE version=7')).rows.length) return
+    await c.query(`CREATE TABLE permission_policies (exam_id text NOT NULL REFERENCES exams(id), level text NOT NULL CHECK(level IN ('free','vip','svip')), permissions jsonb NOT NULL DEFAULT '{}', version integer NOT NULL DEFAULT 1, actor_id text REFERENCES users(id), updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(exam_id,level))`)
+    await c.query(`CREATE TABLE media_assets (id text PRIMARY KEY, exam_id text NOT NULL REFERENCES exams(id), content_id text NOT NULL, owner_id text NOT NULL REFERENCES users(id), kind text NOT NULL CHECK(kind IN ('image','video','audio','handout')), source text NOT NULL CHECK(source IN ('upload','external')), filename text NOT NULL, mime text NOT NULL, size_bytes bigint NOT NULL DEFAULT 0, disk_name text, external_url text, created_at timestamptz NOT NULL DEFAULT now())`)
+    await c.query(`CREATE INDEX media_content ON media_assets(content_id)`)
+    await c.query(`CREATE TABLE media_tickets (token_hash text PRIMARY KEY, asset_id text NOT NULL REFERENCES media_assets(id), content_id text NOT NULL, session_hash text NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE, expires_at timestamptz NOT NULL)`)
+    await c.query(`CREATE TABLE content_notices_seen (user_id text NOT NULL REFERENCES users(id), content_id text NOT NULL REFERENCES content(id), PRIMARY KEY(user_id,content_id), seen_at timestamptz NOT NULL DEFAULT now())`)
+    await c.query('INSERT INTO schema_versions(version) VALUES(7)')
+  })
 }
 
 async function migratePlanModel() {

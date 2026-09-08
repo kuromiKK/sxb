@@ -13,8 +13,11 @@ import { administrators } from './administrators.ts'
 import { userEntitlements } from './entitlements.ts'
 import { getLearningPlan, saveLearningPlan } from './learning-plan.ts'
 import { examManagement } from './exam-management.ts'
+import { permissionPolicies } from './permission-policy.ts'
+import { studyPublic, studyStudent, mediaAdmin } from './study-content.ts'
 
 export const api = Router()
+api.use(studyPublic)
 const phone = z.string().regex(/^1\d{10}$/,'请输入11位手机号')
 const text = z.string().min(1).max(200)
 api.get('/health', async (_req,res)=>{ await db.query('SELECT 1'); res.json({status:'ok',mode:process.env.APP_MODE||'test',database:process.env.DATABASE_URL?'PostgreSQL':'PGlite (persistent PostgreSQL)'}) })
@@ -61,6 +64,7 @@ api.get('/exam-tree',async(_req,res)=>{
 })
 api.get('/catalog/:examId',async(req,res)=>res.json(await catalog(req.params.examId)))
 api.use(requireUser)
+api.use(studyStudent)
 api.post('/auth/logout',async(req,res)=>{await db.query('DELETE FROM sessions WHERE token_hash=$1',[hash(req.headers.authorization?.replace(/^Bearer /,'')||'')]);res.json({ok:true})})
 api.get('/me',async(_req,res)=>res.json(res.locals.user))
 api.get('/learning-plan/:examId',async(req,res)=>{
@@ -202,11 +206,14 @@ api.post('/ai/:feature',async(req,res)=>{
   const r=await rights(res.locals.user.id,b.examId)
   const feature=req.params.feature
   if(!['chat','review','wrong','report','plan'].includes(feature)) fail(403,'此AI功能仅在后台测试开放')
-  if(['review','report'].includes(feature)?r.level!=='svip':r.level==='free') fail(403,'当前考试会员权限不足')
+  const permission:Record<string,string>={chat:'aiChat',review:'aiReview',wrong:'ai.wrong',report:'ai.report',plan:'ai.plan'}
+  if(!r.permissions[permission[feature]]) fail(403,'当前考试会员权限不足')
   res.json(await callAI(res.locals.user.id,feature,b.prompt,false,b.examId))
 })
 
 api.use('/admin',requireAdmin)
+api.use('/admin/permission-policies',permissionPolicies)
+api.use('/admin/media',mediaAdmin)
 api.use('/admin/administrators',administrators)
 api.get('/admin/roles',async(_req,res)=>res.json([{id:'superadmin',name:'最高管理员',description:'管理全部教学内容、学生、订单、AI配置和管理员账号',system:true}]))
 api.get('/admin/dashboard',async(_req,res)=>{

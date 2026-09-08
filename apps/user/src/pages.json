@@ -6,6 +6,8 @@
     { "path": "pages/search/index", "style": { "navigationStyle": "custom" } },
     { "path": "pages/knowledge/index", "style": { "navigationStyle": "custom" } },
     { "path": "pages/knowledge-detail/index", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/cheatsheets/index", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/cheatsheet-detail/index", "style": { "navigationStyle": "custom" } },
     { "path": "pages/recite/index", "style": { "navigationStyle": "custom" } },
     { "path": "pages/recite-detail/index", "style": { "navigationStyle": "custom" } },
     { "path": "pages/courses/index", "style": { "navigationStyle": "custom" } },

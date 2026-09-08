@@ -10,7 +10,7 @@ export const courseDebugOptions = [
 ]
 
 export const getCourseAccessLevel = (): CourseAccessLevel => {
-  const rights = (token() && account.level !== 'free' ? 'pro' : 'none') as CourseRightsLevel
+  const rights = (token() && account.permissions.courses ? 'pro' : 'none') as CourseRightsLevel
   if (rights === 'trial') return 'trial'
   if (rights === 'pro' || rights === 'flagship') return 'full'
   return 'none'

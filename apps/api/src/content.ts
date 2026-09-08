@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { db, type Queryable } from './db.ts'
 import { fail } from './security.ts'
+import { validateDocument } from './rich-document.ts'
 
-export const kinds = ['subject','chapter','section','knowledge','question','course','handout','article','announcement','faq'] as const
+export const kinds = ['subject','chapter','section','knowledge','question','course','handout','article','announcement','faq','cheatsheet'] as const
 export const contentSchema = z.object({
   id: z.string().min(1).max(160), exam_id: z.string().nullable(), kind: z.enum(kinds),
   parent_id: z.string().nullable(), title: z.string().trim().min(1).max(2000),
@@ -19,6 +20,16 @@ export function validateQuestion(value: any) {
   return q
 }
 export async function validateContent(row: z.infer<typeof contentSchema>, c: Queryable = db) {
+  if(['knowledge','cheatsheet'].includes(row.kind)) {
+    if(!row.exam_id)fail(400,'请选择所属考试')
+    if(row.payload.document)row.payload.content=(await validateDocument(row.payload.document,row.id,row.exam_id!,c)).text
+    if(row.kind==='knowledge'&&row.payload.isKnowledgeCourse!==undefined&&typeof row.payload.isKnowledgeCourse!=='boolean')fail(400,'知识点课程标记必须为开关值')
+    if(row.kind==='cheatsheet') {
+      const p=z.object({intro:z.string().trim().min(1).max(500),opensAt:z.iso.datetime({offset:true}),closesAt:z.iso.datetime({offset:true})}).parse(row.payload)
+      if(new Date(p.closesAt)<=new Date(p.opensAt))fail(400,'结束时间必须晚于开放时间')
+      if(!row.payload.document)fail(400,'请填写考前小抄正文')
+    }
+  }
   if(row.status==='published'&&!row.is_test_data&&row.payload.starsPendingReview)fail(400,'请先核对正式知识点星级并清除待核对标记，再发布')
   if (row.kind === 'question') {
     validateQuestion(row.payload)
@@ -49,7 +60,8 @@ export async function catalog(examId: string) {
     return {subjectId:result.subject?.id,subjectName:result.subject?.title,chapterId:result.chapter?.id,chapterName:result.chapter?.title,sectionId:result.section?.id,sectionName:row.kind==='course'?row.title:result.section?.title,knowledgePointId:result.knowledge?.id,knowledgePointTitle:result.knowledge?.title}
   }
   const children=(parent: string, kind: string) => all.filter(x=>x.parent_id===parent && x.kind===kind)
-  const knowledgeSubjects=all.filter(x=>x.kind==='subject').map(s=>({ ...s.payload,id:s.id,name:s.title,chapters:children(s.id,'chapter').map(c=>({ ...c.payload,id:c.id,name:c.title,sections:children(c.id,'section').map(t=>({ ...t.payload,id:t.id,name:t.title,points:children(t.id,'knowledge').map(p=>({...p.payload,id:p.id,title:p.title,questionTotal:children(p.id,'question').length,questionDone:0,mastery:0})) })) })) }))
+  const safePoint=(p:any)=>{const {document,...payload}=p.payload;return payload}
+  const knowledgeSubjects=all.filter(x=>x.kind==='subject').map(s=>({ ...s.payload,id:s.id,name:s.title,chapters:children(s.id,'chapter').map(c=>({ ...c.payload,id:c.id,name:c.title,sections:children(c.id,'section').map(t=>({ ...t.payload,id:t.id,name:t.title,points:children(t.id,'knowledge').map(p=>({...safePoint(p),id:p.id,title:p.title,questionTotal:children(p.id,'question').length,questionDone:0,mastery:0})) })) })) }))
   const records=(kind:string) => all.filter(x=>x.kind===kind).map(x=>({...x.payload,...ancestry(x),id:x.id,title:x.title,isTestData:x.is_test_data,updatedAt:x.updated_at}))
   return { knowledgeSubjects, courseCatalog:records('course').map(({ mediaUrl, downloadUrl, content, articleSections, ...x })=>({...x,progress:0,currentMinute:0,completed:false})), practiceQuestions:records('question').map(({answer,explanation,referenceAnswer,rubric,...x})=>({...x,answer:[],explanation:''})), articles:records('article'), announcements:records('announcement'), faqs:records('faq') }
 }

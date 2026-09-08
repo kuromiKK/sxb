@@ -1,0 +1,14 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { request, send } from './api'
+const props=defineProps<{exams:any[]}>()
+const exam=ref(props.exams[0]?.id||''),level=ref('vip'),data=ref<any>(),busy=ref(false),error=ref(''),reason=ref('')
+let revision=0
+async function load(){const rev=++revision;data.value=undefined;reason.value='';error.value='';if(!exam.value){busy.value=false;return}busy.value=true;try{const result=await request(`/admin/permission-policies/${exam.value}`);if(rev===revision)data.value=result}catch(e:any){if(rev===revision)error.value=e.message}finally{if(rev===revision)busy.value=false}}
+watch(exam,load,{immediate:true})
+watch(()=>props.exams,values=>{if(!exam.value&&values.length)exam.value=values[0].id})
+async function save(){if(!reason.value.trim()){error.value='请填写调整原因';return}try{await ElMessageBox.confirm(`修改将立即影响该考试所有 ${level.value.toUpperCase()} 用户，是否确认？`,'确认调整会员权限',{type:'warning',confirmButtonText:'确认保存',cancelButtonText:'取消'})}catch{return}busy.value=true;error.value='';try{const policy=data.value.policies.find((p:any)=>p.level===level.value);await send(`/admin/permission-policies/${exam.value}/${level.value}`,{version:policy.version,permissions:policy.permissions,reason:reason.value},'PUT');reason.value='';ElMessage.success('权限已更新并记录日志');await load()}catch(e:any){error.value=e.message}finally{busy.value=false}}
+</script>
+<template><section v-loading="busy"><div class="policy-filters"><el-select v-model="exam" aria-label="选择考试"><el-option v-for="e in exams" :key="e.id" :value="e.id" :label="e.name" /></el-select><el-radio-group v-model="level"><el-radio-button value="free">免费版</el-radio-button><el-radio-button value="vip">VIP</el-radio-button><el-radio-button value="svip">SVIP</el-radio-button></el-radio-group></div><el-alert v-if="error" :title="error" type="error" :closable="false" show-icon /><el-table v-if="data" :data="data.catalog" row-key="key"><el-table-column prop="group" label="模块" width="130" /><el-table-column prop="name" label="功能权限" min-width="260" /><el-table-column label="授权" width="100"><template #default="{row}"><el-switch v-model="data.policies.find((p:any)=>p.level===level).permissions[row.key]" :disabled="row.fixed||busy" :aria-label="row.name" /></template></el-table-column><el-table-column label="规则" min-width="200"><template #default="{row}">{{ row.fixed?'全员开放':row.note||'按考试独立配置' }}</template></el-table-column></el-table><el-form class="policy-save" label-position="top" @submit.prevent="save"><el-form-item label="调整原因" required><el-input v-model="reason" maxlength="200" /></el-form-item><el-button type="primary" :loading="busy" :disabled="!data" @click="save">保存当前版本权限</el-button></el-form></section></template>
+<style scoped>.policy-filters{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:24px}.policy-filters .el-select{width:260px}.policy-save{max-width:520px;margin-top:24px}</style>
