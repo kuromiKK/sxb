@@ -25,7 +25,7 @@
 | knowledge.text.read | 知识点图文阅读 | 已确认：所有人可看 | 已实现公开图文与受保护媒体分别返回，课程标记不锁文字；固定开放 |
 | knowledge.video.play | 知识点视频播放 | 已确认：默认 VIP、SVIP；免费用户看缩略图及会员提示 | 已实现独立可配置权限与媒体会话鉴权 |
 | knowledge.audio.play | 知识点音频播放 | 已确认：默认 VIP、SVIP | 已实现独立可配置权限与媒体会话鉴权 |
-| knowledge.handout.download | 知识点讲义下载 | 最终门槛待确认，暂沿用 VIP/SVIP | 已实现独立下载权限开关，不与音视频共用 |
+| knowledge.handout.download | 知识点讲义下载 | 最终门槛待确认，暂沿用 VIP/SVIP | 已实现独立下载权限开关；正文下方单独管理与下载，收入按用户/考试隔离的“我的讲义”，重新下载仍须鉴权 |
 | section_course.text.read | 节级精讲课图文 | 现有实现：VIP、SVIP，单个课程可要求 SVIP | 新的“知识点图文免费”不自动覆盖节级课程 |
 | section_course.video.play | 节级精讲课视频 | 现有实现：VIP、SVIP，单个课程可要求 SVIP | 当前共用 courses 开关，后续独立登记 |
 | section_course.audio.play | 节级精讲课音频 | 现有实现：VIP、SVIP，单个课程可要求 SVIP | 当前共用 courses 开关，后续独立登记 |

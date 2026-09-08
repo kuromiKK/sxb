@@ -11,6 +11,8 @@ import { id, hash, fail, audit } from './security.ts'
 import { publishedContent } from './content.ts'
 import { rights } from './membership.ts'
 import { inspectDocument, renderText } from './rich-document.ts'
+import { splitKnowledgeHandouts } from '../../shared/knowledge-handouts.ts'
+import { recordLearning } from './reports.ts'
 
 export const mediaDirectory=resolve(process.env.MEDIA_DIR||'.local/media')
 const upload=multer({storage:multer.diskStorage({destination:(_req,_file,done)=>{mkdir(mediaDirectory,{recursive:true}).then(()=>done(null,mediaDirectory),e=>done(e,mediaDirectory))},filename:(_req,_file,done)=>done(null,id())}),limits:{fileSize:200*1024*1024,files:1,fields:0}})
@@ -68,7 +70,10 @@ export function availability(row:any,now=Date.now()) {
 function summary(row:any) {return {id:row.id,examId:row.exam_id,title:row.title,intro:row.payload.intro||'',opensAt:row.payload.opensAt,closesAt:row.payload.closesAt,state:availability(row),isTestData:row.is_test_data,updatedAt:row.updated_at}}
 async function assetAccess(asset:any,userId?:string) {
   const row=await publishedContent(asset.content_id)
-  if(!['knowledge','cheatsheet'].includes(row.kind)||row.exam_id!==asset.exam_id||!row.payload.document||!inspectDocument(row.payload.document).assets.includes(asset.id))fail(404,'资源不属于当前已发布正文')
+  const referenced=row.kind==='knowledge'&&asset.kind==='handout'
+    ?splitKnowledgeHandouts(row.payload).handouts.some(h=>h.assetId===asset.id)
+    :row.payload.document&&inspectDocument(row.payload.document).assets.includes(asset.id)
+  if(!['knowledge','cheatsheet'].includes(row.kind)||row.exam_id!==asset.exam_id||!referenced)fail(404,'资源不属于当前已发布内容')
   const p=userId?(await rights(userId,row.exam_id)).permissions:{}
   if(row.kind==='cheatsheet') {
     if(availability(row)!=='open')fail(403,'考前小抄不在开放时间内')
@@ -81,12 +86,28 @@ export const studyPublic=Router()
 studyPublic.get('/cheatsheets/:examId',async(req,res)=>res.json((await db.query(`SELECT * FROM content WHERE kind='cheatsheet' AND exam_id=$1 AND status='published' ORDER BY payload->>'opensAt' DESC,id`,[req.params.examId])).rows.map(summary)))
 studyPublic.get('/knowledge-content/:id',async(req,res)=>{
   const row=await publishedContent(req.params.id,'knowledge')
-  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row)})
+  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row),handouts:await handoutItems(row)})
 })
+function handoutFileType(asset:any) {
+  const extension=asset.filename.match(/\.(pdf|docx|pptx)$/i)?.[1]
+  return extension?extension.toUpperCase():'文件'
+}
+async function handoutItems(row:any,userId?:string) {
+  const items=[]
+  for(const entry of splitKnowledgeHandouts(row.payload).handouts) {
+    const asset=(await db.query("SELECT * FROM media_assets WHERE id=$1 AND kind='handout' AND content_id=$2 AND exam_id=$3",[entry.assetId,row.id,row.exam_id])).rows[0]
+    if(!asset)continue
+    let locked=true
+    try{await assetAccess(asset,userId);locked=false}catch(e:any){if(![401,403].includes(e.status))throw e}
+    items.push({assetId:asset.id,title:entry.title,kind:'handout',locked,sizeBytes:Number(asset.size_bytes),fileType:handoutFileType(asset)})
+  }
+  return items
+}
 async function blocks(row:any,userId?:string,sessionHash?:string) {
   if(!row.payload.document)return [{kind:'text',html:renderText({type:'paragraph',content:[{type:'text',text:row.payload.content||''}]})}]
   const result:any[]=[]
   for(const node of row.payload.document.content||[]) {
+    if(row.kind==='knowledge'&&node.type==='resource'&&node.attrs.kind==='handout')continue
     if(node.type!=='resource'){result.push({kind:'text',html:renderText(node)});continue}
     const asset=(await db.query('SELECT * FROM media_assets WHERE id=$1',[node.attrs.assetId])).rows[0];if(!asset)continue
     const item:any={kind:asset.kind,assetId:asset.id,title:node.attrs.title||asset.filename,locked:true}
@@ -120,11 +141,44 @@ studyPublic.get('/media/t/:token',async(req,res)=>{
 export const studyStudent=Router()
 studyStudent.get('/knowledge-content/:id/member',async(req,res)=>{
   const row=await publishedContent(req.params.id,'knowledge')
-  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row,res.locals.user.id)})
+  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row,res.locals.user.id),handouts:await handoutItems(row,res.locals.user.id)})
+})
+async function handoutDownload(asset:any,req:any,res:any) {
+  const row=await assetAccess(asset,res.locals.user.id)
+  const title=row.kind==='knowledge'?splitKnowledgeHandouts(row.payload).handouts.find(h=>h.assetId===asset.id)?.title:undefined
+  const data=await ticket(asset,hash(req.headers.authorization?.replace(/^Bearer /,'')||''))
+  // Records track an authorized download request; a website cannot inspect the user's local save dialog.
+  await db.query(`INSERT INTO user_records(id,user_id,exam_id,kind,source_id,payload) VALUES($1,$2,$3,'handoutDownload',$4,$5) ON CONFLICT(user_id,exam_id,kind,source_id) DO UPDATE SET payload=$5,updated_at=now()`,[id(),res.locals.user.id,asset.exam_id,asset.id,JSON.stringify({title:title||asset.filename,version:1,sourceType:'study-media',contentId:row.id,sizeBytes:Number(asset.size_bytes),fileType:handoutFileType(asset)})])
+  await recordLearning(res.locals.user.id,asset.exam_id,'handoutDownload',row.id)
+  return {...data,title:title||asset.filename}
+}
+studyStudent.get('/study-handouts/:id/download',async(req,res)=>{
+  const asset=(await db.query("SELECT * FROM media_assets WHERE id=$1 AND kind='handout'",[req.params.id])).rows[0]
+  if(!asset)fail(404,'讲义不存在')
+  res.setHeader('Cache-Control','no-store')
+  res.json(await handoutDownload(asset,req,res))
+})
+studyStudent.get('/handout-library/:examId',async(req,res)=>{
+  const records=(await db.query("SELECT * FROM user_records WHERE user_id=$1 AND exam_id=$2 AND kind='handoutDownload' ORDER BY updated_at DESC",[res.locals.user.id,req.params.examId])).rows
+  const items=[]
+  for(const record of records) {
+    const p=record.payload
+    const media=p.sourceType==='study-media'
+    let active=false,currentTitle=p.title,currentVersion=p.version||1
+    if(media) {
+      const asset=(await db.query("SELECT * FROM media_assets WHERE id=$1 AND exam_id=$2 AND kind='handout'",[record.source_id,req.params.examId])).rows[0]
+      if(asset)try{const row=await assetAccess(asset,res.locals.user.id);active=true;currentTitle=row.kind==='knowledge'?splitKnowledgeHandouts(row.payload).handouts.find(h=>h.assetId===asset.id)?.title||p.title:p.title}catch(e:any){if(e.status===403)active=true;else if(e.status!==404)throw e}
+    }else {
+      try{const row=await publishedContent(record.source_id,'handout');active=row.exam_id===req.params.examId;currentVersion=row.payload.version||1;currentTitle=row.title}catch(e:any){if(e.status!==404)throw e}
+    }
+    items.push({id:record.source_id,title:currentTitle,downloadedAt:record.updated_at,downloadedVersion:String(p.version||1),systemVersion:String(currentVersion),systemState:active?'active':'removed',sizeBytes:p.sizeBytes||0,fileType:p.fileType||'PDF',downloadPath:`/${media?'study-handouts':'handouts'}/${encodeURIComponent(record.source_id)}/download`})
+  }
+  res.setHeader('Cache-Control','no-store');res.json(items)
 })
 studyStudent.post('/media/:id/ticket',async(req,res)=>{
   const asset=(await db.query('SELECT * FROM media_assets WHERE id=$1',[req.params.id])).rows[0];if(!asset)fail(404,'资源不存在')
   await assetAccess(asset,res.locals.user.id)
+  if(asset.kind==='handout'){res.json(await handoutDownload(asset,req,res));return}
   res.json(await ticket(asset,hash(req.headers.authorization?.replace(/^Bearer /,'')||'')))
 })
 studyStudent.get('/cheatsheet/:id',async(req,res)=>{

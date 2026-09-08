@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
 import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { Bold, Italic, Heading2, List, ListOrdered, Undo2, Redo2, ImagePlus, Video, AudioLines, Paperclip } from 'lucide-vue-next'
 import RichResource from './RichResource.vue'
 import { send } from './api'
-const props=defineProps<{modelValue?:any;plainText?:string;examId:string;contentId:string}>()
+const props=defineProps<{modelValue?:any;plainText?:string;examId:string;contentId:string;allowHandouts?:boolean}>()
+const resourceTools=computed(()=>[{kind:'image',name:'图片',icon:ImagePlus},{kind:'video',name:'视频',icon:Video},{kind:'audio',name:'音频',icon:AudioLines},...(props.allowHandouts===false?[]:[{kind:'handout',name:'讲义',icon:Paperclip}])])
 const emit=defineEmits(['update:modelValue','busy'])
 const resource=Node.create({name:'resource',group:'block',atom:true,draggable:true,addAttributes(){return {assetId:{default:''},kind:{default:'image'},title:{default:''},posterAssetId:{default:null}}},parseHTML(){return []},renderHTML({HTMLAttributes}){return ['figure',mergeAttributes(HTMLAttributes,{'data-resource':'true'})]},addNodeView(){return VueNodeViewRenderer(RichResource)}})
 const editor=useEditor({extensions:[StarterKit.configure({link:false,codeBlock:false,orderedList:{HTMLAttributes:{}}}),resource],content:props.modelValue||{type:'doc',content:(props.plainText||'').split('\n').map(text=>({type:'paragraph',...(text?{content:[{type:'text',text}]}:{})}))},onCreate:({editor})=>emit('update:modelValue',editor.getJSON()),onUpdate:({editor})=>emit('update:modelValue',editor.getJSON()),editorProps:{attributes:{'aria-label':'图文正文编辑器',role:'textbox','aria-multiline':'true'}}})
@@ -42,7 +43,7 @@ onBeforeUnmount(()=>{xhr?.abort();editor.value?.destroy()})
       <button type="button" title="有序列表" aria-label="有序列表" @click="editor.chain().focus().toggleOrderedList().run()"><ListOrdered :size="18" /></button>
       <button type="button" title="撤销" aria-label="撤销" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()"><Undo2 :size="18" /></button>
       <button type="button" title="重做" aria-label="重做" :disabled="!editor.can().redo()" @click="editor.chain().focus().redo().run()"><Redo2 :size="18" /></button>
-      <button v-for="tool in [{kind:'image',name:'图片',icon:ImagePlus},{kind:'video',name:'视频',icon:Video},{kind:'audio',name:'音频',icon:AudioLines},{kind:'handout',name:'讲义',icon:Paperclip}]" :key="tool.kind" type="button" :title="'插入'+tool.name" :aria-label="'插入'+tool.name" @click="open(tool.kind)"><component :is="tool.icon" :size="18" /></button>
+      <button v-for="tool in resourceTools" :key="tool.kind" type="button" :title="'插入'+tool.name" :aria-label="'插入'+tool.name" @click="open(tool.kind)"><component :is="tool.icon" :size="18" /></button>
     </div>
     <EditorContent :editor="editor" />
     <el-dialog v-model="dialog" title="插入资源" width="min(520px,92vw)" append-to-body :close-on-click-modal="!busy" :show-close="!busy" :close-on-press-escape="!busy">

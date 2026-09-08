@@ -46,6 +46,8 @@ type HandoutRecord = {
   downloadedVersion: string
   systemVersion: string
   systemState: HandoutSystemState
+  downloadPath: string
+  fileType: string
 }
 const handoutConfirmVisible = ref(false)
 const handoutVerifyVisible = ref(false)
@@ -89,7 +91,7 @@ async function loadCenterData() {
   const saved = await api<any[]>(`/records/${exam.value.id}`)
   const readIds = new Set(saved.filter(item=>item.kind==='announcementRead').map(item=>item.source_id))
   unreadAnnouncementIds.value = announcements.value.filter(item=>!readIds.has(item.id)).map(item=>item.id)
-  handouts.value = saved.filter(item=>item.kind==='handoutDownload').map(item=>({id:item.source_id,title:item.payload.title,size:'',downloadedAt:new Date(item.updated_at).toLocaleDateString(),downloadedVersion:String(item.payload.version),systemVersion:String(item.payload.version),systemState:'active'}))
+  if(mode.value==='handouts')handouts.value = (await api<any[]>(`/handout-library/${exam.value.id}`)).map(item=>({...item,size:item.sizeBytes?(item.sizeBytes>=1048576?`${(item.sizeBytes/1048576).toFixed(1)} MB`:`${Math.ceil(item.sizeBytes/1024)} KB`):'文件大小未知',downloadedAt:new Date(item.downloadedAt).toLocaleDateString()}))
   if(mode.value==='record') {
     const stats = await api(`/stats/${exam.value.id}`)
     recordStats.value = { days: stats.studyDays.length, answers: stats.daily.reduce((sum:number,row:any)=>sum+row.attempts,0), minutes: stats.minutes }
@@ -178,10 +180,10 @@ const verifyHandoutDownload = async () => {
   if(handoutInputCode.value.trim()!==handoutVerificationCode.value)return toast('验证码不正确，请重新输入')
   if(!activeHandout.value)return
   try {
-    const result=await api(`/handouts/${activeHandout.value.id}/download`)
+    const result=await api(activeHandout.value.downloadPath)
     handoutVerifyVisible.value=false
     // #ifdef H5
-    window.location.assign(result.url)
+    const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noreferrer';link.click()
     // #endif
     // #ifndef H5
     uni.downloadFile({url:result.url,success:r=>{if(r.statusCode===200)uni.openDocument({filePath:r.tempFilePath,showMenu:true});else toast('下载失败')},fail:()=>toast('下载失败')})
@@ -377,7 +379,7 @@ const applyAnnouncementDebug = (key: string) => {
 
     <view v-else-if="mode === 'record'" class="content-block"><view class="summary-band"><view><text>{{ recordStats.days }}</text><text>累计学习天数</text></view><view><text>{{ recordStats.answers }}</text><text>累计刷题</text></view><view><text>{{ recordStats.minutes }}</text><text>学习分钟</text></view></view><view class="list-card"><view v-for="item in records" :key="item.title" class="record-row"><view class="row-icon" :style="{ background: `${item.color}16` }"><uni-icons :type="item.icon" size="20" :color="item.color" /></view><view><text>{{ item.title }}</text><text>{{ item.meta }}</text></view></view></view></view>
 
-    <view v-else-if="mode === 'handouts'" class="content-block handout-block"><view class="page-note"><uni-icons type="info" size="18" color="#3569e8" /><text>下面是已经下载过的讲义记录，点击可重复下载。</text></view><view class="list-card handout-list"><view v-for="item in handouts" :key="item.id" class="handout-row" :class="`is-${handoutState(item)}`" @tap="openHandoutDownload(item)"><view class="pdf-icon">PDF</view><view class="handout-record-copy"><text>{{ item.title }}</text><text>{{ item.size }} · 下载于 {{ item.downloadedAt }} · v{{ item.downloadedVersion }}</text></view><view class="handout-row-action"><button :disabled="handoutState(item) === 'removed'" @tap.stop="openHandoutDownload(item)">{{ handoutActionLabel(item) }}</button></view></view></view></view>
+    <view v-else-if="mode === 'handouts'" class="content-block handout-block"><view class="page-note"><uni-icons type="info" size="18" color="#3569e8" /><text>下面是已经下载过的讲义记录，点击可重复下载。</text></view><view class="list-card handout-list"><view v-for="item in handouts" :key="item.id" class="handout-row" :class="`is-${handoutState(item)}`" @tap="openHandoutDownload(item)"><view class="pdf-icon">{{ item.fileType }}</view><view class="handout-record-copy"><text>{{ item.title }}</text><text>{{ item.size }} · 下载于 {{ item.downloadedAt }} · v{{ item.downloadedVersion }}</text></view><view class="handout-row-action"><button :disabled="handoutState(item) === 'removed'" @tap.stop="openHandoutDownload(item)">{{ handoutActionLabel(item) }}</button></view></view></view></view>
 
     <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>{{ account.level.toUpperCase() }}</text><view><text>{{ account.level === 'svip' ? 'SVIP' : account.level === 'vip' ? 'VIP' : '免费版' }}</text><text>{{ account.expiresAt ? `有效至 ${new Date(account.expiresAt).toLocaleDateString()}` : '当前考试免费权益' }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in account.permissionLabels" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><text class="page-note">按当前考试实际权益展示；资料开放时间、发布状态及 AI 服务启用状态另行生效。</text><button class="primary-button" @tap="startRightsPurchase">续费或升级</button></view>
 
@@ -399,7 +401,7 @@ const applyAnnouncementDebug = (key: string) => {
       <view v-else class="center-modal bind-modal" @tap.stop><text class="modal-title">更换绑定手机号</text><text class="modal-desc">{{ bindStep === 1 ? '先验证当前手机号 138****6452' : bindStep === 2 ? '输入新的手机号' : `验证新手机号 ${bindPhone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}` }}</text><input v-if="bindStep === 2" v-model="bindPhone" class="modal-input" type="number" placeholder="请输入新手机号" maxlength="11" /><view v-if="bindStep !== 2" class="code-input-row"><input v-model="bindCode" class="modal-input" type="number" placeholder="请输入6位验证码" maxlength="6" /><button @tap="sendCode">{{ codeSeconds ? `${codeSeconds}s` : '获取验证码' }}</button></view><button class="modal-primary" @tap="nextBind">{{ bindStep === 3 ? '确认换绑并重新登录' : '下一步' }}</button><button class="modal-cancel" @tap="bindVisible = false">取消</button></view>
     </view>
     <view v-if="handoutConfirmVisible" class="modal-mask" @tap="handoutConfirmVisible = false"><view v-if="activeHandout" class="center-modal handout-modal" @tap.stop><view class="modal-mark handout-mark"><uni-icons type="download" size="27" color="#fff" /></view><text class="modal-title">{{ handoutState(activeHandout) === 'updated' ? '下载新版讲义' : '重复下载讲义' }}</text><text class="modal-desc modal-copy">即将下载《{{ activeHandout.title }}》，继续前需要完成验证码校验。</text><view class="handout-version-card"><view><text>上次下载</text><text>v{{ activeHandout.downloadedVersion }}</text></view><view><text>系统版本</text><text :class="{ updated: handoutState(activeHandout) === 'updated' }">v{{ activeHandout.systemVersion }}</text></view><view><text>文件大小</text><text>{{ activeHandout.size }}</text></view></view><button class="modal-primary" @tap="openHandoutVerification">继续验证</button><button class="modal-cancel" @tap="handoutConfirmVisible = false">取消</button></view></view>
-    <view v-if="handoutVerifyVisible" class="modal-mask" @tap="handoutVerifyVisible = false"><view class="center-modal handout-modal" @tap.stop><text class="modal-title no-mark">输入验证码</text><text class="modal-desc">请输入下方 4 位验证码，验证通过后立即下载 PDF 讲义。</text><view class="handout-code-display"><text>{{ handoutVerificationCode }}</text><button @tap="refreshHandoutCode">换一张</button></view><input v-model="handoutInputCode" class="handout-code-input" type="number" maxlength="4" placeholder="请输入验证码" /><button class="modal-primary" @tap="verifyHandoutDownload">验证并下载</button><button class="modal-cancel" @tap="handoutVerifyVisible = false">取消</button></view></view>
+    <view v-if="handoutVerifyVisible" class="modal-mask" @tap="handoutVerifyVisible = false"><view class="center-modal handout-modal" @tap.stop><text class="modal-title no-mark">输入验证码</text><text class="modal-desc">请输入下方 4 位验证码，验证通过后立即下载讲义。</text><view class="handout-code-display"><text>{{ handoutVerificationCode }}</text><button @tap="refreshHandoutCode">换一张</button></view><input v-model="handoutInputCode" class="handout-code-input" type="number" maxlength="4" placeholder="请输入验证码" /><button class="modal-primary" @tap="verifyHandoutDownload">验证并下载</button><button class="modal-cancel" @tap="handoutVerifyVisible = false">取消</button></view></view>
     <view v-if="purchaseNoticeVisible" class="modal-mask" @tap="purchaseNoticeVisible = false"><view v-if="activePurchaseOrder" class="center-modal purchase-notice" @tap.stop><view class="modal-mark pending-mark"><uni-icons type="wallet" size="27" color="#fff" /></view><text class="modal-title">存在待支付订单</text><text class="modal-desc modal-copy">你已有一笔{{ activePurchaseOrder.rightsName }}订单，请先支付、取消或等待订单自动失效后再创建新订单。</text><view class="pending-order-summary"><text>{{ activePurchaseOrder.productName }}</text><view><text>¥{{ activePurchaseOrder.amount }}</text><text>剩余 {{ orderCountdown(activePurchaseOrder) }}</text></view></view><button class="modal-primary" @tap="openPendingOrder">查看待支付订单</button><button class="modal-cancel" @tap="purchaseNoticeVisible = false">取消</button></view></view>
     <view v-if="orderDialogVisible && orderDialogMode" class="modal-mask order-dialog-mask" @tap="paymentPhase !== 'processing' && closeOrderDialog()">
       <view class="order-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>

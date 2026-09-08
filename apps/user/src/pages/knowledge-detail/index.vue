@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import StudyContent from '@/components/StudyContent.vue'
+import KnowledgeHandouts from '@/components/KnowledgeHandouts.vue'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { backOrFallback } from '@/utils/navigation'
 import { courseCatalog, knowledgeSubjects, type KnowledgePoint } from '@/mock/data'
@@ -91,6 +92,7 @@ const saveNote = async () => { if (!note.value.trim()) return uni.showToast({ ti
     <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
     <view class="point-hero"><view class="hero-top"><view class="hero-icon"><uni-icons type="map" size="24" color="#fff" /></view><view class="hero-title-wrap"><text class="hero-title">{{ point.title }}</text><view class="hero-tags"><text class="star-tag" :class="`star-${point.stars}`">{{ point.stars }}星</text><text class="mastery-tag">掌握 {{ point.mastery }}%</text></view></view></view><view class="hero-stats"><view><text>{{ point.questionTotal }}</text><text>包含题目</text></view><view><text>{{ point.questionDone }}</text><text>已做题目</text></view><view><text>{{ point.questionTotal ? Math.round(point.questionDone / point.questionTotal * 100) : 0 }}%</text><text>完成进度</text></view></view></view>
     <view class="content-card"><view class="card-title-row"><view class="card-title"><view class="title-bar"></view><text>{{ richContent?.isKnowledgeCourse?'知识点课程':'知识点内容' }}</text></view></view><text v-if="contentBusy" class="content-text">正在加载…</text><view v-else-if="contentError"><text class="content-text">{{ contentError }}</text><button @tap="loadContent">重试</button></view><StudyContent v-else-if="richContent" :blocks="richContent.blocks" /></view>
+    <KnowledgeHandouts v-if="richContent" :items="richContent.handouts||[]" />
     <view class="extension-card">
       <view class="extension-title"><text>学习延伸</text><text>继续巩固本知识点</text></view>
       <view class="extension-row practice-row" :class="{ disabled: !point.questionTotal }" @tap="openPractice"><view class="extension-icon practice"><uni-icons type="compose" size="20" :color="point.questionTotal ? '#3569e8' : '#9aa5b4'" /></view><view class="extension-copy practice-copy"><view class="practice-copy-head"><text>本知识点刷题</text><text v-if="point.questionTotal">{{ practiceProgress }}%</text></view><text class="practice-meta">{{ point.questionTotal ? `已完成 ${point.questionDone} / 共 ${point.questionTotal} 题` : '本知识点无题' }}</text><view v-if="point.questionTotal" class="practice-progress"><view :style="{ width: `${practiceProgress}%` }"></view></view></view><uni-icons v-if="point.questionTotal" type="forward" size="18" color="#8a96a7" /></view>

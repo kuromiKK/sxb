@@ -63,6 +63,38 @@ test('rich content, exam permissions and protected media',async t=>{
       const another=await external('audio','different-content');const invalid=await current(point);invalid.payload.document.content.push(resource(another,'audio'));assert.equal((await save(invalid)).status,400)
       const valid=await current(point);valid.payload.isKnowledgeCourse=true;assert.equal((await save(valid)).status,200);assert.equal((await req(`/knowledge-content/${point}`)).data.isKnowledgeCourse,true)
     })
+    await t.test('independent knowledge handouts, legacy extraction and private download library',async()=>{
+      const pdf=Buffer.from('%PDF-1.4\n% local test handout\n%%EOF')
+      const form=new FormData();form.append('file',new Blob([pdf],{type:'application/pdf'}),'test-handout.pdf')
+      const uploadResponse=await fetch(`${base}/admin/media/upload?${new URLSearchParams({examId:exam,contentId:point,kind:'handout'})}`,{method:'POST',headers:{Authorization:`Bearer ${admin}`},body:form})
+      assert.equal(uploadResponse.status,200);const assetId=(await uploadResponse.json() as any).id
+      const row=await current(point);row.payload.document.content.push(resource(assetId,'handout'))
+      // Existing inline attachments continue to work before the next edit/save.
+      await db.query('UPDATE content SET payload=$2 WHERE id=$1',[point,JSON.stringify(row.payload)])
+      const legacy=(await req(`/knowledge-content/${point}`,'GET',undefined,'')).data
+      assert.equal(legacy.blocks.some((b:any)=>b.kind==='handout'),false);assert.equal(legacy.handouts[0].assetId,assetId)
+      assert.equal((await save(row)).status,200)
+      const stored=await current(point);assert.equal(stored.payload.handouts[0].assetId,assetId)
+      assert.equal(stored.payload.document.content.some((n:any)=>n.attrs?.kind==='handout'),false)
+      const cross=await external('handout','foreign-point');const bad=structuredClone(stored);bad.payload.handouts=[{assetId:cross,title:'外部讲义'}];assert.equal((await save(bad)).status,400)
+      const wrongKind=structuredClone(stored);wrongKind.payload.handouts=[{assetId:imageId,title:'图片不能当讲义'}];assert.equal((await save(wrongKind)).status,400)
+      const duplicate=structuredClone(stored);duplicate.payload.handouts.push(duplicate.payload.handouts[0]);assert.equal((await save(duplicate)).status,400)
+      assert.equal((await req(`/study-handouts/${assetId}/download`)).status,403)
+      assert.equal((await req('/handout-library/'+exam)).data.length,0)
+      const vip=await session('test-student-002')
+      assert.equal((await req('/rights/'+exam,'GET',undefined,vip)).data.level,'vip')
+      const result=await req(`/study-handouts/${assetId}/download`,'GET',undefined,vip);assert.equal(result.status,200)
+      const download=await fetch(base.replace('/api','')+result.data.url);assert.equal(download.status,200);assert.match(download.headers.get('content-disposition')||'',/attachment/);assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf)
+      await req(`/study-handouts/${assetId}/download`,'GET',undefined,vip)
+      const library=(await req('/handout-library/'+exam,'GET',undefined,vip)).data
+      const mine=library.filter((r:any)=>r.id===assetId);assert.equal(mine.length,1);assert.equal(mine[0].fileType,'PDF');assert.equal(mine[0].systemState,'active')
+      assert.equal((await req('/handout-library/'+exam)).data.some((r:any)=>r.id===assetId),false)
+      assert.equal((await req('/handout-library/mid-social-worker','GET',undefined,vip)).data.some((r:any)=>r.id===assetId),false)
+      const removed=await current(point);removed.payload.handouts=[];assert.equal((await save(removed)).status,200)
+      assert.equal((await req(`/study-handouts/${assetId}/download`,'GET',undefined,vip)).status,404)
+      assert.equal((await fetch(base.replace('/api','')+result.data.url)).status,404)
+      assert.equal((await req('/handout-library/'+exam,'GET',undefined,vip)).data.find((r:any)=>r.id===assetId).systemState,'removed')
+    })
     await t.test('streamed upload above 200MB is rejected and temporary file removed',async()=>{
       const before=await readdir(process.env.MEDIA_DIR!)
       const boundary='sxb-test-upload-boundary'

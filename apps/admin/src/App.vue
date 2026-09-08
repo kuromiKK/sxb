@@ -8,7 +8,10 @@ import UserEntitlements from './UserEntitlements.vue'
 import ExamCategories from './ExamCategories.vue'
 import RichEditor from './RichEditor.vue'
 import PermissionManagement from './PermissionManagement.vue'
+import KnowledgeHandouts from './KnowledgeHandouts.vue'
+import { splitKnowledgeHandouts } from '../../shared/knowledge-handouts'
 const resourceBusy=ref(false)
+const handoutBusy=ref(false)
 
 const token=ref(sessionStorage.getItem('sxb-admin-token')||'')
 const identity=ref<any>(null)
@@ -67,11 +70,12 @@ const parentOptions=computed(()=>contentOptions.value.filter(x=>x.exam_id===edit
 async function openEditor(row?:any){
   contentOptions.value=await request('/admin/content-options')
   edit.value=row?structuredClone(toRaw(row)):{id:crypto.randomUUID(),kind:kind.value,exam_id:['article','announcement','faq'].includes(kind.value)?null:exams.value[0]?.id,parent_id:null,title:'',status:'draft',payload:{stars:3,type:kind.value==='course'?'article':'single',options:[],answer:[],requiredLevel:'vip'},source:'test',is_test_data:true}
+  if(edit.value.kind==='knowledge')Object.assign(edit.value.payload,splitKnowledgeHandouts(edit.value.payload))
   optionText.value=(edit.value.payload.options||[]).join('\n');answerText.value=(edit.value.payload.answer||[]).map((i:number)=>String.fromCharCode(65+i)).join(',')
   payloadText.value=JSON.stringify(edit.value.payload,null,2);advanced.value=false;editError.value='';editor.value=true
 }
 async function saveContent(){
-  if(resourceBusy.value)return
+  if(resourceBusy.value||handoutBusy.value)return
   saving.value=true;editError.value=''
   try{
     const row=structuredClone(toRaw(edit.value))
@@ -203,13 +207,14 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
       <template v-else-if="['knowledge','cheatsheet'].includes(edit.kind)">
         <el-form-item v-if="edit.kind==='knowledge'" label="这是知识点课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="这是知识点课程" /></el-form-item>
         <template v-else><el-form-item label="简介" required><el-input v-model="edit.payload.intro" type="textarea" :rows="3" maxlength="500" /></el-form-item><div class="form-columns"><el-form-item label="开放时间" required><el-date-picker v-model="edit.payload.opensAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item><el-form-item label="关闭时间" required><el-date-picker v-model="edit.payload.closesAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item></div></template>
-        <el-form-item label="图文正文"><RichEditor v-if="editor" :key="edit.id" v-model="edit.payload.document" :plain-text="edit.payload.content" :exam-id="edit.exam_id" :content-id="edit.id" @busy="resourceBusy=$event" /></el-form-item>
+        <el-form-item label="图文正文"><RichEditor v-if="editor" :key="edit.id" v-model="edit.payload.document" :plain-text="edit.payload.content" :exam-id="edit.exam_id" :content-id="edit.id" :allow-handouts="edit.kind!=='knowledge'" @busy="resourceBusy=$event" /></el-form-item>
+        <el-form-item v-if="edit.kind==='knowledge'" label="配套讲义"><KnowledgeHandouts v-if="editor" :key="edit.id" v-model="edit.payload.handouts" :exam-id="edit.exam_id" :content-id="edit.id" @busy="handoutBusy=$event" /></el-form-item>
       </template>
       <el-form-item v-else label="正文"><el-input v-model="edit.payload.content" type="textarea" :rows="7" /></el-form-item>
       <div class="form-columns"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
       <el-checkbox v-model="advanced" @change="payloadText=JSON.stringify(edit.payload,null,2)">高级结构字段</el-checkbox><el-input v-if="advanced" v-model="payloadText" class="json-field" type="textarea" :rows="12" />
       <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="form-error" />
-    </el-form><template #footer><el-button :disabled="resourceBusy" @click="editor=false">取消</el-button><el-button type="primary" :disabled="resourceBusy" :loading="saving" @click="saveContent">保存内容</el-button></template>
+    </el-form><template #footer><el-button :disabled="resourceBusy||handoutBusy" @click="editor=false">取消</el-button><el-button type="primary" :disabled="resourceBusy||handoutBusy" :loading="saving" @click="saveContent">保存内容</el-button></template>
   </el-drawer>
   <el-dialog v-model="dateDialog" title="修改考试日期" width="480px"><p class="dialog-context">{{ dateEdit.name }} · {{ dateEdit.year }} 年</p><el-form label-position="top"><el-form-item label="考试结束时间（北京时间）"><el-date-picker v-model="dateEdit.endsAt" type="datetime" format="YYYY-MM-DD HH:mm:ss" /></el-form-item></el-form><el-alert v-if="dateError" :title="dateError" type="error" :closable="false" /><template #footer><el-button @click="dateDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveDate">保存日期</el-button></template></el-dialog>
   <el-dialog v-model="planDialog" title="学习计划默认规则" width="520px"><p class="dialog-context">{{ planEdit.name }} · 用户可在前台自行调整</p><el-form label-position="top"><div class="form-columns"><el-form-item label="备考阶段（天）"><el-input-number v-model="planEdit.prepDays" :min="1" :max="365" /></el-form-item><el-form-item label="冲刺阶段（天）"><el-input-number v-model="planEdit.sprintDays" :min="1" :max="90" /></el-form-item></div><div class="form-columns"><el-form-item label="默认每周休息天数"><el-input-number v-model="planEdit.defaultRestDays" :min="0" :max="3" /></el-form-item><el-form-item label="默认轮次"><el-select v-model="planEdit.defaultRound"><el-option label="第一轮 · 覆盖学习" value="coverage" /><el-option label="第二轮 · 巩固复习" value="consolidation" /></el-select></el-form-item></div><el-alert v-if="planError" :title="planError" type="error" :closable="false" show-icon /></el-form><template #footer><el-button @click="planDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePlanConfig">保存规则</el-button></template></el-dialog>

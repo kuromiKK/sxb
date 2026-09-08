@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { db, type Queryable } from './db.ts'
 import { fail } from './security.ts'
 import { validateDocument } from './rich-document.ts'
+import { splitKnowledgeHandouts } from '../../shared/knowledge-handouts.ts'
 
 export const kinds = ['subject','chapter','section','knowledge','question','course','handout','article','announcement','faq','cheatsheet'] as const
 export const contentSchema = z.object({
@@ -23,6 +24,17 @@ export async function validateContent(row: z.infer<typeof contentSchema>, c: Que
   if(['knowledge','cheatsheet'].includes(row.kind)) {
     if(!row.exam_id)fail(400,'请选择所属考试')
     if(row.payload.document)row.payload.content=(await validateDocument(row.payload.document,row.id,row.exam_id!,c)).text
+    if(row.kind==='knowledge') {
+      row.payload.handouts=z.array(z.object({assetId:z.string().min(1).max(160),title:z.string().trim().min(1).max(200)}).strict()).max(20).default([]).parse(row.payload.handouts)
+      const separated=splitKnowledgeHandouts(row.payload)
+      if(separated.handouts.length>20||new Set(separated.handouts.map(h=>h.assetId)).size!==separated.handouts.length)fail(400,'讲义最多20份，不能重复添加')
+      for(const handout of separated.handouts) {
+        const asset=(await c.query("SELECT id FROM media_assets WHERE id=$1 AND content_id=$2 AND exam_id=$3 AND kind='handout'",[handout.assetId,row.id,row.exam_id])).rows[0]
+        if(!asset)fail(400,'讲义不存在或不属于当前知识点与考试')
+      }
+      row.payload.handouts=separated.handouts
+      if(separated.document)row.payload.document=separated.document
+    }
     if(row.kind==='knowledge'&&row.payload.isKnowledgeCourse!==undefined&&typeof row.payload.isKnowledgeCourse!=='boolean')fail(400,'知识点课程标记必须为开关值')
     if(row.kind==='cheatsheet') {
       const p=z.object({intro:z.string().trim().min(1).max(500),opensAt:z.iso.datetime({offset:true}),closesAt:z.iso.datetime({offset:true})}).parse(row.payload)
@@ -60,7 +72,7 @@ export async function catalog(examId: string) {
     return {subjectId:result.subject?.id,subjectName:result.subject?.title,chapterId:result.chapter?.id,chapterName:result.chapter?.title,sectionId:result.section?.id,sectionName:row.kind==='course'?row.title:result.section?.title,knowledgePointId:result.knowledge?.id,knowledgePointTitle:result.knowledge?.title}
   }
   const children=(parent: string, kind: string) => all.filter(x=>x.parent_id===parent && x.kind===kind)
-  const safePoint=(p:any)=>{const {document,...payload}=p.payload;return payload}
+  const safePoint=(p:any)=>{const {document,handouts,...payload}=p.payload;return payload}
   const knowledgeSubjects=all.filter(x=>x.kind==='subject').map(s=>({ ...s.payload,id:s.id,name:s.title,chapters:children(s.id,'chapter').map(c=>({ ...c.payload,id:c.id,name:c.title,sections:children(c.id,'section').map(t=>({ ...t.payload,id:t.id,name:t.title,points:children(t.id,'knowledge').map(p=>({...safePoint(p),id:p.id,title:p.title,questionTotal:children(p.id,'question').length,questionDone:0,mastery:0})) })) })) }))
   const records=(kind:string) => all.filter(x=>x.kind===kind).map(x=>({...x.payload,...ancestry(x),id:x.id,title:x.title,isTestData:x.is_test_data,updatedAt:x.updated_at}))
   return { knowledgeSubjects, courseCatalog:records('course').map(({ mediaUrl, downloadUrl, content, articleSections, ...x })=>({...x,progress:0,currentMinute:0,completed:false})), practiceQuestions:records('question').map(({answer,explanation,referenceAnswer,rubric,...x})=>({...x,answer:[],explanation:''})), articles:records('article'), announcements:records('announcement'), faqs:records('faq') }
