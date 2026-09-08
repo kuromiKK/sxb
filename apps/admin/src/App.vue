@@ -66,6 +66,29 @@ onMounted(async()=>{window.addEventListener('sxb-unauthorized',unauthorized);win
 onUnmounted(()=>{window.removeEventListener('sxb-unauthorized',unauthorized);window.removeEventListener('hashchange',hashChange)})
 
 const editor=ref(false);const edit=ref<any>({});const editError=ref('');const optionText=ref('');const answerText=ref('');const advanced=ref(false);const payloadText=ref('')
+const courseConfirmVisible=ref(false),courseConfirmChecked=ref(false),courseConfirmError=ref('')
+const pendingCourseRow=ref<any>(null)
+function containsCourseMedia(node:any):boolean {
+  if(!node||typeof node!=='object')return false
+  if(node.type==='resource'&&['video','audio'].includes(node.attrs?.kind))return true
+  return Array.isArray(node.content)&&node.content.some(containsCourseMedia)
+}
+function returnToContent(){if(saving.value)return;courseConfirmVisible.value=false;pendingCourseRow.value=null;courseConfirmError.value=''}
+async function persistContent(row:any){
+  await send('/admin/content/'+row.id,row,'PUT');editor.value=false;ElMessage.success('内容已保存');await load()
+}
+async function continueCourseSave(){
+  if(saving.value||!pendingCourseRow.value)return
+  saving.value=true;courseConfirmError.value=''
+  try{
+    const row=structuredClone(toRaw(pendingCourseRow.value))
+    row.payload.isKnowledgeCourse=courseConfirmChecked.value
+    edit.value.payload.isKnowledgeCourse=courseConfirmChecked.value
+    if(advanced.value)payloadText.value=JSON.stringify(row.payload,null,2)
+    await persistContent(row)
+    courseConfirmVisible.value=false;pendingCourseRow.value=null
+  }catch(e:any){courseConfirmError.value=e.message}finally{saving.value=false}
+}
 const parentOptions=computed(()=>contentOptions.value.filter(x=>x.exam_id===edit.value.exam_id && ({chapter:['subject'],section:['chapter'],knowledge:['section'],question:['knowledge'],course:['section','knowledge'],handout:['course']} as any)[edit.value.kind]?.includes(x.kind)))
 async function openEditor(row?:any){
   contentOptions.value=await request('/admin/content-options')
@@ -75,7 +98,7 @@ async function openEditor(row?:any){
   payloadText.value=JSON.stringify(edit.value.payload,null,2);advanced.value=false;editError.value='';editor.value=true
 }
 async function saveContent(){
-  if(resourceBusy.value||handoutBusy.value)return
+  if(resourceBusy.value||handoutBusy.value||saving.value||courseConfirmVisible.value)return
   saving.value=true;editError.value=''
   try{
     const row=structuredClone(toRaw(edit.value))
@@ -83,9 +106,16 @@ async function saveContent(){
     if(row.kind==='question'){
       row.payload={...row.payload,stem:row.title,knowledgePointId:row.parent_id,options:optionText.value.split('\n').map(s=>s.trim()).filter(Boolean),answer:answerText.value?answerText.value.toUpperCase().split(/[,，\s]+/).join('').split('').map((s:string)=>s.charCodeAt(0)-65):[]}
     }
-    if(row.kind==='knowledge')row.payload.title=row.title
+    if(row.kind==='knowledge'){
+      row.payload.title=row.title
+      if(edit.value.payload.isKnowledgeCourse===true)row.payload.isKnowledgeCourse=true
+      if(row.payload.isKnowledgeCourse!==true&&containsCourseMedia(row.payload.document)){
+        pendingCourseRow.value=row;courseConfirmChecked.value=false;courseConfirmError.value='';courseConfirmVisible.value=true
+        return
+      }
+    }
     if(row.kind==='course')row.payload.sectionName=row.title
-    await send('/admin/content/'+row.id,row,'PUT');editor.value=false;ElMessage.success('内容已保存');await load()
+    await persistContent(row)
   }catch(e:any){editError.value=e.message}finally{saving.value=false}
 }
 const dateDialog=ref(false);const dateEdit=ref<any>({});const dateError=ref('')
@@ -205,17 +235,22 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
       <template v-else-if="edit.kind==='course'"><div class="form-columns"><el-form-item label="课程类型"><el-select v-model="edit.payload.type"><el-option label="图文" value="article" /><el-option label="视频" value="video" /><el-option label="音频" value="audio" /></el-select></el-form-item><el-form-item label="所需会员"><el-select v-model="edit.payload.requiredLevel"><el-option label="VIP" value="vip" /><el-option label="SVIP" value="svip" /></el-select></el-form-item></div><el-form-item label="课程介绍"><el-input v-model="edit.payload.intro" type="textarea" :rows="5" /></el-form-item><el-form-item label="媒体地址（HTTPS）"><el-input v-model="edit.payload.mediaUrl" /></el-form-item><el-form-item label="时长（分钟）"><el-input-number v-model="edit.payload.totalMinutes" :min="1" /></el-form-item></template>
       <template v-else-if="edit.kind==='handout'"><el-form-item label="版本号"><el-input-number v-model="edit.payload.version" :min="1" /></el-form-item><el-form-item label="下载地址（HTTPS）"><el-input v-model="edit.payload.downloadUrl" /></el-form-item></template>
       <template v-else-if="['knowledge','cheatsheet'].includes(edit.kind)">
-        <el-form-item v-if="edit.kind==='knowledge'" label="这是知识点课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="这是知识点课程" /></el-form-item>
-        <template v-else><el-form-item label="简介" required><el-input v-model="edit.payload.intro" type="textarea" :rows="3" maxlength="500" /></el-form-item><div class="form-columns"><el-form-item label="开放时间" required><el-date-picker v-model="edit.payload.opensAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item><el-form-item label="关闭时间" required><el-date-picker v-model="edit.payload.closesAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item></div></template>
+        <template v-if="edit.kind==='cheatsheet'"><el-form-item label="简介" required><el-input v-model="edit.payload.intro" type="textarea" :rows="3" maxlength="500" /></el-form-item><div class="form-columns"><el-form-item label="开放时间" required><el-date-picker v-model="edit.payload.opensAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item><el-form-item label="关闭时间" required><el-date-picker v-model="edit.payload.closesAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" /></el-form-item></div></template>
         <el-form-item label="图文正文"><RichEditor v-if="editor" :key="edit.id" v-model="edit.payload.document" :plain-text="edit.payload.content" :exam-id="edit.exam_id" :content-id="edit.id" :allow-handouts="edit.kind!=='knowledge'" @busy="resourceBusy=$event" /></el-form-item>
         <el-form-item v-if="edit.kind==='knowledge'" label="配套讲义"><KnowledgeHandouts v-if="editor" :key="edit.id" v-model="edit.payload.handouts" :exam-id="edit.exam_id" :content-id="edit.id" @busy="handoutBusy=$event" /></el-form-item>
       </template>
       <el-form-item v-else label="正文"><el-input v-model="edit.payload.content" type="textarea" :rows="7" /></el-form-item>
-      <div class="form-columns"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
+      <div class="form-columns" :class="{three:edit.kind==='knowledge'}"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item v-if="edit.kind==='knowledge'" label="已配套课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="已配套课程" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
       <el-checkbox v-model="advanced" @change="payloadText=JSON.stringify(edit.payload,null,2)">高级结构字段</el-checkbox><el-input v-if="advanced" v-model="payloadText" class="json-field" type="textarea" :rows="12" />
       <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="form-error" />
     </el-form><template #footer><el-button :disabled="resourceBusy||handoutBusy" @click="editor=false">取消</el-button><el-button type="primary" :disabled="resourceBusy||handoutBusy" :loading="saving" @click="saveContent">保存内容</el-button></template>
   </el-drawer>
+  <el-dialog v-model="courseConfirmVisible" title="确认配套课程" width="min(460px,92vw)" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+    <p class="dialog-context">该知识点可能包含视频或音频课程，是否勾选“配套课程”？</p>
+    <el-checkbox v-model="courseConfirmChecked" :disabled="saving">已配套课程</el-checkbox>
+    <el-alert v-if="courseConfirmError" :title="courseConfirmError" type="error" :closable="false" show-icon />
+    <template #footer><el-button :disabled="saving" @click="returnToContent">返回</el-button><el-button type="primary" :loading="saving" @click="continueCourseSave">继续保存</el-button></template>
+  </el-dialog>
   <el-dialog v-model="dateDialog" title="修改考试日期" width="480px"><p class="dialog-context">{{ dateEdit.name }} · {{ dateEdit.year }} 年</p><el-form label-position="top"><el-form-item label="考试结束时间（北京时间）"><el-date-picker v-model="dateEdit.endsAt" type="datetime" format="YYYY-MM-DD HH:mm:ss" /></el-form-item></el-form><el-alert v-if="dateError" :title="dateError" type="error" :closable="false" /><template #footer><el-button @click="dateDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveDate">保存日期</el-button></template></el-dialog>
   <el-dialog v-model="planDialog" title="学习计划默认规则" width="520px"><p class="dialog-context">{{ planEdit.name }} · 用户可在前台自行调整</p><el-form label-position="top"><div class="form-columns"><el-form-item label="备考阶段（天）"><el-input-number v-model="planEdit.prepDays" :min="1" :max="365" /></el-form-item><el-form-item label="冲刺阶段（天）"><el-input-number v-model="planEdit.sprintDays" :min="1" :max="90" /></el-form-item></div><div class="form-columns"><el-form-item label="默认每周休息天数"><el-input-number v-model="planEdit.defaultRestDays" :min="0" :max="3" /></el-form-item><el-form-item label="默认轮次"><el-select v-model="planEdit.defaultRound"><el-option label="第一轮 · 覆盖学习" value="coverage" /><el-option label="第二轮 · 巩固复习" value="consolidation" /></el-select></el-form-item></div><el-alert v-if="planError" :title="planError" type="error" :closable="false" show-icon /></el-form><template #footer><el-button @click="planDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePlanConfig">保存规则</el-button></template></el-dialog>
   <el-drawer v-model="aiDialog" :title="aiEdit.name+' · 接口配置'" size="660px" :close-on-click-modal="false"><el-form v-if="aiEdit.config" label-position="top"><div class="form-columns"><el-form-item label="运行模式"><el-select v-model="aiEdit.config.mode"><el-option label="本地测试适配器" value="mock" /><el-option label="真实中转接口" value="live" /></el-select></el-form-item><el-form-item label="功能启用"><el-switch v-model="aiEdit.enabled" /></el-form-item></div><el-form-item label="服务商名称"><el-input v-model="aiEdit.config.provider" /></el-form-item><el-form-item label="API Base URL（包含 /v1）"><el-input v-model="aiEdit.config.baseUrl" placeholder="https://api.apikey.fun/v1" /></el-form-item><el-form-item label="接口协议"><el-radio-group v-model="aiEdit.config.protocol"><el-radio-button value="responses">Responses</el-radio-button><el-radio-button value="chat">Chat Completions</el-radio-button></el-radio-group></el-form-item><el-form-item label="API Key"><el-input v-model="aiEdit.apiKey" type="password" show-password autocomplete="new-password" :placeholder="aiEdit.has_key?'已加密保存，留空保持不变':'请输入中转商密钥'" /></el-form-item><el-form-item label="模型 ID"><el-select v-model="aiEdit.config.model" filterable allow-create default-first-option @change="Object.assign(aiEdit.config,prices.find(p=>p.model===$event)||{})"><el-option v-for="p in prices" :key="p.model" :value="p.model" :label="p.model" /></el-select></el-form-item><h3 class="form-section-title">费用标准 <small>人民币 / 1M Tokens</small></h3><div class="form-columns three"><el-form-item label="输入单价"><el-input-number v-model="aiEdit.config.inputPrice" :min="0" :precision="4" :controls="false" /></el-form-item><el-form-item label="输出单价"><el-input-number v-model="aiEdit.config.outputPrice" :min="0" :precision="4" :controls="false" /></el-form-item><el-form-item label="缓存读取"><el-input-number v-model="aiEdit.config.cachedPrice" :min="0" :precision="4" :controls="false" /></el-form-item></div><h3 class="form-section-title">用量限制</h3><div class="form-columns three"><el-form-item label="每日次数 / 用户"><el-input-number v-model="aiEdit.config.dailyLimit" :min="1" :max="100000" :controls="false" /></el-form-item><el-form-item label="最大输出 Token"><el-input-number v-model="aiEdit.config.maxTokens" :min="32" :max="16000" :controls="false" /></el-form-item><el-form-item label="超时（秒）"><el-input-number v-model="aiEdit.config.timeoutSeconds" :min="5" :max="120" :controls="false" /></el-form-item></div><el-form-item label="系统提示词"><el-input v-model="aiEdit.config.prompt" type="textarea" :rows="5" /></el-form-item><el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon /></el-form><template #footer><el-button @click="aiDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveAI">保存配置</el-button></template></el-drawer>
