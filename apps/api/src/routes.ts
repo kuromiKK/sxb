@@ -15,6 +15,7 @@ import { getLearningPlan, saveLearningPlan } from './learning-plan.ts'
 import { examManagement } from './exam-management.ts'
 import { permissionPolicies } from './permission-policy.ts'
 import { studyPublic, studyStudent, mediaAdmin } from './study-content.ts'
+import { messageAdmin } from './messages.ts'
 
 export const api = Router()
 api.use(studyPublic)
@@ -67,6 +68,7 @@ api.use(requireUser)
 api.use(studyStudent)
 api.post('/auth/logout',async(req,res)=>{await db.query('DELETE FROM sessions WHERE token_hash=$1',[hash(req.headers.authorization?.replace(/^Bearer /,'')||'')]);res.json({ok:true})})
 api.get('/me',async(_req,res)=>res.json(res.locals.user))
+api.post('/referrals/use',async(req,res)=>{const b=z.object({code:z.string().regex(/^[A-Z2-9]{10}$/)}).parse(req.body);const result=await transaction(async c=>{const me=(await c.query("SELECT * FROM users WHERE id=$1 AND account_kind='student' FOR UPDATE",[res.locals.user.id])).rows[0];if((await c.query('SELECT 1 FROM referral_uses WHERE user_id=$1',[me.id])).rows.length)fail(409,'你已经使用过推荐码，不能再次使用');const r=(await c.query("SELECT * FROM referral_codes WHERE code=$1 AND status='active' AND (expires_at IS NULL OR expires_at>now()) FOR UPDATE",[b.code])).rows[0];if(!r)fail(400,'推荐码无效');await c.query('INSERT INTO referral_uses(id,referral_id,user_id,exam_id,permission_level,permission_hours) VALUES($1,$2,$3,$4,$5,$6)',[id(),r.id,me.id,r.exam_id,r.permission_level,r.permission_hours]);if(r.permission_level&&r.exam_id){const cycle=(await c.query('SELECT * FROM exam_cycles WHERE exam_id=$1 ORDER BY ends_at DESC LIMIT 1',[r.exam_id])).rows[0];if(cycle)await c.query(`INSERT INTO manual_entitlements(user_id,exam_id,cycle_id,level,first_granted_at,actor_id,reason) VALUES($1,$2,$3,$4,now(),$5,$6) ON CONFLICT(user_id,exam_id) DO UPDATE SET level=CASE WHEN manual_entitlements.level='svip' OR (manual_entitlements.level='vip' AND $4='vip') THEN manual_entitlements.level ELSE $4 END,updated_at=now(),reason=$6`,[me.id,r.exam_id,cycle.id,r.permission_level,me.id,'推荐码赠送']);}return r});res.json({ok:true,permission:result.permission_level,hours:result.permission_hours,examId:result.exam_id,channel:result.channel})})
 api.get('/learning-plan/:examId',async(req,res)=>{
   res.json(await getLearningPlan(res.locals.user.id,req.params.examId))
 })
@@ -129,6 +131,13 @@ api.get('/records/:examId',async(req,res)=>{
   const kind=z.enum(['note','favorite','plan','courseProgress','recite','announcementRead','handoutDownload']).optional().parse(req.query.kind)
   res.json((await db.query('SELECT * FROM user_records WHERE user_id=$1 AND exam_id=$2 AND ($3::text IS NULL OR kind=$3) ORDER BY updated_at DESC',[res.locals.user.id,req.params.examId,kind||null])).rows)
 })
+api.get('/messages',async(req,res)=>{
+  const examId=String(req.query.examId||'')
+  const rows=(await db.query(`SELECT m.id,m.title,m.content,m.document,m.created_at,m.sent_at,d.read_at,d.id AS delivery_id,m.schedule FROM message_deliveries d JOIN messages m ON m.id=d.message_id WHERE d.user_id=$1 AND d.channel='h5' AND ($2='' OR jsonb_array_length(m.exam_ids)=0 OR $2=ANY(SELECT jsonb_array_elements_text(m.exam_ids))) ORDER BY coalesce(m.sent_at,m.created_at) DESC LIMIT 200`,[res.locals.user.id,examId])).rows
+  res.json(rows)
+})
+api.post('/messages/:id/read',async(req,res)=>{await db.query(`UPDATE message_deliveries SET read_at=coalesce(read_at,now()) WHERE id=$1 AND user_id=$2`,[req.params.id,res.locals.user.id]);res.json({ok:true})})
+api.post('/messages/read-all',async(req,res)=>{await db.query(`UPDATE message_deliveries SET read_at=coalesce(read_at,now()) WHERE user_id=$1 AND channel='h5'`,[res.locals.user.id]);res.json({ok:true})})
 api.put('/records/:examId',async(req,res)=>{
   const b=z.object({kind:z.enum(['note','favorite','plan','courseProgress','recite','announcementRead']),sourceId:text,payload:z.record(z.string(),z.any())}).parse(req.body)
   if(JSON.stringify(b.payload).length>50000) fail(400,'记录内容过长')
@@ -212,6 +221,20 @@ api.post('/ai/:feature',async(req,res)=>{
 })
 
 api.use('/admin',requireAdmin)
+const referralChannels=[{id:'douyin',name:'抖音'},{id:'video_account',name:'视频号'},{id:'kuaishou',name:'快手'},{id:'xiaohongshu',name:'小红书'},{id:'bilibili',name:'B站'},{id:'community',name:'社群'}]
+function referralCode(){const chars='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let out='';for(let i=0;i<10;i++)out+=chars[Math.floor(Math.random()*chars.length)];return out}
+api.get('/admin/referrals',async(req,res)=>{const q=typeof req.query.search==='string'?`%${req.query.search}%`:'%';const channel=typeof req.query.channel==='string'&&req.query.channel?req.query.channel:null;const status=typeof req.query.status==='string'&&req.query.status?req.query.status:null;const exam=typeof req.query.examId==='string'&&req.query.examId?req.query.examId:null;await db.query("UPDATE referral_codes SET status='expired' WHERE status='active' AND expires_at IS NOT NULL AND expires_at<=now()");res.json((await db.query(`SELECT r.*,e.name AS exam_name,u.nickname AS creator,(SELECT count(*)::int FROM referral_uses x WHERE x.referral_id=r.id) AS use_count FROM referral_codes r LEFT JOIN exams e ON e.id=r.exam_id JOIN users u ON u.id=r.creator_id WHERE ($1='%' OR r.code ILIKE $1) AND ($2::text IS NULL OR r.channel=$2) AND ($3::text IS NULL OR r.status=$3) AND ($4::text IS NULL OR r.exam_id=$4) ORDER BY r.created_at DESC`,[q,channel,status,exam])).rows)})
+api.post('/admin/referrals',async(req,res)=>{const b=z.object({channel:z.enum(['douyin','video_account','kuaishou','xiaohongshu','bilibili','community']),examId:z.string().optional().nullable(),permissionLevel:z.enum(['vip','svip']).optional().nullable(),permissionHours:z.number().int().min(1).max(72).optional().nullable(),expiresAt:z.string().datetime({offset:true}).optional().nullable()}).parse(req.body);if(b.permissionLevel&&!b.examId)fail(400,'附带权限时必须选择考试项目');let code='';for(let i=0;i<10;i++){const c=referralCode();if(!(await db.query('SELECT 1 FROM referral_codes WHERE code=$1',[c])).rows.length){code=c;break}}const row=(await db.query(`INSERT INTO referral_codes(id,code,channel,exam_id,permission_level,permission_hours,expires_at,creator_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,[id(),code,b.channel,b.examId||null,b.permissionLevel||null,b.permissionHours||null,b.expiresAt||null,res.locals.user.id])).rows[0];await audit(res.locals.user.id,'referral.create',row.id,{code,channel:b.channel});res.json(row)})
+api.get('/admin/referrals/:id',async(req,res)=>{const row=(await db.query(`SELECT r.*,e.name AS exam_name,u.nickname AS creator FROM referral_codes r LEFT JOIN exams e ON e.id=r.exam_id JOIN users u ON u.id=r.creator_id WHERE r.id=$1`,[req.params.id])).rows[0];if(!row)fail(404,'推荐码不存在');const uses=(await db.query(`SELECT x.*,u.nickname,u.phone,m.level AS purchased_level,o.created_at AS purchased_at FROM referral_uses x JOIN users u ON u.id=x.user_id LEFT JOIN memberships m ON m.user_id=x.user_id AND m.exam_id=x.exam_id LEFT JOIN orders o ON o.user_id=x.user_id AND o.exam_id=x.exam_id AND o.status='paid' WHERE x.referral_id=$1 ORDER BY x.used_at DESC`,[req.params.id])).rows;res.json({row,uses})})
+api.patch('/admin/referrals/:id/status',async(req,res)=>{const b=z.object({status:z.enum(['active','disabled']),expiresAt:z.string().datetime({offset:true}).optional().nullable()}).parse(req.body);const r=(await db.query('UPDATE referral_codes SET status=$2,expires_at=CASE WHEN $3::timestamptz IS NULL THEN expires_at ELSE $3 END,updated_at=now() WHERE id=$1 RETURNING *',[req.params.id,b.status,b.expiresAt||null])).rows[0];if(!r)fail(404,'推荐码不存在');await audit(res.locals.user.id,'referral.status',r.id,b);res.json(r)})
+api.get('/admin/settings/site-domain',async(_req,res)=>res.json((await db.query('SELECT value FROM system_settings WHERE key=$1',['site_domain'])).rows[0]||{value:''}))
+api.put('/admin/settings/site-domain',async(req,res)=>{const b=z.object({value:z.string().url()}).parse(req.body);await db.query('INSERT INTO system_settings(key,value,actor_id) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value=$2,actor_id=$3,updated_at=now()',['site_domain',b.value,res.locals.user.id]);res.json({value:b.value})})
+api.get('/admin/message-templates',async(_req,res)=>res.json(await messageAdmin.templates()))
+api.put('/admin/message-templates/:id',async(req,res)=>res.json(await messageAdmin.saveTemplate(res.locals.user.id,{...req.body,id:req.params.id})))
+api.get('/admin/messages',async(req,res)=>res.json(await messageAdmin.list(req.query)))
+api.post('/admin/messages',async(req,res)=>res.json(await messageAdmin.saveMessage(res.locals.user.id,req.body)))
+api.delete('/admin/messages/:id',async(req,res)=>res.json(await messageAdmin.remove(res.locals.user.id,req.params.id)))
+api.post('/admin/messages/:id/send',async(req,res)=>res.json(await messageAdmin.send(res.locals.user.id,req.params.id,req.body?.force===true)))
 api.use('/admin/permission-policies',permissionPolicies)
 api.use('/admin/media',mediaAdmin)
 api.use('/admin/administrators',administrators)

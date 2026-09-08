@@ -56,7 +56,7 @@ const handoutVerificationCode = ref('')
 const handoutInputCode = ref('')
 const qrPattern = Array.from({ length: 64 }, (_, index) => [0, 1, 3, 5, 6, 8, 10, 11, 14, 16, 18, 19, 22, 24, 27, 29, 31, 34, 36, 37, 40, 42, 44, 46, 49, 51, 53, 55, 57, 60, 62, 63].includes(index))
 const titles: Record<CenterMode, string> = {
-  report: '学习报告', record: '学习记录', handouts: '我的讲义', rights: '我的权益', orders: '我的订单', announcements: '公告', faq: '常见问题', security: '设置', about: '关于上行宝', agreement: '用户服务协议', privacy: '隐私政策',
+  report: '学习报告', record: '学习记录', handouts: '我的讲义', rights: '我的权益', orders: '我的订单', announcements: '消息中心', faq: '常见问题', security: '设置', about: '关于上行宝', agreement: '用户服务协议', privacy: '隐私政策',
 }
 const title = computed(() => titles[mode.value])
 
@@ -78,19 +78,22 @@ async function bindInviter() {
   } catch (error) { showApiError(error) } finally { inviterBusy.value = false }
 }
 const handouts = ref<HandoutRecord[]>([])
-const announcements = ref<Array<{id:string;title:string;date:string;content:string}>>([])
+const announcements = ref<Array<{id:string;title:string;date:string;content:string;deliveryId?:string;read?:boolean}>>([])
 const unreadAnnouncementIds = ref<string[]>([])
 const faqs = ref<Array<{id:string;title:string;content:string}>>([])
 async function loadCenterData() {
   const data = await api(`/catalog/${exam.value.id}`)
-  announcements.value = data.announcements.map((item:any)=>({...item,date:new Date(item.updatedAt).toLocaleDateString()}))
+  const serverMessages = token() && mode.value==='announcements' ? await api<any[]>(`/messages?examId=${encodeURIComponent(exam.value.id)}`) : []
+  announcements.value = serverMessages.length
+    ? serverMessages.map((item:any)=>({...item,date:new Date(item.sent_at||item.created_at).toLocaleDateString(),content:item.content||'',deliveryId:item.delivery_id,read:Boolean(item.read_at)}))
+    : data.announcements.map((item:any)=>({...item,date:new Date(item.updatedAt).toLocaleDateString(),deliveryId:null,read:false}))
   faqs.value = data.faqs
   if (!token()) return
   me.value = await api('/me')
   await refreshRights()
   const saved = await api<any[]>(`/records/${exam.value.id}`)
   const readIds = new Set(saved.filter(item=>item.kind==='announcementRead').map(item=>item.source_id))
-  unreadAnnouncementIds.value = announcements.value.filter(item=>!readIds.has(item.id)).map(item=>item.id)
+  unreadAnnouncementIds.value = announcements.value.filter(item=>!item.read&&!readIds.has(item.id)).map(item=>item.id)
   if(mode.value==='handouts')handouts.value = (await api<any[]>(`/handout-library/${exam.value.id}`)).map(item=>({...item,size:item.sizeBytes?(item.sizeBytes>=1048576?`${(item.sizeBytes/1048576).toFixed(1)} MB`:`${Math.ceil(item.sizeBytes/1024)} KB`):'文件大小未知',downloadedAt:new Date(item.downloadedAt).toLocaleDateString()}))
   if(mode.value==='record') {
     const stats = await api(`/stats/${exam.value.id}`)
@@ -121,7 +124,9 @@ const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy')
 const toggle = async (id: string) => {
   expanded.value = expanded.value === id ? '' : id
   if(mode.value==='announcements' && token()){
-    await api(`/records/${exam.value.id}`,'PUT',{kind:'announcementRead',sourceId:id,payload:{read:true}})
+    const item=announcements.value.find(row=>row.id===id)
+    if(item?.deliveryId) await api(`/messages/${item.deliveryId}/read`,'POST',{})
+    else await api(`/records/${exam.value.id}`,'PUT',{kind:'announcementRead',sourceId:id,payload:{read:true}})
     unreadAnnouncementIds.value=unreadAnnouncementIds.value.filter(item=>item!==id)
   }
 }

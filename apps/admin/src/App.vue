@@ -9,6 +9,9 @@ import ExamCategories from './ExamCategories.vue'
 import RichEditor from './RichEditor.vue'
 import PermissionManagement from './PermissionManagement.vue'
 import KnowledgeHandouts from './KnowledgeHandouts.vue'
+import MessageManagement from './MessageManagement.vue'
+import ReferralManagement from './ReferralManagement.vue'
+import SystemSettings from './SystemSettings.vue'
 import { splitKnowledgeHandouts } from '../../shared/knowledge-handouts'
 const resourceBusy=ref(false)
 const handoutBusy=ref(false)
@@ -20,22 +23,24 @@ const loginError=ref(''); const loginBusy=ref(false)
 const navigation=[
   {section:'总览',items:[{id:'dashboard',name:'工作台',icon:LayoutDashboard}]},
   {section:'教学内容',items:[{id:'exams',name:'考试与考期',icon:CalendarDays},{id:'knowledge',name:'知识点结构',icon:LibraryBig},{id:'question',name:'题库管理',icon:BookOpen},{id:'course',name:'课程管理',icon:GraduationCap},{id:'handout',name:'讲义资料',icon:FileText},{id:'article',name:'考试须知',icon:ClipboardList}]},
-  {section:'用户与服务',items:[{id:'users',name:'用户管理',icon:Users},{id:'orders',name:'订单与会员',icon:CreditCard},{id:'records',name:'学习记录',icon:Activity},{id:'announcement',name:'公告管理',icon:Bell},{id:'faq',name:'常见问题',icon:HelpCircle}]},
-  {section:'系统管理',items:[{id:'administrators',name:'管理员管理',icon:ShieldCheck},{id:'roles',name:'角色管理',icon:Settings2},{id:'ai',name:'AI 配置中心',icon:Sparkles},{id:'audit',name:'操作日志',icon:ScrollText}]}
+  {section:'用户与服务',items:[{id:'users',name:'用户管理',icon:Users},{id:'orders',name:'订单与会员',icon:CreditCard},{id:'records',name:'学习记录',icon:Activity},{id:'faq',name:'常见问题',icon:HelpCircle}]},
+  {section:'运营管理',items:[{id:'message-template',name:'消息模板',icon:Bell},{id:'message-center',name:'消息中心',icon:Activity},{id:'referrals',name:'推荐码',icon:Users}]},
+  {section:'系统管理',items:[{id:'administrators',name:'管理员管理',icon:ShieldCheck},{id:'roles',name:'角色管理',icon:Settings2},{id:'settings',name:'系统设置',icon:Settings2},{id:'ai',name:'AI 配置中心',icon:Sparkles},{id:'audit',name:'操作日志',icon:ScrollText}]}
 ]
 const view=ref(location.hash.slice(1)||'dashboard')
 navigation[1].items.push({id:'cheatsheet',name:'考前小抄',icon:FileText})
-navigation[3].items.push({id:'permissions',name:'会员权限',icon:ShieldCheck})
+navigation[4].items.push({id:'permissions',name:'会员权限',icon:ShieldCheck})
 const currentNav=computed(()=>navigation.flatMap(g=>g.items).find(x=>x.id===view.value)||navigation[0].items[0])
 const mobileNav=ref(false)
 const busy=ref(false);const error=ref('');const saving=ref(false)
 const dashboard=ref<any>(null);const rows=ref<any[]>([]);const total=ref(0);const page=ref(1);const search=ref('');const treeKind=ref('knowledge')
 const exams=ref<any[]>([]);const contentOptions=ref<any[]>([]);const aiFeatures=ref<any[]>([]);const prices=ref<any[]>([])
 const entitlementUser=ref<{id:string;nickname:string;phone:string}|null>(null)
+const messageManagement=ref<any>(null)
 watch(token,value=>{if(!value)entitlementUser.value=null})
-const labels:Record<string,string>={subject:'科目',chapter:'章',section:'节',knowledge:'知识点',question:'题目',course:'课程',handout:'讲义',article:'考试须知',announcement:'公告',faq:'常见问题',draft:'草稿',review:'审核中',published:'已发布',offline:'已下架',pending_payment:'待支付',paid:'支付成功',closed:'已关闭',refunding:'退款中',refunded:'已退款',vip:'VIP',svip:'SVIP',trial:'VIP 24小时体验',upgrade:'VIP 升 SVIP',superadmin:'最高管理员',student:'学生',success:'成功',failed:'失败',note:'笔记',favorite:'收藏',plan:'学习计划',courseProgress:'课程进度',recite:'背诵',announcementRead:'公告已读'}
+const labels:Record<string,string>={subject:'科目',chapter:'章',section:'节',knowledge:'知识点',question:'题目',course:'课程',handout:'讲义',article:'考试须知',announcement:'消息',faq:'常见问题',draft:'草稿',review:'审核中',published:'已发布',offline:'已下架',pending_payment:'待支付',paid:'支付成功',closed:'已关闭',refunding:'退款中',refunded:'已退款',vip:'VIP',svip:'SVIP',trial:'VIP 24小时体验',upgrade:'VIP 升 SVIP',superadmin:'最高管理员',student:'学生',success:'成功',failed:'失败',note:'笔记',favorite:'收藏',plan:'学习计划',courseProgress:'课程进度',recite:'背诵',announcementRead:'消息已读'}
 labels.cheatsheet='考前小抄'
-const contentViews=['knowledge','question','course','handout','article','announcement','faq','cheatsheet']
+const contentViews=['knowledge','question','course','handout','article','faq','cheatsheet']
 const isContent=computed(()=>contentViews.includes(view.value))
 const kind=computed(()=>view.value==='knowledge'?treeKind.value:view.value)
 const formatDate=(v:any)=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—'
@@ -46,6 +51,8 @@ async function login(){loginBusy.value=true;loginError.value='';try{const r=awai
 async function logout(){try{await send('/auth/logout',{})}finally{token.value='';sessionStorage.removeItem('sxb-admin-token');identity.value=null}}
 function unauthorized(){token.value='';identity.value=null;sessionStorage.removeItem('sxb-admin-token')}
 function navigate(id:string){view.value=id;location.hash=id;mobileNav.value=false;page.value=1;search.value=''}
+const referralManagement=ref<any>(null)
+function openReferral(){referralManagement.value?.openNew()}
 function hashChange(){view.value=location.hash.slice(1)||'dashboard'}
 let revision=0
 async function load(){
@@ -53,7 +60,7 @@ async function load(){
   const rev=++revision;busy.value=true;error.value=''
   try{
     if(!exams.value.length)exams.value=await request('/exams')
-    if(['administrators','permissions'].includes(view.value)) return
+    if(['administrators','permissions','message-template','message-center','referrals','settings'].includes(view.value)) return
     if(view.value==='dashboard')dashboard.value=await request('/admin/dashboard')
     else if(view.value==='ai'){const r=await request('/admin/ai');aiFeatures.value=r.features;prices.value=r.prices}
     else if(isContent.value){const r=await request(`/admin/content?kind=${kind.value}&search=${encodeURIComponent(search.value)}&page=${page.value}`);if(rev===revision){rows.value=r.items;total.value=r.total}}
@@ -178,7 +185,7 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
     <div class="shell-main">
       <header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-toggle" aria-label="打开菜单" @click="mobileNav=true"><Menu :size="20" /></button><span>管理后台</span><ChevronRight :size="14" /><strong>{{ currentNav.name }}</strong></div><div class="topbar-actions"><span class="test-indicator">测试环境</span><span class="avatar">管</span><div class="account"><strong>{{ identity?.nickname||'最高管理员' }}</strong><small>{{ identity?.phone }}</small></div><el-tooltip content="退出登录"><button class="icon-button" aria-label="退出登录" @click="logout"><LogOut :size="18" /></button></el-tooltip></div></header>
       <main id="workspace" class="workspace" tabindex="-1">
-        <div class="page-heading"><div><div class="eyebrow">{{ view==='dashboard'?'WORKSPACE OVERVIEW':view==='ai'?'AI OPERATIONS':'SXB CONSOLE' }}</div><h1>{{ currentNav.name }}</h1><p v-if="view==='dashboard'">{{ new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}) }} · 内容与业务概况</p><p v-else-if="view==='ai'">模型连接、功能权限与调用用量</p><p v-else-if="view==='orders'">会员按考试独立生效 · VIP ¥599 · SVIP ¥799</p></div><div class="heading-actions"><el-tooltip content="刷新数据"><el-button circle :loading="busy" aria-label="刷新数据" @click="load"><RefreshCw :size="17" /></el-button></el-tooltip><el-button v-if="isContent" type="primary" @click="openEditor()"><Plus :size="17" />新增{{ labels[kind] }}</el-button></div></div>
+        <div class="page-heading"><div><div class="eyebrow">{{ view==='dashboard'?'WORKSPACE OVERVIEW':view==='ai'?'AI OPERATIONS':'SXB CONSOLE' }}</div><h1>{{ currentNav.name }}</h1><p v-if="view==='dashboard'">{{ new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}) }} · 内容与业务概况</p><p v-else-if="view==='ai'">模型连接、功能权限与调用用量</p><p v-else-if="view==='orders'">会员按考试独立生效 · VIP ¥599 · SVIP ¥799</p></div><div class="heading-actions"><el-tooltip content="刷新数据"><el-button circle :loading="busy" aria-label="刷新数据" @click="load"><RefreshCw :size="17" /></el-button></el-tooltip><el-button v-if="view==='message-template'||view==='message-center'" type="primary" @click="messageManagement?.newItem()"><Plus :size="17" />{{ view==='message-template'?'新增模板':'新增消息' }}</el-button><el-button v-if="view==='referrals'" type="primary" @click="openReferral"><Plus :size="17" />创建推荐码</el-button><el-button v-if="isContent" type="primary" @click="openEditor()"><Plus :size="17" />新增{{ labels[kind] }}</el-button></div></div>
         <el-alert v-if="error" type="error" :closable="false" :title="error" show-icon class="form-error" />
         <div v-loading="busy" class="view-content">
           <ExamCategories v-if="view==='exams'" />
@@ -195,6 +202,9 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
             <div class="table-toolbar"><h2>功能与模型</h2><span class="subtle-label">默认关闭，配置后按需启用</span></div>
             <el-table :data="aiFeatures" row-key="id"><el-table-column label="功能点" min-width="160"><template #default="{row}"><button class="table-title" @click="openUsage(row)">{{ row.name }}</button><small class="cell-sub">{{ row.id }}</small></template></el-table-column><el-table-column label="服务与模型" min-width="200"><template #default="{row}"><span>{{ row.config.model }}</span><small class="cell-sub">{{ row.config.provider }}</small></template></el-table-column><el-table-column label="运行模式" width="115"><template #default="{row}"><el-tag :type="row.config.mode==='live'?'success':'info'" effect="plain">{{ row.config.mode==='live'?'真实接口':'本地测试' }}</el-tag></template></el-table-column><el-table-column label="启用" width="90"><template #default="{row}"><el-switch :model-value="row.enabled" :aria-label="'启用'+row.name" @change="toggleAI(row,$event)" /></template></el-table-column><el-table-column label="操作" min-width="225"><template #default="{row}"><div class="row-actions"><el-button link type="primary" @click="configure(row)"><Settings2 :size="15" />配置</el-button><el-button link type="primary" :loading="testing===row.id" @click="testAI(row)">测试连接</el-button><el-button link type="primary" @click="openUsage(row)">用量</el-button></div><small v-if="aiTest[row.id]" class="cell-sub">{{ aiTest[row.id].status==='success'?'最近测试成功':'最近测试失败' }} · {{ aiTest[row.id].durationMs }}ms</small></template></el-table-column></el-table>
           </template>
+          <MessageManagement ref="messageManagement" v-else-if="view==='message-template'||view==='message-center'" :key="view+revision" :mode="view==='message-template'?'templates':'messages'" />
+          <ReferralManagement ref="referralManagement" v-else-if="view==='referrals'" :key="view+revision" />
+          <SystemSettings v-else-if="view==='settings'" :key="view+revision" />
           <template v-else-if="isContent">
             <div class="table-toolbar"><el-radio-group v-if="view==='knowledge'" v-model="treeKind"><el-radio-button value="subject">科目</el-radio-button><el-radio-button value="chapter">章</el-radio-button><el-radio-button value="section">节</el-radio-button><el-radio-button value="knowledge">知识点</el-radio-button></el-radio-group><span v-else class="table-count">全部{{ labels[kind] }} <b>{{ total }}</b></span><div class="filter-tools"><el-input v-model="search" clearable placeholder="搜索标题" class="search-input" @keyup.enter="page=1;load()" @clear="page=1;load()"><template #prefix><Search :size="16" /></template></el-input><el-button v-if="view==='question'" @click="importDialog=true;importPreview=null;importError=''" ><Upload :size="16" />导入题库</el-button><el-button aria-label="执行搜索" @click="page=1;load()"><Search :size="16" /></el-button></div></div>
             <el-table :data="rows" row-key="id"><el-table-column label="标题" min-width="340"><template #default="{row}"><button class="table-title" @click="openEditor(row)">{{ row.title }}</button><small class="cell-sub">{{ row.id }}</small></template></el-table-column><el-table-column label="考试" width="140"><template #default="{row}">{{ exams.find(x=>x.id===row.exam_id)?.name||'全平台' }}</template></el-table-column><el-table-column label="状态" width="105"><template #default="{row}"><el-tag :type="stateColor(row.status)" effect="light">{{ labels[row.status] }}</el-tag></template></el-table-column><el-table-column label="数据来源" width="105"><template #default="{row}"><span :class="row.is_test_data?'test-label':'source-label'">{{ row.is_test_data?'测试内容':'真实资料' }}</span></template></el-table-column><el-table-column label="更新时间" width="180"><template #default="{row}">{{ formatDate(row.updated_at) }}</template></el-table-column><el-table-column label="操作" width="75" fixed="right"><template #default="{row}"><el-tooltip content="编辑内容"><el-button link type="primary" aria-label="编辑内容" @click="openEditor(row)"><Pencil :size="17" /></el-button></el-tooltip></template></el-table-column></el-table>
@@ -268,3 +278,4 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
   .form-columns.knowledge-meta { grid-template-columns: 1fr; }
 }
 </style>
+

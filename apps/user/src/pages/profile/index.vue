@@ -14,6 +14,9 @@ const wrongCount = ref(0)
 const favoriteCount = ref(0)
 const noteCount = ref(0)
 const serviceVisible = ref(false)
+const referralVisible = ref(false)
+const referralCode = ref('')
+const referralBusy = ref(false)
 const unreadNotice = ref(true)
 const pendingOrder = ref(true)
 type RightsLevel = 'none' | 'basic' | 'trial' | 'pro' | 'flagship'
@@ -75,6 +78,7 @@ const selectRights = (level: RightsLevel) => {
 const applyDebug = (key: string) => {
   if (key.startsWith('rights-')) selectRights(key.replace('rights-', '') as RightsLevel)
 }
+const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value)) return uni.showToast({title:'请输入10位推荐码',icon:'none'}); referralBusy.value=true; try { const r=await api('/referrals/use','POST',{code:referralCode.value}); referralVisible.value=false; referralCode.value=''; uni.showToast({title:r.permission?`成功获取${String(r.permission).toUpperCase()} ${r.hours}小时`:'推荐码使用成功',icon:'none'}); if(r.examId) uni.reLaunch({url:`/pages/exam-switch/index?examId=${r.examId}`}) } catch(e){showApiError(e)} finally {referralBusy.value=false} }
 </script>
 
 <template>
@@ -118,10 +122,11 @@ const applyDebug = (key: string) => {
       <view class="menu-row" @tap="openCenter('orders')"><view class="menu-icon"><uni-icons type="wallet" size="20" color="#5f748b" /></view><view class="menu-copy"><text>我的订单</text><text>购买与支付记录</text></view><view v-if="pendingOrder" class="unread-dot"></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
     </view></view>
 
-    <view class="section-card"><view class="section-head"><text>帮助与公告</text></view><view class="menu-group compact">
-      <view class="menu-row" @tap="openCenter('announcements')"><view class="menu-icon"><uni-icons type="notification" size="20" color="#5f748b" /></view><view class="menu-copy"><text>公告</text><text>产品更新与考试提醒</text></view><view v-if="unreadNotice" class="unread-dot"></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
+    <view class="section-card"><view class="section-head"><text>消息中心</text></view><view class="menu-group compact">
+      <view class="menu-row" @tap="openCenter('announcements')"><view class="menu-icon"><uni-icons type="notification" size="20" color="#5f748b" /></view><view class="menu-copy"><text>消息中心</text><text>学习提醒、订单通知与考试公告</text></view><view v-if="unreadNotice" class="unread-dot"></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="openCenter('faq')"><view class="menu-icon"><uni-icons type="help" size="20" color="#5f748b" /></view><view class="menu-copy"><text>常见问题</text><text>账号、学习和购买问题</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="serviceVisible = true"><view class="menu-icon"><uni-icons type="chat" size="20" color="#5f748b" /></view><view class="menu-copy"><text>联系客服</text><text>企业微信人工客服</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
+      <view class="menu-row" @tap="referralVisible = true"><view class="menu-icon"><uni-icons type="gift" size="20" color="#5f748b" /></view><view class="menu-copy"><text>使用推荐码</text><text>绑定推荐关系，领取专属权益</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="openCenter('about')"><view class="menu-icon"><uni-icons type="info" size="20" color="#5f748b" /></view><view class="menu-copy"><text>关于上行宝</text><text>协议、隐私与版本信息</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
     </view></view>
 
@@ -137,6 +142,7 @@ const applyDebug = (key: string) => {
         <button class="cancel-button" @tap="serviceVisible = false">关闭</button>
       </view>
     </view>
+    <view v-if="referralVisible" class="modal-mask" @tap="referralVisible = false"><view class="service-modal" @tap.stop><text class="service-title">使用推荐码</text><text class="service-time">每位用户只能使用一次推荐码</text><input v-model="referralCode" maxlength="10" class="referral-input" placeholder="请输入10位推荐码" @input="referralCode=referralCode.toUpperCase()"/><button class="copy-button" :loading="referralBusy" @tap="useReferral">立即使用</button><button class="cancel-button" @tap="referralVisible=false">取消</button></view></view>
   </view>
 </template>
 

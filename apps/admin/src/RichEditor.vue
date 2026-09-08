@@ -3,14 +3,16 @@ import { computed, ref, onBeforeUnmount } from 'vue'
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
 import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
+import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
+import Image from '@tiptap/extension-image'
 import { Bold, Italic, Heading2, List, ListOrdered, Undo2, Redo2, ImagePlus, Video, AudioLines, Paperclip } from 'lucide-vue-next'
 import RichResource from './RichResource.vue'
 import { send } from './api'
-const props=defineProps<{modelValue?:any;plainText?:string;examId:string;contentId:string;allowHandouts?:boolean}>()
-const resourceTools=computed(()=>[{kind:'image',name:'图片',icon:ImagePlus},{kind:'video',name:'视频',icon:Video},{kind:'audio',name:'音频',icon:AudioLines},...(props.allowHandouts===false?[]:[{kind:'handout',name:'讲义',icon:Paperclip}])])
+const props=withDefaults(defineProps<{modelValue?:any;plainText?:string;examId?:string;contentId:string;allowHandouts?:boolean;allowMedia?:boolean;allowImages?:boolean}>(),{examId:''})
+const resourceTools=computed(()=>[((props.allowMedia!==false||props.allowImages!==false)?{kind:'image',name:'图片',icon:ImagePlus}:null),...(props.allowMedia===false?[]:[{kind:'video',name:'视频',icon:Video},{kind:'audio',name:'音频',icon:AudioLines}]),...(props.allowHandouts===false?[]:[{kind:'handout',name:'讲义',icon:Paperclip}])].filter(Boolean) as any)
 const emit=defineEmits(['update:modelValue','busy'])
 const resource=Node.create({name:'resource',group:'block',atom:true,draggable:true,addAttributes(){return {assetId:{default:''},kind:{default:'image'},title:{default:''},posterAssetId:{default:null}}},parseHTML(){return []},renderHTML({HTMLAttributes}){return ['figure',mergeAttributes(HTMLAttributes,{'data-resource':'true'})]},addNodeView(){return VueNodeViewRenderer(RichResource)}})
-const editor=useEditor({extensions:[StarterKit.configure({link:false,codeBlock:false,orderedList:{HTMLAttributes:{}}}),resource],content:props.modelValue||{type:'doc',content:(props.plainText||'').split('\n').map(text=>({type:'paragraph',...(text?{content:[{type:'text',text}]}:{})}))},onCreate:({editor})=>emit('update:modelValue',editor.getJSON()),onUpdate:({editor})=>emit('update:modelValue',editor.getJSON()),editorProps:{attributes:{'aria-label':'图文正文编辑器',role:'textbox','aria-multiline':'true'}}})
+const editor=useEditor({extensions:[StarterKit.configure({link:false,codeBlock:false,orderedList:{HTMLAttributes:{}}}),Image,Table.configure({resizable:true}),TableRow,TableHeader,TableCell,resource],content:props.modelValue||{type:'doc',content:(props.plainText||'').split('\n').map(text=>({type:'paragraph',...(text?{content:[{type:'text',text}]}:{})}))},onCreate:({editor})=>emit('update:modelValue',editor.getJSON()),onUpdate:({editor})=>emit('update:modelValue',editor.getJSON()),editorProps:{attributes:{'aria-label':'图文正文编辑器',role:'textbox','aria-multiline':'true'}}})
 const dialog=ref(false),kind=ref('image'),source=ref('upload'),title=ref(''),external=ref(''),error=ref(''),busy=ref(false),progress=ref(0)
 const file=ref<File>(),poster=ref<File>();let xhr:XMLHttpRequest|undefined
 function open(k:string){kind.value=k;title.value='';external.value='';file.value=undefined;poster.value=undefined;error.value='';dialog.value=true}
@@ -26,12 +28,14 @@ async function insert(){
   busy.value=true;emit('busy',true);progress.value=0
   try {
     if(source.value==='upload'&&!file.value)throw new Error('请选择文件')
+    if(kind.value==='image'&&source.value==='external') { editor.value?.chain().focus().setImage({src:external.value,alt:title.value}).run();dialog.value=false;return }
     const asset=source.value==='upload'?await upload(file.value!,kind.value):await send('/admin/media/external',{examId:props.examId,contentId:props.contentId,kind:kind.value,filename:title.value,url:external.value})
     const cover=kind.value==='video'&&poster.value?await upload(poster.value,'image'):undefined
     editor.value?.chain().focus().insertContent([{type:'resource',attrs:{assetId:asset.id,kind:kind.value,title:title.value,posterAssetId:cover?.id||null}},{type:'paragraph'}]).run();dialog.value=false
   }catch(e:any){error.value=e.message}finally{busy.value=false;emit('busy',false);xhr=undefined}
 }
 onBeforeUnmount(()=>{xhr?.abort();editor.value?.destroy()})
+defineExpose({ insertText: (value:string) => editor.value?.chain().focus().insertContent(value).run() })
 </script>
 <template>
   <div class="rich-editor" v-if="editor">
@@ -41,6 +45,7 @@ onBeforeUnmount(()=>{xhr?.abort();editor.value?.destroy()})
       <button type="button" title="二级标题" aria-label="二级标题" @click="editor.chain().focus().toggleHeading({level:2}).run()"><Heading2 :size="18" /></button>
       <button type="button" title="无序列表" aria-label="无序列表" @click="editor.chain().focus().toggleBulletList().run()"><List :size="18" /></button>
       <button type="button" title="有序列表" aria-label="有序列表" @click="editor.chain().focus().toggleOrderedList().run()"><ListOrdered :size="18" /></button>
+      <button type="button" title="插入表格" aria-label="插入表格" @click="editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).run()"><span class="table-glyph">▦</span></button>
       <button type="button" title="撤销" aria-label="撤销" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()"><Undo2 :size="18" /></button>
       <button type="button" title="重做" aria-label="重做" :disabled="!editor.can().redo()" @click="editor.chain().focus().redo().run()"><Redo2 :size="18" /></button>
       <button v-for="tool in resourceTools" :key="tool.kind" type="button" :title="'插入'+tool.name" :aria-label="'插入'+tool.name" @click="open(tool.kind)"><component :is="tool.icon" :size="18" /></button>
@@ -56,5 +61,5 @@ onBeforeUnmount(()=>{xhr?.abort();editor.value?.destroy()})
   </div>
 </template>
 <style scoped>
-.rich-editor{width:100%;border:1px solid #d8e0e9;border-radius:6px;overflow:hidden;background:white}.rich-toolbar{display:flex;flex-wrap:wrap;gap:4px;padding:8px;border-bottom:1px solid #e2e8f0;background:#f8fafc}.rich-toolbar button{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:4px;background:transparent;color:#475569;cursor:pointer;transition:background .15s}.rich-toolbar button:hover,.rich-toolbar button[aria-pressed=true]{background:#e7efff;color:#2563eb}.rich-toolbar button:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.rich-toolbar button:disabled{opacity:.35;cursor:default}.rich-editor :deep(.tiptap){min-height:300px;padding:20px;font-size:16px;line-height:1.8;color:#26354a;overflow-wrap:anywhere}.rich-editor :deep(.tiptap:focus){outline:2px solid #93b4f4;outline-offset:-2px}.rich-editor :deep(.tiptap p){margin:8px 0}.rich-editor :deep(.tiptap h2){font-size:20px;margin:20px 0 8px}.rich-editor :deep(.tiptap ul),.rich-editor :deep(.tiptap ol){padding-left:24px}.rich-editor :deep(.tiptap blockquote){border-left:3px solid #b3c7ea;padding-left:16px;color:#53637b}
+.rich-editor{width:100%;border:1px solid #d8e0e9;border-radius:6px;overflow:hidden;background:white}.rich-toolbar{display:flex;flex-wrap:wrap;gap:4px;padding:8px;border-bottom:1px solid #e2e8f0;background:#f8fafc}.rich-toolbar button{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:4px;background:transparent;color:#475569;cursor:pointer;transition:background .15s}.rich-toolbar button:hover,.rich-toolbar button[aria-pressed=true]{background:#e7efff;color:#2563eb}.rich-toolbar button:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.rich-toolbar button:disabled{opacity:.35;cursor:default}.table-glyph{font-size:20px;line-height:1}.rich-editor :deep(.tiptap){min-height:300px;padding:20px;font-size:16px;line-height:1.8;color:#26354a;overflow-wrap:anywhere}.rich-editor :deep(.tiptap:focus){outline:2px solid #93b4f4;outline-offset:-2px}.rich-editor :deep(.tiptap p){margin:8px 0}.rich-editor :deep(.tiptap h2){font-size:20px;margin:20px 0 8px}.rich-editor :deep(.tiptap ul),.rich-editor :deep(.tiptap ol){padding-left:24px}.rich-editor :deep(.tiptap blockquote){border-left:3px solid #b3c7ea;padding-left:16px;color:#53637b}.rich-editor :deep(.tiptap table){border-collapse:collapse;width:100%;margin:14px 0}.rich-editor :deep(.tiptap th),.rich-editor :deep(.tiptap td){border:1px solid #dbe3ed;padding:8px;text-align:left}.rich-editor :deep(.tiptap th){background:#f5f8fc;font-weight:700}
 </style>

@@ -3,7 +3,7 @@ export async function migrate() {
   // Append versioned migrations here; never reset a database on startup.
   await db.query(`CREATE TABLE IF NOT EXISTS schema_versions (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())`)
   const versions = await db.query('SELECT version FROM schema_versions WHERE version=1')
-  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); await migrateStudyContent(); return }
+  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); await migrateStudyContent(); await migrateMessages(); await migrateReferrals(); return }
   const statements = [
     `CREATE TABLE users (id text PRIMARY KEY, phone text UNIQUE NOT NULL, nickname text NOT NULL, role text NOT NULL DEFAULT 'student' CHECK(role IN ('student','superadmin','editor','support','operator')), password_hash text, invite_code text UNIQUE NOT NULL, inviter_id text REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), is_test_data boolean NOT NULL DEFAULT true)`,
     `CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL, created_at timestamptz DEFAULT now())`,
@@ -36,6 +36,45 @@ export async function migrate() {
   await migrateManualEntitlements()
   await migratePlanModel()
   await migrateStudyContent()
+  await migrateMessages()
+  await migrateReferrals()
+}
+
+async function migrateReferrals() {
+  await transaction(async c => {
+    await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
+    if ((await c.query('SELECT version FROM schema_versions WHERE version=9')).rows.length) return
+    await c.query(`CREATE TABLE IF NOT EXISTS referral_codes (
+      id text PRIMARY KEY, code text UNIQUE NOT NULL, channel text NOT NULL CHECK(channel IN ('douyin','video_account','kuaishou','xiaohongshu','bilibili','community')),
+      exam_id text REFERENCES exams(id), permission_level text CHECK(permission_level IN ('vip','svip')), permission_hours integer CHECK(permission_hours BETWEEN 1 AND 72),
+      expires_at timestamptz, status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled','expired')), creator_id text NOT NULL REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+    )`)
+    await c.query(`CREATE TABLE IF NOT EXISTS referral_uses (
+      id text PRIMARY KEY, referral_id text NOT NULL REFERENCES referral_codes(id), user_id text NOT NULL REFERENCES users(id), exam_id text REFERENCES exams(id), permission_level text, permission_hours integer, used_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id)
+    )`)
+    await c.query(`CREATE TABLE IF NOT EXISTS system_settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now(), actor_id text REFERENCES users(id))`)
+    await c.query('INSERT INTO system_settings(key,value) VALUES($1,$2) ON CONFLICT DO NOTHING',['site_domain','http://127.0.0.1:5174'])
+    await c.query('INSERT INTO schema_versions(version) VALUES(9)')
+  })
+}
+
+async function migrateMessages() {
+  await transaction(async c => {
+    await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
+    if ((await c.query('SELECT version FROM schema_versions WHERE version=8')).rows.length) return
+    await c.query(`CREATE TABLE IF NOT EXISTS message_templates (
+      id text PRIMARY KEY, name text NOT NULL, status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','offline')),
+      title text NOT NULL, document jsonb NOT NULL DEFAULT '{}', content text NOT NULL DEFAULT '', variables jsonb NOT NULL DEFAULT '[]',
+      created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), actor_id text REFERENCES users(id), is_test_data boolean NOT NULL DEFAULT true
+    )`)
+    await c.query(`CREATE TABLE IF NOT EXISTS messages (
+      id text PRIMARY KEY, template_id text REFERENCES message_templates(id), title text NOT NULL, document jsonb NOT NULL DEFAULT '{}', content text NOT NULL DEFAULT '',
+      send_type text NOT NULL CHECK(send_type IN ('manual','scheduled','preset','draft')), channels jsonb NOT NULL DEFAULT '["h5"]', category_ids jsonb NOT NULL DEFAULT '[]', exam_ids jsonb NOT NULL DEFAULT '[]', permission_levels jsonb NOT NULL DEFAULT '[]', user_ids jsonb NOT NULL DEFAULT '[]',
+      schedule jsonb NOT NULL DEFAULT '{}', status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','sent','cancelled','active')), sent_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), actor_id text REFERENCES users(id), is_test_data boolean NOT NULL DEFAULT true
+    )`)
+    await c.query(`CREATE TABLE IF NOT EXISTS message_deliveries (id text PRIMARY KEY, message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id text NOT NULL REFERENCES users(id), channel text NOT NULL, status text NOT NULL, read_at timestamptz, delivered_at timestamptz, error text, UNIQUE(message_id,user_id,channel))`)
+    await c.query('INSERT INTO schema_versions(version) VALUES(8)')
+  })
 }
 
 async function migrateStudyContent() {

@@ -12,12 +12,13 @@ const code = ref('')
 const agreed = ref(false)
 const countdown = ref(0)
 const redirect = ref('')
+const referral = ref('')
 const testCode = ref('')
 const busy = ref(false)
 const sendingCode = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
 
-onLoad((options) => { redirect.value = options?.redirect ? decodeURIComponent(options.redirect) : '' })
+onLoad((options) => { redirect.value = options?.redirect ? decodeURIComponent(options.redirect) : ''; referral.value = String(options?.referral || '').toUpperCase() })
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 const back = () => backOrFallback('/pages/index/index')
 onUnmounted(() => { if (timer) clearInterval(timer) })
@@ -51,6 +52,7 @@ const submit = async () => {
   busy.value = true
   try {
     acceptSession(await api('/auth/phone', 'POST', { phone: phone.value, code: code.value }))
+    if(referral.value) { try { await api('/referrals/use','POST',{code:referral.value}); uni.showToast({title:'推荐码绑定成功',icon:'none'}) } catch(e) { /* 登录不因推荐码失败而中断 */ } }
     await refreshRights()
     await refreshPersonalData()
     finish(phone.value)
@@ -69,6 +71,7 @@ const openRoute = (url: string) => tabRoutes.includes(url) ? uni.reLaunch({ url 
     <view class="login-form">
       <view class="field"><uni-icons type="phone" size="21" color="#8793a6" /><input v-model="phone" type="number" maxlength="11" aria-label="手机号" placeholder="请输入手机号" placeholder-class="placeholder" /></view>
       <view class="field"><uni-icons type="locked" size="21" color="#8793a6" /><input v-model="code" type="number" maxlength="4" aria-label="验证码" placeholder="请输入验证码" placeholder-class="placeholder" /><button class="code-button" :disabled="Boolean(countdown) || sendingCode" @tap="sendCode">{{ sendingCode ? '获取中…' : countdown ? `${countdown}s 后重发` : '获取验证码' }}</button></view>
+      <view class="field"><uni-icons type="gift" size="21" color="#8793a6" /><input v-model="referral" maxlength="10" aria-label="推荐码" placeholder="推荐码（选填）" placeholder-class="placeholder" @input="referral=referral.toUpperCase()" /></view>
       <button class="login-button" :loading="busy" :disabled="busy" @tap="submit">登录</button>
     </view>
     <view class="agreement" @tap="agreed = !agreed"><view class="checkbox" :class="{ checked: agreed }"><uni-icons v-if="agreed" type="checkmarkempty" size="14" color="#fff" /></view><text>我已阅读并同意《用户服务协议》和《隐私政策》，未注册手机号将自动创建账号</text></view>

@@ -63,6 +63,8 @@ const gated = (url: string) => { if (requireLogin(url)) goRoute(url) }
 const showMessage = (message: string) => uni.showToast({ title: message, icon: 'none' })
 const openExamSwitch = () => uni.navigateTo({ url: '/pages/exam-switch/index', animationType: 'slide-in-bottom', animationDuration: 260 })
 const openSearch = () => uni.navigateTo({ url: '/pages/search/index' })
+const openMessages = () => uni.navigateTo({ url: '/pages/profile-center/index?mode=announcements' })
+const hasUnreadMessages = computed(() => uni.getStorageSync('sxb-unread-announcements') !== false)
 const openTrial = () => openPlanPayment({ name: 'VIP 24小时体验', icon: 'clock', price: 1, color: 'trial', includedCount: 7, intro: '' })
 const paymentMethodLabel = (method: PaymentMethod) => method === 'alipay' ? '支付宝支付' : '微信支付'
 const openPlanPayment = (plan: StudyPlan) => {
@@ -194,7 +196,7 @@ const plans: StudyPlan[] = [
   <view class="home page safe-top">
     <view class="top-actions">
       <button class="exam-entry" @tap="openExamSwitch"><view class="exam-entry-icon"><uni-icons type="calendar" size="17" color="#3569e8" /></view><view class="exam-entry-copy"><view><text>{{ exam.name }}</text><uni-icons type="arrowdown" size="14" color="#3569e8" /></view></view></button>
-      <button class="search-button" aria-label="搜索" @tap="openSearch"><uni-icons type="search" size="23" color="#4c54b5" /></button>
+      <button class="search-button" aria-label="搜索" @tap="openSearch"><uni-icons type="search" size="23" color="#4c54b5" /></button><button class="message-button" aria-label="消息中心" @tap="openMessages"><uni-icons type="notification" size="22" color="#4c54b5" /><view v-if="hasUnreadMessages" class="message-dot"></view></button>
     </view>
 
     <view class="overview"><view class="overview-copy"><text class="overview-title">距离考试还有 <text>{{ exam.daysLeft }}</text> 天</text><text class="overview-sub">按计划完成每一次练习，上岸会更有把握</text></view><view class="mastery"><view class="mastery-ring" :style="masteryRingStyle"><view class="mastery-center"><text>{{ exam.mastery }}%</text></view></view><text>掌握程度</text></view></view>
@@ -267,13 +269,15 @@ const plans: StudyPlan[] = [
 <style scoped lang="scss">
 .home { max-width: 430px; margin: 0 auto; padding-top: calc(env(safe-area-inset-top) + 22rpx); background: #f5f7fb; }
 .top-actions { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
-.exam-entry, .search-button, .text-button { border: 0; padding: 0; margin: 0; }
+.exam-entry, .search-button, .message-button, .text-button { border: 0; padding: 0; margin: 0; }
 .exam-entry { flex: 1; min-width: 0; display: flex; align-items: center; gap: 11rpx; background: transparent; text-align: left; }
 .exam-entry-icon { width: 54rpx; height: 54rpx; display: flex; align-items: center; justify-content: center; background: #e9efff; border: 1rpx solid #d7e2ff; border-radius: 16rpx; }
 .exam-entry-copy { display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
 .tiny-label { font-size: 19rpx; color: #8a95a5; }
 .exam-entry-copy>view { display: flex; align-items: center; gap: 4rpx; font-size: 27rpx; font-weight: 800; white-space: nowrap; }
 .search-button { width: 58rpx; height: 58rpx; display: flex; align-items: center; justify-content: center; background: #f0efff; border-radius: 16rpx; }
+.message-button { position:relative; width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; background:#f0efff; border-radius:16rpx; margin-left:10rpx; }
+.message-dot { position:absolute; top:8rpx; right:8rpx; width:12rpx; height:12rpx; border-radius:50%; background:#e5484d; border:2rpx solid #f0efff; }
 .overview { display: flex; justify-content: space-between; align-items: center; padding: 28rpx 0 24rpx; border-bottom: 1rpx solid #e1e7f0; }
 .overview-title { display: block; font-size: 32rpx; font-weight: 850; color: #152238; }.overview-title text { color: #3569e8; }.overview-sub { display: block; margin-top: 7rpx; color: #758297; font-size: 21rpx; }.mastery { display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }.mastery>text:first-child { color: #6949df; font-size: 29rpx; font-weight: 850; }.mastery>text:last-child { color: #7f8b9b; font-size: 21rpx; }
 .promo { position: relative; margin-top: 20rpx; padding: 24rpx; overflow: hidden; color: #fff; border-radius: 16rpx; background: linear-gradient(135deg,#172c4c 0%,#2e3a79 100%); box-shadow: 0 14rpx 30rpx rgba(35,46,100,.18); }.promo::after { content:''; position:absolute; width:180rpx; height:180rpx; right:-76rpx; top:-90rpx; border:20rpx solid rgba(255,194,90,.16); border-radius:50%; box-shadow:0 0 0 18rpx rgba(255,194,90,.06); }.promo.collapsed { padding: 18rpx 22rpx; }.promo-head { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:flex-start; gap:12rpx; }.promo-head>view { display:flex; flex-direction:column; gap:7rpx; }.promo-kicker { color:#a7c8ff; font-size: 19rpx; font-weight:750; }.promo-title { font-size: 29rpx; font-weight:850; }.collapse-btn { height:42rpx; line-height:42rpx; padding:0 13rpx; color:#dfe8ff; background:rgba(255,255,255,.12); border-radius:7rpx; font-size: 19rpx; }.promo-content { position:relative; z-index:1; }.promo-desc { display:block; margin-top:16rpx; color:#c8d5ea; font-size: 21rpx; line-height:1.55; }.promo-stats { display:grid; grid-template-columns:repeat(3,1fr); margin:18rpx 0 15rpx; padding:15rpx 0; border-top:1rpx solid rgba(255,255,255,.14); border-bottom:1rpx solid rgba(255,255,255,.14); }.promo-stats view { display:flex; flex-direction:column; align-items:center; gap:3rpx; border-right:1rpx solid rgba(255,255,255,.14); }.promo-stats view:last-child { border-right:0; }.promo-stats text:first-child { font-size: 29rpx; font-weight:850; }.promo-stats text:last-child { color:#aebbd0; font-size: 19rpx; }.promo-tags { display:flex; flex-wrap:wrap; gap:8rpx; margin-bottom:18rpx; }.promo-tags text { padding:6rpx 10rpx; color:#dfd8ff; background:rgba(119,88,230,.28); border-radius:6rpx; font-size: 19rpx; }.trial-btn { height:68rpx; line-height:68rpx; display:flex; align-items:center; justify-content:center; gap:6rpx; color:#fff; background:#7655df; border-radius:10rpx; font-size: 22rpx; font-weight:800; box-shadow:0 8rpx 18rpx rgba(118,85,223,.3); }.trial-price { color:#ffd16b; font-size: 27rpx; font-weight:900; }.promo-mini { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:center; color:#edf2ff; font-size: 21rpx; font-weight:700; }.promo-mini text:last-child { color:#c3b7ff; font-weight:500; }
