@@ -240,7 +240,7 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
         <el-form-item v-if="edit.kind==='knowledge'" label="配套讲义"><KnowledgeHandouts v-if="editor" :key="edit.id" v-model="edit.payload.handouts" :exam-id="edit.exam_id" :content-id="edit.id" @busy="handoutBusy=$event" /></el-form-item>
       </template>
       <el-form-item v-else label="正文"><el-input v-model="edit.payload.content" type="textarea" :rows="7" /></el-form-item>
-      <div class="form-columns" :class="{three:edit.kind==='knowledge'}"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item v-if="edit.kind==='knowledge'" label="已配套课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="已配套课程" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
+      <div class="form-columns" :class="{'knowledge-meta':edit.kind==='knowledge'}"><el-form-item label="来源"><el-input v-model="edit.source" /></el-form-item><el-form-item v-if="edit.kind==='knowledge'" label="已配套课程"><el-switch v-model="edit.payload.isKnowledgeCourse" aria-label="已配套课程" /></el-form-item><el-form-item label="测试内容标记"><el-switch v-model="edit.is_test_data" /></el-form-item></div>
       <el-checkbox v-model="advanced" @change="payloadText=JSON.stringify(edit.payload,null,2)">高级结构字段</el-checkbox><el-input v-if="advanced" v-model="payloadText" class="json-field" type="textarea" :rows="12" />
       <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="form-error" />
     </el-form><template #footer><el-button :disabled="resourceBusy||handoutBusy" @click="editor=false">取消</el-button><el-button type="primary" :disabled="resourceBusy||handoutBusy" :loading="saving" @click="saveContent">保存内容</el-button></template>
@@ -259,3 +259,12 @@ async function saveOrder(){saving.value=true;try{const o=orderEdit.value;await s
   <el-dialog v-model="orderDialog" title="订单详情" width="600px"><el-descriptions :column="1" border><el-descriptions-item label="订单号">{{ orderEdit.id }}</el-descriptions-item><el-descriptions-item label="用户 / 考试">{{ orderEdit.phone }} · {{ orderEdit.exam_name }}</el-descriptions-item><el-descriptions-item label="商品 / 状态">{{ labels[orderEdit.product] }} · {{ labels[orderEdit.status] }}</el-descriptions-item><el-descriptions-item label="支付金额">{{ money(orderEdit.amount_cents/100) }}</el-descriptions-item><el-descriptions-item label="支付时间">{{ formatDate(orderEdit.paid_at) }}</el-descriptions-item><el-descriptions-item label="关闭原因">{{ orderEdit.close_reason||'—' }}</el-descriptions-item></el-descriptions><el-form label-position="top" class="order-form"><el-form-item v-if="orderEdit.product==='upgrade'&&orderEdit.status==='pending_payment'" label="调整补差价（元，最低100）"><el-input-number v-model="orderEdit.amountYuan" :min="100" :precision="2" /></el-form-item><el-form-item label="订单操作"><el-select v-model="orderEdit.nextStatus" clearable><el-option v-if="orderEdit.status==='pending_payment'" label="关闭订单" value="closed" /><el-option v-if="orderEdit.status==='paid'" label="客服发起退款（测试）" value="refunding" /><el-option v-if="orderEdit.status==='refunding'" label="确认已退款（测试）" value="refunded" /></el-select></el-form-item><el-form-item label="操作原因（必填）"><el-input v-model="orderEdit.reason" type="textarea" :rows="3" /></el-form-item><el-alert v-if="orderError" :title="orderError" type="error" :closable="false" /></el-form><template #footer><el-button @click="orderDialog=false">关闭</el-button><el-button type="primary" :loading="saving" @click="saveOrder">保存操作</el-button></template></el-dialog>
   <el-dialog :model-value="Boolean(inspect)" title="记录详情" width="720px" @close="inspect=null"><pre class="record-json">{{ JSON.stringify(inspect,null,2) }}</pre></el-dialog>
 </template>
+<style scoped>
+.form-columns.knowledge-meta {
+  grid-template-columns: minmax(0, calc((100% - 32px) / 3)) max-content max-content;
+  column-gap: 16px;
+}
+@media (max-width: 768px) {
+  .form-columns.knowledge-meta { grid-template-columns: 1fr; }
+}
+</style>
