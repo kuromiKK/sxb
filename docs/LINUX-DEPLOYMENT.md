@@ -1,13 +1,13 @@
 # Linux 部署前置说明
 
-本文件是部署规划，不表示已在 Linux 实机验收。当前版本仅允许本机联调，不应直接暴露测试验证码和模拟支付到公网。
+2026-09-17 已在 Alibaba Cloud Linux 3 完成线上内测部署、数据库及文件迁移核验、HTTPS 与 API 冒烟检查。实际目录、服务、备份及回调配置见 [线上内测部署记录](ONLINE-INTERNAL-TEST.md)。真实短信、微信登录和支付仍需配置凭据并由业务方联调；不要把测试验证码和模拟支付暴露到公网。以下为通用部署要求。
 
 ## 架构
 
 - 用户端：Vue 3 + uni-app，一套代码编译 H5 / 微信小程序；App 尚未真机打包验收。
 - 后台：Vue 3 + Element Plus + Lucide + Vite。
 - API：NestJS 11 承载 Express 路由，TypeScript、Zod 校验。
-- 数据：本机 PGlite 持久化；正式环境 PostgreSQL，通过 `DATABASE_URL` 切换。
+- 数据：本机网站已使用 PostgreSQL 17，正式环境也使用 PostgreSQL，通过 `DATABASE_URL` 配置连接；PGlite 仅保留用于隔离的自动化测试与历史回退。
 - 正式入口：Nginx HTTPS 443，静态资源与 `/api` 反向代理；Node API 仅监听 127.0.0.1:4310。不要把 Vite 开发服务用于公网。
 
 ## 环境与流程

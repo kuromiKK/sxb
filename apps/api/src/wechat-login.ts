@@ -5,6 +5,7 @@ import {db,transaction} from './db.ts'
 import {fail,hash,requireUser,session} from './security.ts'
 import {providerSetting} from './provider-config.ts'
 import {requireProtocolConsent,loginStudent} from './site-settings.ts'
+import {platformEnvironment} from './platform-mode.ts'
 export const wechatLogin=Router()
 const ticketSchema=z.string().regex(/^[a-f0-9]{64}$/)
 async function ticket(kind:string,data:any){const raw=randomBytes(32).toString('hex');await db.query('DELETE FROM wechat_tickets WHERE expires_at<now()');await db.query("INSERT INTO wechat_tickets(token_hash,kind,data,expires_at) VALUES($1,$2,$3,now()+interval '5 minutes')",[hash(raw),kind,JSON.stringify(data)]);return raw}
@@ -12,9 +13,9 @@ async function exchange(channel:string,code:string){const {config:c,credentials:
 async function result(identity:{appId:string;openid:string}){
  const u=(await db.query('SELECT u.id,u.phone FROM wechat_identities w JOIN users u ON u.id=w.user_id WHERE w.app_id=$1 AND w.openid=$2',[identity.appId,identity.openid])).rows[0]
  if(!u)return {bindingRequired:true,bindingTicket:await ticket('bind',identity)}
- const r=await transaction(async c=>{const user=await loginStudent(c,u.phone);const consent=await requireProtocolConsent(c,u.phone,user.id);return consent?{consent}:{user}})
+ const r=await transaction(async c=>{await platformEnvironment(c,true);const user=await loginStudent(c,u.phone);const consent=await requireProtocolConsent(c,u.phone,user.id);return consent?{consent}:{user,token:await session(user.id,'student',c)}})
  if(r.consent)return r.consent
- return {user:r.user,token:await session(r.user!.id)}
+ return {user:r.user,token:r.token}
 }
 wechatLogin.get('/auth/wechat/settings',async(_req,res)=>{const {config:c}=await providerSetting('wechat');res.setHeader('Cache-Control','no-store');res.json({web:c.enabled&&c.webEnabled,official:c.enabled&&c.officialEnabled,mini:c.enabled&&c.miniEnabled})})
 wechatLogin.post('/auth/wechat/start',async(req,res)=>{

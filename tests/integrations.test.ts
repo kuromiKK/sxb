@@ -77,6 +77,6 @@ test('captcha proof isolation, real SMS adapter, secrets and delivery limits',as
    await assert.rejects(()=>verifyChallenge(malformed.challengeId,'test-binding','preview',v.type==='rotate'?{x:180,y:20}:{angle:135}),/不匹配/)
   }
   await migrateIntegrations();assert.equal((await f.db.query('SELECT version FROM schema_versions WHERE version=24')).rows.length,1)
-  process.env.APP_MODE='production';assert.equal((await save('sms',{...sms,mode:'test'})).status,400)
+  await f.db.query("UPDATE platform_environment SET mode='production' WHERE id=1");assert.equal((await save('sms',{...sms,mode:'test'})).status,400)
  }finally{process.env.APP_MODE='test';await f.close();await new Promise<void>(r=>server.close(()=>r()))}
 })

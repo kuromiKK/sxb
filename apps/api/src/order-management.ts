@@ -3,6 +3,7 @@ import {z} from 'zod'
 import {db,transaction} from './db.ts'
 import {fail,id} from './security.ts'
 import {expireOrders} from './membership.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export async function migrateOrderManagement(){await transaction(async c=>{
   await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
@@ -41,7 +42,7 @@ function filters(input:unknown){
   if(f.paidTo)add('paid_at<=?::timestamptz',f.paidTo)
   return {f,params,where:clauses.join(' AND ')}
 }
-const canDeleteTest=()=>process.env.APP_MODE!=='production'
+const canDeleteTest=()=>isTestMode()
 export const orderManagement=Router()
 orderManagement.get('/',async(req,res)=>{
   await expireOrders()
@@ -53,7 +54,7 @@ orderManagement.get('/',async(req,res)=>{
     count(*) FILTER(WHERE status='pending_payment')::int AS pending,
     count(*) FILTER(WHERE status='paid')::int AS paid,
     coalesce(sum(amount_cents) FILTER(WHERE status='refunded'),0)::bigint AS refunded_cents FROM matching`,params)).rows[0]
-  res.json({items:result.rows,total:summary.total,summary,testDeletionAllowed:canDeleteTest()})
+  res.json({items:result.rows,total:summary.total,summary,testDeletionAllowed:await canDeleteTest()})
 })
 orderManagement.get('/:id',async(req,res)=>{
   await expireOrders()
@@ -61,7 +62,7 @@ orderManagement.get('/:id',async(req,res)=>{
   if(!order)fail(404,'订单不存在或已删除')
   const payments=(await db.query('SELECT p.*,a.ref AS merchant_reference,a.transaction_id FROM payments p LEFT JOIN provider_payments a ON a.order_id=p.order_id AND a.provider=split_part(p.method,\'_\',1) WHERE p.order_id=$1 ORDER BY p.created_at DESC,p.id DESC',[order.id])).rows
   const history=(await db.query("SELECT a.*,u.nickname AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id WHERE a.target_id=$1 AND a.action LIKE 'order.%' ORDER BY a.created_at DESC,a.id DESC",[order.id])).rows
-  res.json({order,payments,history,testDeletionAllowed:canDeleteTest()&&order.is_test_data})
+  res.json({order,payments,history,testDeletionAllowed:await canDeleteTest()&&order.is_test_data})
 })
 
 orderManagement.patch('/:id',async(req,res)=>{
@@ -84,10 +85,10 @@ orderManagement.patch('/:id',async(req,res)=>{
   });res.json({ok:true})
 })
 orderManagement.delete('/:id',async(req,res)=>{
-  if(!canDeleteTest())fail(403,'生产环境不允许删除测试订单')
   const b=z.object({confirmation:z.string(),reason:z.string().trim().min(3).max(500)}).strict().parse(req.body)
   if(b.confirmation!==req.params.id)fail(400,'请输入完整订单号确认删除')
   await transaction(async c=>{
+    if(!await isTestMode(c,true))fail(403,'生产环境不允许删除测试订单')
     const initial=(await c.query('SELECT user_id FROM orders WHERE id=$1',[req.params.id])).rows[0];if(!initial)fail(404,'订单不存在')
     await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[initial.user_id])
     const o=(await c.query('SELECT * FROM orders WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[req.params.id])).rows[0]

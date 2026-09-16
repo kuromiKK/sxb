@@ -2,6 +2,7 @@ import { db,transaction,type Queryable } from './db.ts'
 import { id,fail } from './security.ts'
 import { getProduct,productConfig,saleState } from './products.ts'
 import { expireOrders,rights } from './membership.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export function trialWindow(hours:number,minimum:number,endsAt:string,now=Date.now()){
   const remaining=Date.parse(endsAt)-now
@@ -30,13 +31,14 @@ async function activeProduct(c:Queryable,productId:string){
   return p
 }
 export async function createProductOrder(userId:string,productId:string){return transaction(async c=>{
+  const test=await isTestMode(c,true)
   await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[userId]);await expireOrders(c)
   const p=await activeProduct(c,productId)
   const snapshot={...productConfig(p),productId:p.id,version:p.version,examName:p.exam_name,year:p.year,endsAt:new Date(p.ends_at).toISOString()}
   await eligible(c,userId,snapshot,Date.now())
   const pending=(await c.query("SELECT * FROM orders WHERE user_id=$1 AND status='pending_payment'",[userId])).rows[0]
   if(pending)return {order:pending,existing:true}
-  const order=(await c.query(`INSERT INTO orders(id,user_id,exam_id,cycle_id,product,amount_cents,expires_at,product_id,product_snapshot,is_test_data) VALUES($1,$2,$3,$4,$5,$6,least(now()+interval '30 minutes',$7::timestamptz),$8,$9,$10) RETURNING *`,['SXB'+id().replaceAll('-',''),userId,p.exam_id,p.cycle_id,p.type==='trial'?'trial':p.level,p.price_cents,p.ends_at,p.id,JSON.stringify(snapshot),process.env.APP_MODE!=='production'])).rows[0]
+  const order=(await c.query(`INSERT INTO orders(id,user_id,exam_id,cycle_id,product,amount_cents,expires_at,product_id,product_snapshot,is_test_data) VALUES($1,$2,$3,$4,$5,$6,least(now()+interval '30 minutes',$7::timestamptz),$8,$9,$10) RETURNING *`,['SXB'+id().replaceAll('-',''),userId,p.exam_id,p.cycle_id,p.type==='trial'?'trial':p.level,p.price_cents,p.ends_at,p.id,JSON.stringify(snapshot),test])).rows[0]
   return {order,existing:false}
 })}
 export async function pendingCheckout(c:Queryable,userId:string,orderId:string){
@@ -66,11 +68,12 @@ export async function checkoutProductOrder(userId:string,orderId:string){return 
   return {paid:false,title:s.frontendTitle||s.title,amountCents:order.amount_cents,shortened:w.shortened,notice,availableHours:w.availableHours,expiresAt:w.expiresAt,endsAt:s.endsAt,confirmationToken}
 })}
 export async function payProductOrder(userId:string,orderId:string,outcome:'success'|'failure',confirmationToken?:string){
-  if(process.env.APP_MODE==='production')fail(403,'生产环境禁止模拟支付')
   return transaction(async c=>{
+    if(!await isTestMode(c,true))fail(403,'生产环境禁止模拟支付')
     const r=await pendingCheckout(c,userId,orderId)
-    if(r.paid)return r.order
     if((await c.query('SELECT 1 FROM provider_payments WHERE order_id=$1 LIMIT 1',[orderId])).rows.length)fail(409,'此订单已使用第三方支付，不能改用模拟支付')
+    if(!r.order.is_test_data)fail(403,'正式订单不能使用模拟支付')
+    if(r.paid)return r.order
     const {order,snapshot:s,window:w}=r,confirmation=order.checkout_confirmation
     if(w.shortened&&(!confirmationToken||confirmation?.token!==confirmationToken||confirmation.expires<Date.now()||confirmation.endsAt!==s.endsAt))fail(409,'体验时长不足完整时长，请重新确认实际可用时长后支付')
     await c.query('INSERT INTO payments(id,order_id,status,method,error) VALUES($1,$2,$3,$4,$5)',[id(),orderId,outcome,'wechat_test',outcome==='failure'?'测试支付失败':null])

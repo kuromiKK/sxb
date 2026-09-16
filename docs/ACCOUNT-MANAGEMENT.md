@@ -27,11 +27,17 @@ Highest admins can search, add, rename, enable/disable administrators, and reset
 passwords with a recorded reason. Passwords require 10-128 characters with
 letters and digits, are stored as hashes, and never appear in audit payloads.
 Admin phone numbers cannot be edited. Disabling accounts is reversible; there
-is no destructive delete. The current administrator cannot disable itself and
+is a confirmed delete action that hides the account and revokes admin access while
+retaining its identity for content ownership and audit history. The phone
+`18600513966` cannot be deleted (both UI and API enforce this). Deleted identities
+cannot be re-enabled, reset or recreated using the same phone; use disable for
+temporary access suspension. The current administrator cannot delete or disable itself and
 at least one enabled highest administrator must remain. Disabling or resetting
 a password revokes that administrator's sessions, not the same-phone student.
 
-Creation, updates, password resets and admin logins are audited. Test-mode
+Deletion uses the idempotent `users.admin_deleted_at` migration, clears the password
+hash and revokes admin sessions. Student identities and records remain untouched.
+Creation, updates, deletion, password resets and admin logins are audited. Test-mode
 accounts are marked `is_test_data`. UI verification administrators additionally
 carry a test prefix in their display name and are disabled after the run.
 
@@ -58,4 +64,6 @@ separation, unseeded phone login, authorization boundaries, administrator CRUD,
 session revocation, protected active accounts, audit secrecy and repeatable
 migration/seed. `npm run check` covers API and admin types. Browser tests are in
 `tests/ui-site.mjs`. No Docker, HTTPS certificate, or port 3000 is required for
-this local setup.
+this local setup. `node --experimental-strip-types tests/administrator-delete.browser.mjs`
+checks protected/current accounts, deletion confirmation, cancellation and list refresh
+against an isolated temporary database while the local admin Vite service is running.

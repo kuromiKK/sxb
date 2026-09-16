@@ -55,6 +55,10 @@ test('central AI service migration, discovery, runtime and independent appearanc
   await assert.rejects(()=>runAgentModel(f.admin.id,body,false,async()=>({choices:[{message:{content:'only chat'}}]})),/工具调用/)
   await assert.rejects(()=>runAgentModel(f.admin.id,body,false,async()=>{throw new Error(draft.apiKey)}),/模型请求失败/)
   const day=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'}),usage=await f.call(ai+'/usage?day='+day);assert.equal(usage.summary.calls,3);assert.equal(usage.summary.successes,1);assert.equal(usage.rows.find((x:any)=>x.status==='success').cost_yuan,'0.00020000');assert.ok(!JSON.stringify(usage).includes(draft.apiKey))
+  await assert.rejects(()=>runAgentModel(f.admin.id,body,false,async()=>{throw Object.assign(new Error(draft.apiKey),{upstreamStatus:404})}),/模型服务未找到接口或模型（HTTP 404）/)
+  await assert.rejects(()=>runAgentModel(f.admin.id,body,false,async()=>{throw Object.assign(new Error('API 域名解析到了内网或保留地址'),{status:400})}),/内网或保留地址/)
+  const failures=(await f.db.query("SELECT error FROM ai_calls WHERE feature_id='page-agent' AND status='failed'")).rows
+  assert.ok(failures.some((x:any)=>x.error.includes('HTTP 404')));assert.ok(failures.some((x:any)=>x.error.includes('内网或保留地址')));assert.ok(!JSON.stringify(failures).includes(draft.apiKey))
   await send(ai,{revision:service.revision,enabled:false,config});assert.equal((await f.call(integration+'/runtime')).ready,false);await assert.rejects(()=>runAgentModel(f.admin.id,body,false,fake),/尚未启用/)
   await send(ai,{revision:service.revision+1,enabled:false,config,clearKey:true},400)
   const other=(await f.call('/admin/ai')).features.find((x:any)=>x.id==='chat')

@@ -17,7 +17,12 @@ import { migrateLearningData } from './learning-data.ts'
 import { migrateLearningRecords } from './learning-records.ts'
 import { migrateOrderManagement } from './order-management.ts'
 import { migrateCheatsheetManagement } from './cheatsheet-management.ts'
-export async function migrate() {await migrateCore();await migrateSiteSettings();await migrateIntegrations();await migrateProviders();await migrateWorkspaceTools()}
+import {migratePlatformMode} from './platform-mode.ts'
+export async function migrate() {await migrateCore();await migrateAdministratorDeletion();await migrateSiteSettings();await migrateIntegrations();await migrateProviders();await migrateWorkspaceTools();await migratePlatformMode()}
+async function migrateAdministratorDeletion() {
+  // Keep administrator identities for content ownership and historical audit references.
+  await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_deleted_at timestamptz')
+}
 async function migrateCore() {
   // Append versioned migrations here; never reset a database on startup.
   await db.query(`CREATE TABLE IF NOT EXISTS schema_versions (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())`)

@@ -1,10 +1,11 @@
 import { z } from 'zod'
-import { lookup } from 'node:dns/promises'
+import { lookup,Resolver } from 'node:dns/promises'
 import https from 'node:https'
 import { isIP,type LookupFunction } from 'node:net'
 import { db,transaction } from './db.ts'
 import {createHash} from 'node:crypto'
 import { fail, id, decrypt, encrypt, audit } from './security.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export const featureNames: Record<string, string> = {
   chat: '知识点答疑', review: '专属复习资料', wrong: '错题分析', report: '学习报告解读',
@@ -99,10 +100,20 @@ export function pinnedPublicLookup(addresses:string[]):LookupFunction {
   // Node's family auto-selection requests an address array with all:true.
   return (_host,options,callback)=>options.all?callback(null,pinned.map(a=>({...a}))):callback(null,pinned[0].address,4)
 }
+const directDns=new Resolver({timeout:3000,tries:1})
+export async function modelPublicLookup(hostname:string,systemLookup:(host:string)=>Promise<string[]>=async host=>(await lookup(host,{all:true,family:4})).map(a=>a.address),dnsLookup:(host:string)=>Promise<string[]>=host=>directDns.resolve4(host)):Promise<LookupFunction>{
+ let addresses=await systemLookup(hostname)
+ // Some Windows proxy/hosts layers return benchmarking-range Fake-IP addresses.
+ // Only for this specific case, try DNS directly, validate ALL results, then pin them.
+ // Never connect to the Fake-IP, private addresses, or an unvalidated second lookup.
+ if(!isIP(hostname)&&addresses.length&&addresses.every(ip=>isIP(ip)===4&&/^198\.(18|19)\./.test(ip))){
+  try{addresses=await dnsLookup(hostname)}catch{return pinnedPublicLookup(addresses)}
+ }
+ return pinnedPublicLookup(addresses)
+}
 export async function upstream(url: URL, secret: string, body: any, timeout: number, method:'POST'|'GET'='POST'): Promise<any> {
   if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)fail(400,'API地址必须为不含凭据和查询参数的HTTPS地址')
-  const addresses = await lookup(url.hostname, { all: true, family: 4 })
-  const pinnedLookup=pinnedPublicLookup(addresses.map(a=>a.address))
+  const pinnedLookup=await modelPublicLookup(url.hostname)
   // Pin the validated DNS result so a later DNS change cannot redirect to the local network.
   return new Promise((resolve, reject) => {
     const req = https.request(url, { method, headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' }, lookup: pinnedLookup }, response => {
@@ -124,6 +135,7 @@ export async function callAI(userId: string, featureId: string, prompt: string, 
   if (!feature) fail(404, 'AI功能不存在')
   if (!test && !feature.enabled) fail(403, '该AI功能尚未启用')
   const config: AIConfig = feature.config
+  if(config.mode==='mock'&&!await isTestMode())fail(503,'生产环境不提供模拟 AI 内容，请配置真实模型')
   if(options.requireLive&&(config.mode!=='live'||!feature.encrypted_key))fail(503,'AI 判分服务未配置，请联系管理员；作答已保存，可稍后重试')
   const lock = `${userId}:${featureId}`
   if (active.has(lock)) fail(429, '该功能正在处理上一条请求')

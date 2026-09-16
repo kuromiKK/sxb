@@ -11,6 +11,7 @@ import {captchaVariantIds,captchaVariant,type CaptchaAnswer} from '../../shared/
 import {credentialFlags,providerKeys,saveProvider} from './provider-config.ts'
 import {integrationTests} from './integration-tests.ts'
 import {workspaceTools} from './workspace-tools.ts'
+import {platformEnvironment,isTestMode} from './platform-mode.ts'
 
 export const captchaSchema=z.object({mode:z.enum(['frontend','gocaptcha']),variant:z.enum(captchaVariantIds).default('slide-default'),appearance:z.enum(['light','dark']).default('light'),sms:z.boolean(),handouts:z.boolean(),title:z.string().trim().min(1).max(35),color:z.string().regex(/^#[0-9a-fA-F]{6}$/),expiresSeconds:z.number().int().min(60).max(300)}).strict()
 export const smsSchema=z.object({mode:z.enum(['test','aliyun','disabled']),signName:z.string().trim().max(50),templateCode:z.string().trim().max(60),codeVariable:z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,29}$/),codeLength:z.union([z.literal(4),z.literal(6)]),expiresSeconds:z.number().int().min(300).max(600),intervalSeconds:z.number().int().min(60).max(300),dailyLimit:z.number().int().min(1).max(30)}).strict()
@@ -42,8 +43,9 @@ async function goRequest(path:string,body?:unknown){
   const result:any=await r.json();if(result.code!==200)throw new Error('upstream');return result.data
  }catch{fail(503,'GoCaptcha 服务暂时不可用，请稍后重试；不会自动降低验证方式')}
 }
-const targetSchema=z.object({scope:z.enum(['sms','handout']),target:z.string().min(1).max(250)}).strict()
+const targetSchema=z.object({scope:z.enum(['sms','handout','admin-login']),target:z.string().min(1).max(250)}).strict()
 function binding(scope:string,target:string,req:any){
+ if(scope==='admin-login'){if(!/^1\d{10}$/.test(target))fail(400,'请输入11位手机号');return hash('admin-login:'+target+':'+String(req.ip||''))}
  if(scope==='sms'){if(!/^1\d{10}$/.test(target))fail(400,'请输入11位手机号');return hash('sms:'+target)}
  return hash('handout:'+String(req.headers.authorization||'')+':'+target)
 }
@@ -74,9 +76,10 @@ export async function verifyChallenge(challengeId:string,bound:string,scope:stri
  await db.query("UPDATE verification_challenges SET proof_hash=$2,proof_expires_at=now()+interval '2 minutes' WHERE id=$1",[challengeId,hash(proof)])
  return {proof,expiresIn:120}
 }
-export async function consumeCaptcha(scope:'sms'|'handout',target:string,req:any,proof?:string){
+export async function consumeCaptcha(scope:'sms'|'handout'|'admin-login',target:string,req:any,proof?:string){
  const {config}=await integration('captcha')
- if(config.mode!=='gocaptcha'||!(scope==='sms'?config.sms:config.handouts))return
+ // Administrator login always requires server verification, regardless of student-facing switches.
+ if(scope!=='admin-login'&&(config.mode!=='gocaptcha'||!(scope==='sms'?config.sms:config.handouts)))return
  const value=proof||req.headers['x-captcha-proof']
  if(typeof value!=='string'||value.length>200)fail(400,'请先完成安全验证')
  const result=await db.query('DELETE FROM verification_challenges WHERE proof_hash=$1 AND binding=$2 AND scope=$3 AND proof_expires_at>now() RETURNING id',[hash(value),binding(scope,target,req),scope])
@@ -86,10 +89,10 @@ export const integrationPublic=Router(),integrationAdmin=Router()
 integrationAdmin.use(workspaceTools)
 integrationAdmin.use(integrationTests)
 integrationPublic.use('/verification',rateLimit({windowMs:60_000,limit:40,standardHeaders:true,legacyHeaders:false,message:{message:'验证过于频繁，请稍后重试'}}))
-integrationPublic.get('/verification/settings',async(_req,res)=>{const {config}=await integration('captcha'),sms=(await integration('sms')).config;res.setHeader('Cache-Control','no-store');res.json({captcha:config,sms:{mode:process.env.APP_MODE==='production'&&sms.mode==='test'?'disabled':sms.mode,codeLength:sms.codeLength,intervalSeconds:sms.intervalSeconds}})})
+integrationPublic.get('/verification/settings',async(_req,res)=>{const {config}=await integration('captcha'),sms=(await integration('sms')).config,test=await isTestMode();res.setHeader('Cache-Control','no-store');res.json({captcha:config,sms:{mode:!test&&sms.mode==='test'?'disabled':sms.mode,codeLength:sms.codeLength,intervalSeconds:sms.intervalSeconds}})})
 // Download challenges require a valid student session; SMS challenges work before login.
 integrationPublic.use('/verification',async(req,res,next)=>{if(req.method==='POST'&&req.body?.scope==='handout')return requireUser(req,res,next);next()})
-integrationPublic.post('/verification/challenge',async(req,res)=>{const b=targetSchema.parse(req.body),{config}=await integration('captcha');res.setHeader('Cache-Control','no-store');if(config.mode!=='gocaptcha'||!(b.scope==='sms'?config.sms:config.handouts)){res.json({mode:'frontend',required:b.scope==='sms'?config.sms:config.handouts});return}res.json(await newChallenge(b.scope,binding(b.scope,b.target,req),config))})
+integrationPublic.post('/verification/challenge',async(req,res)=>{const b=targetSchema.parse(req.body),{config}=await integration('captcha');res.setHeader('Cache-Control','no-store');if(b.scope!=='admin-login'&&(config.mode!=='gocaptcha'||!(b.scope==='sms'?config.sms:config.handouts))){res.json({mode:'frontend',required:b.scope==='sms'?config.sms:config.handouts});return}res.json(await newChallenge(b.scope,binding(b.scope,b.target,req),captchaSchema.parse(config)))})
 // Accept the previous slider payload so already-open clients keep working during rollout.
 const answerFields={challengeId:z.string().uuid(),answer:captchaAnswerSchema.optional(),x:coordinate.optional(),y:coordinate.optional()}
 const validAnswer=(b:any)=>Boolean(b.answer)!==(b.x!==undefined&&b.y!==undefined)&&!(b.answer&&(b.x!==undefined||b.y!==undefined))
@@ -103,6 +106,7 @@ integrationAdmin.put('/:key',async(req,res)=>{
  const b=z.object({revision:z.number().int().positive(),config:key==='captcha'?captchaSchema:smsSchema,accessKeyId:z.string().trim().max(200).optional(),accessKeySecret:z.string().trim().max(200).optional(),clearCredentials:z.boolean().optional()}).strict().parse(req.body)
  await transaction(async c=>{
   // Lock both settings in stable order so live SMS cannot race a captcha downgrade.
+  const test=await isTestMode(c,true)
   const rows=(await c.query('SELECT * FROM integration_settings ORDER BY key FOR UPDATE')).rows,current=rows.find(r=>r.key===key)!
   if(current.revision!==b.revision)fail(409,'配置已被修改，请刷新后重试')
   let secrets=current.secrets
@@ -111,7 +115,8 @@ integrationAdmin.put('/:key',async(req,res)=>{
   const cap=key==='captcha'?b.config:rows.find(r=>r.key==='captcha')!.config,sms=key==='sms'?b.config:rows.find(r=>r.key==='sms')!.config
   if(sms.mode==='aliyun'&&(cap.mode!=='gocaptcha'||!cap.sms))fail(400,'真实短信发送必须开启短信场景的 GoCaptcha 验证')
   if(key==='sms'&&sms.mode==='aliyun'&&(!secrets||!sms.signName||!/^SMS_[A-Za-z0-9]+$/.test(sms.templateCode)))fail(400,'请填写凭据、已审核的短信签名及 SMS_ 开头的模板编号')
-  if(process.env.APP_MODE==='production'&&key==='sms'&&sms.mode==='test')fail(400,'生产环境不能启用测试短信')
+  if(!test&&key==='sms'&&sms.mode==='test')fail(400,'生产环境不能启用测试短信')
+  if(!test&&key==='captcha'&&(cap.mode!=='gocaptcha'||!cap.sms))fail(400,'生产环境必须开启短信场景的 GoCaptcha 验证')
   await c.query('UPDATE integration_settings SET config=$2,secrets=$3,revision=revision+1,updated_at=now() WHERE key=$1',[key,JSON.stringify(b.config),secrets])
   await c.query('INSERT INTO audit_logs(id,actor_id,action,target_id,details) VALUES($1,$2,$3,$4,$5)',[id(),res.locals.user.id,'integration.configure',key,JSON.stringify({config:b.config,credentialsChanged:Boolean(b.accessKeyId||b.clearCredentials)})])
  });res.json({ok:true})
@@ -130,12 +135,14 @@ export async function sendAliyunSms(input:SmsInput){
 export async function sendLoginCode(req:any,transport=sendAliyunSms){
  const b=z.object({phone:z.string().regex(/^1\d{10}$/),captchaProof:z.string().max(200).optional()}).strict().parse(req.body)
  const setting=await integration('sms'),config=smsSchema.parse(setting.config)
- if(config.mode==='disabled'||(config.mode==='test'&&process.env.APP_MODE==='production'))fail(503,'短信服务暂未开启')
+ const environment=await platformEnvironment()
+ if(config.mode==='disabled'||(config.mode==='test'&&environment.mode==='production'))fail(503,'短信服务暂未开启')
  if(config.mode==='aliyun') {const cap=(await integration('captcha')).config;if(!setting.secrets||cap.mode!=='gocaptcha'||!cap.sms)fail(503,'短信服务尚未完成配置')}
  await consumeCaptcha('sms',b.phone,req,b.captchaProof)
  const ipHash=hash(req.ip||'unknown'),deliveryId=id(),code=String(randomInt(10**(config.codeLength-1),10**config.codeLength))
  // Reserve a delivery before the network call, serializing sends across API processes.
  await transaction(async c=>{
+  if((await platformEnvironment(c,true)).revision!==environment.revision)fail(409,'运行环境已切换，请重新获取验证码')
   const locked=(await c.query("SELECT revision FROM integration_settings WHERE key='sms' FOR UPDATE")).rows[0]
   if(locked.revision!==setting.revision)fail(409,'短信配置已更新，请重新验证后再试')
   const last=(await c.query('SELECT sent_at FROM login_codes WHERE phone=$1',[b.phone])).rows[0]
@@ -155,6 +162,7 @@ export async function sendLoginCode(req:any,transport=sendAliyunSms){
   fail(503,providerCode==='isv.BUSINESS_LIMIT_CONTROL'?'短信发送过于频繁，请稍后重试':'短信发送失败，请稍后重试或联系客服')
  }
  await transaction(async c=>{
+  if((await platformEnvironment(c,true)).revision!==environment.revision)fail(409,'运行环境已切换，请重新获取验证码')
   await c.query(`INSERT INTO login_codes(phone,code_hash,expires_at) VALUES($1,$2,$3) ON CONFLICT(phone) DO UPDATE SET code_hash=$2,expires_at=$3,sent_at=now(),attempts=0`,[b.phone,hash(b.phone+code),new Date(Date.now()+config.expiresSeconds*1000).toISOString()])
   await c.query('UPDATE sms_deliveries SET status=$2,provider_code=$3,request_id=$4,biz_id=$5 WHERE id=$1',[deliveryId,config.mode==='test'?'test':'accepted',result.code,result.requestId||null,result.bizId||null])
  })

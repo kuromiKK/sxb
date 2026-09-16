@@ -14,13 +14,14 @@ import {captchaVariants,captchaColors,captchaVariant} from '../../shared/captcha
 import {request,send} from './api'
 const selected=ref(''),loading=ref(false),saving=ref(false),error=ref(''),rows=reactive<Record<string,any>>({}),form=reactive<Record<string,any>>({})
 const accessKeyId=ref(''),accessKeySecret=ref(''),clearCredentials=ref(false),logs=ref<any[]>([])
+const platformMode=ref('')
 const options=[{key:'sms',title:'短信',description:'阿里云短信 · 登录验证码',icon:MessageSquare},{key:'captcha',title:'验证码',description:'GoCaptcha · 拼图、旋转与点选验证',icon:ShieldCheck},{key:'wechat',title:'微信登录',description:'网站扫码 · 微信内授权 · 小程序登录',icon:ScanLine},{key:'payment',title:'微信支付',description:'Native · H5 · JSAPI · 小程序',icon:CreditCard},{key:'alipay',title:'支付宝支付',description:'电脑网站 · 手机网站 · RSA2',icon:Wallet},{key:'ai',title:'AI 配置',description:'模型连接、功能权限与调用用量',icon:Sparkles}]
 const providerSelected=computed(()=>['wechat','payment','alipay'].includes(selected.value))
 options.splice(options.length-1,0,{key:'page-agent',title:'AI员工',description:'AI员工 · 配置Page Agent',icon:Bot},{key:'g6',title:'G6 图谱',description:'知识图谱与思维导图 · 颜色与样式',icon:Network})
-function status(key:string){if(key==='g6')return '本地渲染';if(key==='ai')return '统一管理';if(key==='captcha')return rows.captcha?.config.mode==='gocaptcha'?'GoCaptcha':'前端生成';if(key==='sms')return rows.sms?.config.mode==='aliyun'?'阿里云':rows.sms?.config.mode==='disabled'?'已关闭':'本地测试';return rows[key]?.config.enabled?'已启用':'未启用'}
+function status(key:string){if(key==='g6')return '本地渲染';if(key==='ai')return '统一管理';if(key==='captcha')return rows.captcha?.config.mode==='gocaptcha'?'GoCaptcha':'前端生成';if(key==='sms')return rows.sms?.config.mode==='aliyun'?'阿里云':rows.sms?.config.mode==='disabled'?'已关闭':platformMode.value==='production'?'生产环境已禁用':'测试验证码';return rows[key]?.config.enabled?'已启用':'未启用'}
 const current=computed(()=>options.find(x=>x.key===selected.value))
 const dirty=computed(()=>selected.value&&rows[selected.value]&&(JSON.stringify(form[selected.value])!==JSON.stringify(rows[selected.value].config)||Boolean(accessKeyId.value||accessKeySecret.value||clearCredentials.value)))
-async function load(){loading.value=true;try{for(const r of await request('/admin/integrations')){rows[r.key]=r;form[r.key]=JSON.parse(JSON.stringify(r.config))}error.value=''}catch(e:any){error.value=e.message}finally{loading.value=false}}
+async function load(){loading.value=true;try{const [integrations,health]=await Promise.all([request('/admin/integrations'),request('/health')]);platformMode.value=health.mode;for(const r of integrations){rows[r.key]=r;form[r.key]=JSON.parse(JSON.stringify(r.config))}error.value=''}catch(e:any){error.value=e.message}finally{loading.value=false}}
 async function open(key:string){if(key==='ai'){location.hash='ai';return}selected.value=key;error.value='';if(key==='sms')try{logs.value=await request('/admin/integrations/sms/logs')}catch(e:any){error.value=e.message}}
 async function save(){saving.value=true;error.value='';try{const body:any={revision:rows[selected.value].revision,config:form[selected.value]};if(selected.value==='sms')Object.assign(body,{...(accessKeyId.value?{accessKeyId:accessKeyId.value}:{}),...(accessKeySecret.value?{accessKeySecret:accessKeySecret.value}:{}),clearCredentials:clearCredentials.value});await send('/admin/integrations/'+selected.value,body,'PUT');accessKeyId.value='';accessKeySecret.value='';clearCredentials.value=false;await load();ElMessage.success('配置已保存并生效')}catch(e:any){error.value=e.message}finally{saving.value=false}}
 function selectVariant(id:string){if(captchaVariants.some(v=>v.title===form.captcha.title))form.captcha.title=captchaVariant(id).title;form.captcha.variant=id}
@@ -53,8 +54,8 @@ onMounted(load)
       <p class="interface-help">验证成功凭据两分钟有效、仅可使用一次，并绑定当前手机号或讲义。服务故障时提示重试。</p>
      </template>
      <template v-else>
-      <el-form-item label="发送模式"><el-radio-group v-model="form.sms.mode"><el-radio-button value="disabled">关闭</el-radio-button><el-radio-button value="test">本地测试</el-radio-button><el-radio-button value="aliyun">阿里云真实短信</el-radio-button></el-radio-group></el-form-item>
-      <p class="interface-help">真实模式会产生阿里云短信费用，需已审核签名和验证码模板，并开启短信场景的 GoCaptcha。本地测试不发短信，生产环境禁止使用。</p>
+      <el-form-item label="发送模式"><el-radio-group v-model="form.sms.mode"><el-radio-button value="disabled">关闭</el-radio-button><el-radio-button value="test" :disabled="platformMode==='production'">测试验证码</el-radio-button><el-radio-button value="aliyun">阿里云真实短信</el-radio-button></el-radio-group></el-form-item>
+      <p class="interface-help">真实模式会产生阿里云短信费用，需已审核签名和验证码模板，并开启短信场景的 GoCaptcha。测试验证码不发短信，显示在登录页，仅在「系统设置 → 运行环境」选择测试环境时可用，本机和服务器均适用。</p>
       <el-form-item label="AccessKey ID"><el-input v-model="accessKeyId" type="password" show-password autocomplete="new-password" :placeholder="rows.sms.hasCredentials?'凭据已保存；不填写则保留':'请输入 RAM 用户 AccessKey ID'"/></el-form-item>
       <el-form-item label="AccessKey Secret"><el-input v-model="accessKeySecret" type="password" show-password autocomplete="new-password" placeholder="更换时同时填写 ID 和 Secret"/><p class="interface-help">凭据加密保存，不回显、不发送给学生端。RAM 用户需具有 dysms:SendSms 权限。</p></el-form-item>
       <el-checkbox v-if="rows.sms.hasCredentials" v-model="clearCredentials">清除已保存凭据</el-checkbox>

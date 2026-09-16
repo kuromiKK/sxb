@@ -8,8 +8,11 @@ import RichEditor from './RichEditor.vue'
 import ProductDocument from './ProductDocument.vue'
 import InterfaceSettings from './InterfaceSettings.vue'
 import EnvironmentInfo from './EnvironmentInfo.vue'
+import PlatformModeSettings from './PlatformModeSettings.vue'
 const props=defineProps<{initialSection?:string}>()
 const emit=defineEmits<{'basic-published':[]}>()
+const environmentRevision=ref(0)
+function environmentChanged(){environmentRevision.value++;emit('basic-published')}
 const active=ref(['agreement','privacy'].includes(props.initialSection||'')?'protocols':props.initialSection||'basic'),protocolKind=ref(props.initialSection==='privacy'?'privacy':'agreement')
 const preferences=reactive<Record<string,any>>({}),forms=reactive<Record<string,any>>({}),protocols=reactive<Record<string,any>>({}),documents=reactive<Record<string,any>>({})
 const loading=ref(false),saving=ref(false),error=ref(''),uploads=reactive<Record<string,boolean>>({}),historyOpen=ref(false),history=ref<any[]>([]),historyVersion=ref<any>()
@@ -32,7 +35,10 @@ onMounted(()=>load())
   <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon/>
   <el-tabs v-model="active" class="settings-tabs"><el-tab-pane v-for="(label,key) in labels" :key="key" :label="label" :name="key" :disabled="busy"/></el-tabs>
   <InterfaceSettings v-if="active==='interfaces'"/>
-  <EnvironmentInfo v-else-if="active==='environment'"/>
+  <template v-else-if="active==='environment'">
+   <PlatformModeSettings @changed="environmentChanged"/>
+   <EnvironmentInfo :key="environmentRevision"/>
+  </template>
   <template v-else-if="preferences.basic">
    <div class="settings-section-heading"><div><h2>{{labels[active]}}</h2><p>{{active==='protocols'?'每份协议独立管理版本，发布后用户下次登录重新确认。':'先保存草稿，预览确认后再发布到用户端。'}}</p></div><el-tag :type="dirty||unpublished?'warning':'success'"><CheckCircle2 :size="13"/>{{dirty?'有未保存修改':unpublished?'草稿待发布':'与已发布内容一致'}}</el-tag></div>
    <div v-if="active==='protocols'" class="protocol-switch"><button v-for="p in protocols" :key="p.kind" :class="{selected:protocolKind===p.kind}" :disabled="busy" @click="protocolKind=p.kind"><span>{{p.title}}</span><small>当前发布 V{{p.published_version}} · {{date(p.published_at)}}</small></button></div>

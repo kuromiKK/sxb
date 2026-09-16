@@ -36,14 +36,14 @@ test('order management and manual refund lifecycle',async t=>{
   })
   await t.test('manual refunds work without a payment provider and revoke only after confirmation',async()=>{
    await change(0,'refunded','paid',{refundReference:'BANK-01'},409)
-   process.env.APP_MODE='production'
+   await db.query("UPDATE platform_environment SET mode='production' WHERE id=1")
    await change(0,'refunding','paid');assert.equal((await rights('order-user-0',exam)).level,'vip')
    await change(0,'refunding','paid',{},409);await change(0,'refunded','refunding',{},400)
    await change(0,'refunded','refunding',{refundReference:'线下银行转账-0001'});assert.equal((await rights('order-user-0',exam)).level,'free')
    await change(0,'refunded','refunding',{refundReference:'重复确认'},409)
    const d=await call('/admin/orders/'+ids[0]);assert.equal(d.order.status,'refunded');assert.equal(d.order.refund_reference,'线下银行转账-0001');assert(d.order.refunded_at);assert.equal(d.history.length,2);assert.equal(d.history[0].actor_id,admin.id)
    assert.equal(Number((await call('/admin/orders?productId=order-good')).summary.refunded_cents),2990)
-   process.env.APP_MODE='test'
+   await db.query("UPDATE platform_environment SET mode='test' WHERE id=1")
   })
   await t.test('close after failure is guarded; prices cannot be manually rewritten',async()=>{
    await change(2,'closed','pending_payment');await change(2,'closed','pending_payment',{},409)
@@ -56,7 +56,7 @@ test('order management and manual refund lifecycle',async t=>{
    await db.query("INSERT INTO memberships(order_id,user_id,exam_id,cycle_id,level) VALUES('other-order','order-user-1','mid-social-worker',$1,'svip')",[otherCycle.id])
    const body={confirmation:ids[1],reason:'清除指定测试订单'}
    await call('/admin/orders/'+ids[1],{...body,confirmation:'wrong'},'DELETE',400)
-   process.env.APP_MODE='production';await call('/admin/orders/'+ids[1],body,'DELETE',403);process.env.APP_MODE='test'
+   await db.query("UPDATE platform_environment SET mode='production' WHERE id=1");await call('/admin/orders/'+ids[1],body,'DELETE',403);await db.query("UPDATE platform_environment SET mode='test' WHERE id=1")
    await db.query('UPDATE orders SET is_test_data=false WHERE id=$1',[ids[3]]);await call('/admin/orders/'+ids[3],{confirmation:ids[3],reason:'尝试删除正式订单'},'DELETE',403)
    await call('/admin/orders/'+ids[1],body,'DELETE');assert.equal((await rights('order-user-1',exam)).level,'free');assert.equal((await rights('order-user-1','mid-social-worker')).level,'svip')
    assert.equal((await call('/admin/orders?search='+ids[1])).total,0);await call('/admin/orders/'+ids[1],undefined,'GET',404)

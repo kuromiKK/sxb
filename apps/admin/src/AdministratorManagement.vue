@@ -2,7 +2,7 @@
 import RecordIdentifier from './RecordIdentifier.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, RotateCcw, Pencil, KeyRound, ShieldCheck } from 'lucide-vue-next'
+import { Search, RotateCcw, Pencil, KeyRound, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { request, send } from './api'
 
 const props = defineProps<{ currentId?: string }>()
@@ -17,6 +17,7 @@ const busy = ref(false)
 const error = ref('')
 const editing = ref(false)
 const saving = ref(false)
+const deleting = ref('')
 const formError = ref('')
 const form = reactive({ id: '', phone: '', nickname: '', role: 'superadmin', enabled: true, password: '', confirmation: '' })
 const resetting = ref(false)
@@ -34,6 +35,24 @@ async function load() {
 }
 function query() { appliedSearch.value = search.value.trim(); page.value = 1; void load() }
 function resetFilters() { search.value = ''; query() }
+function deleteBlockReason(row: Administrator) {
+  if (row.phone === '18600513966') return '受保护账号，不能删除'
+  if (row.id === props.currentId) return '不能删除当前登录账号'
+  return ''
+}
+async function remove(row: Administrator) {
+  if (deleting.value || deleteBlockReason(row)) return
+  deleting.value = row.id
+  try {
+    await ElMessageBox.confirm(`确认删除管理员「${row.nickname}」（${row.phone}）？删除后将无法登录后台，历史操作和内容归属会保留，同手机号的学生账号不受影响。`, '删除管理员', { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning', closeOnClickModal: false, confirmButtonClass: 'el-button--danger' })
+    await send(`/admin/administrators/${row.id}`, {}, 'DELETE')
+    page.value = Math.min(page.value, Math.max(1, Math.ceil((total.value - 1) / 20)))
+    await load()
+    ElMessage.success('管理员已删除，历史记录已保留')
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') error.value = e.message || '删除失败，请重试'
+  } finally { deleting.value = '' }
+}
 function edit(row?: Administrator) {
   Object.assign(form, { id: '', phone: '', nickname: '', role: 'superadmin', enabled: true, password: '', confirmation: '' }, row || {})
   formError.value = ''; editing.value = true
@@ -97,7 +116,7 @@ defineExpose({ load, open: edit })
       <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.enabled?'success':'info'">{{ row.enabled?'启用':'停用' }}</el-tag></template></el-table-column>
       <el-table-column label="最近登录" width="190"><template #default="{row}">{{ date(row.last_login_at) }}</template></el-table-column>
       <el-table-column label="创建时间" width="190"><template #default="{row}">{{ date(row.created_at) }}</template></el-table-column>
-      <el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><div class="row-actions"><el-tooltip content="编辑管理员"><el-button link type="primary" aria-label="编辑管理员" @click="edit(row)"><Pencil :size="17" /></el-button></el-tooltip><el-tooltip content="重设密码"><el-button link type="primary" aria-label="重设密码" @click="openReset(row)"><KeyRound :size="17" /></el-button></el-tooltip></div></template></el-table-column>
+      <el-table-column label="操作" width="150" fixed="right"><template #default="{row}"><div class="row-actions"><el-tooltip content="编辑管理员"><el-button link type="primary" aria-label="编辑管理员" @click="edit(row)"><Pencil :size="17" /></el-button></el-tooltip><el-tooltip content="重设密码"><el-button link type="primary" aria-label="重设密码" @click="openReset(row)"><KeyRound :size="17" /></el-button></el-tooltip><el-tooltip :content="deleteBlockReason(row) || '删除管理员'"><span class="delete-action"><el-button link type="danger" :aria-label="deleteBlockReason(row) || '删除管理员'" :disabled="Boolean(deleteBlockReason(row)) || Boolean(deleting)" :loading="deleting===row.id" @click="remove(row)"><Trash2 :size="17" /></el-button></span></el-tooltip></div></template></el-table-column>
     </el-table>
     <div class="pagination"><span>共 {{ total }} 位管理员</span><el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="prev,pager,next" @current-change="load" /></div>
     <el-drawer v-model="editing" :title="form.id?'编辑管理员':'新增管理员'" size="min(560px, 100vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="form.password='';form.confirmation=''">
@@ -126,6 +145,7 @@ defineExpose({ load, open: edit })
 .administrator-name .name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .administrator-name .el-tag { flex-shrink: 0; }
 .row-actions { flex-wrap: nowrap; }
+.delete-action { display: inline-flex; }
 .el-form :deep(.el-select) { width: 100%; }
 @media(max-width:600px) { .admin-filter-field { max-width: none; flex-basis: 100%; } }
 </style>

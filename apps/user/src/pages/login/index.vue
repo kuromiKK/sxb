@@ -99,7 +99,7 @@ const openRoute = (url: string) => tabRoutes.includes(url) ? uni.reLaunch({ url 
     </view>
     <view class="agreement-links"><view><button @tap="openProtocol('agreement')">用户服务协议</button><button @tap="openProtocol('privacy')">隐私政策</button></view><text>首次登录或协议更新后，需阅读并确认协议。未注册手机号将自动创建账号。</text></view>
     <view class="split-line"><text>其他登录方式</text></view><button class="wechat-button" @tap="wechat"><view class="wechat-mark"><uni-icons type="weixin" size="21" color="#fff" /></view><text>微信一键登录</text></button>
-    <text class="login-tip">{{ testCode ? `测试验证码：${testCode}（不发送短信）` : smsSettings.mode==='test'?'本地测试环境：点击获取验证码后在此显示':smsSettings.mode==='disabled'?'短信登录暂未开启':'验证码将发送至你的手机，请注意查收' }}</text>
+    <text class="login-tip">{{ testCode ? `测试验证码：${testCode}（不发送短信）` : smsSettings.mode==='test'?'测试环境：点击获取验证码后在此显示，仅供测试账号使用':smsSettings.mode==='disabled'?'短信登录暂未开启':'验证码将发送至你的手机，请注意查收' }}</text>
     <VerificationGate ref="verification"/>
     <ProtocolConsent v-if="consent" :protocols="consent.protocols" :busy="busy" :error="consentError" @confirm="confirmConsent" @cancel="consent=undefined;code='';consentError=''"/>
   </view>

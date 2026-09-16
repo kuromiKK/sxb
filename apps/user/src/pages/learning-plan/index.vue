@@ -9,7 +9,6 @@ import { backOrFallback } from '@/utils/navigation'
 import { getPlanCompletedCount, getPlanQuestions, getActiveDates, loadPlan, savePlan, type PlanRound, type PracticePlan } from '@/utils/practice-plan'
 import { knowledgeSubjects, practiceQuestions } from '@/mock/data'
 
-const uni = (globalThis as any).uni
 const { state, exam, requireLogin } = useAppStore()
 const returnUrl = ref('/pages/index/index')
 const loading = ref(true)

@@ -1,6 +1,7 @@
 import { db } from './db.ts'
 import { rights } from './membership.ts'
 import { fail, id } from './security.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export const shanghaiDay = (date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
 export async function initLearningTables() {
@@ -53,7 +54,7 @@ export async function monthlyReport(userId: string, examId: string, monthId: str
   const payload={id:monthId,year,month,status:generating?'generating':'ready',generatedAt:generating?undefined:new Date().toISOString(),summary:`本月学习${metrics.studyDays}天，完成${metrics.questions}次答题。`,headline:metrics.studyDays?'每一次学习，都留下了记录':'新的学习记录，从下一次开始',metrics,dailyQuestions,studiedDays:[...studied],subjects,chapters,tools,
     highlights:[`本月学习${metrics.studyDays}天，最长连续${longestStreak}天`,`完成${answers.length}次答题，正确率${accuracy}%`],
     concerns:chapters.filter(c=>c.weak).map(c=>`${c.name}正确率低于60%，可安排复习`).concat(answers.length?[]:['尚无答题记录，暂不能判断章节掌握情况']),
-    nextSteps:['按自己的节奏安排学习时间','回顾做错的题目并补充笔记','查看距离考试的提醒，按需调整学习计划'],isTestData:process.env.APP_MODE!=='production'}
+    nextSteps:['按自己的节奏安排学习时间','回顾做错的题目并补充笔记','查看距离考试的提醒，按需调整学习计划'],isTestData:await isTestMode()}
   if(!generating) await db.query('INSERT INTO monthly_reports(user_id,exam_id,month,payload) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[userId,examId,monthId,JSON.stringify(payload)])
   return payload
 }

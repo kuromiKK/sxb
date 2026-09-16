@@ -9,6 +9,7 @@ import { featureNames, pricePresets } from './ai.ts'
 import { knowledgeSubjects, courseCatalog, practiceQuestions } from '../../user/src/mock/data.ts'
 import { examNotices } from '../../user/src/utils/examNotices.ts'
 import { initLearningTables } from './reports.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export async function seed() {
   await migrate()
@@ -23,7 +24,7 @@ export async function seed() {
   if (process.env.ADMIN_PHONE && process.env.ADMIN_PASSWORD) {
     await db.query(`INSERT INTO users(id,phone,nickname,role,password_hash,invite_code,account_kind) VALUES($1,$2,'最高管理员','superadmin',$3,$4,'admin') ON CONFLICT(phone,account_kind) DO NOTHING`, [id(), process.env.ADMIN_PHONE, passwordHash(process.env.ADMIN_PASSWORD), String(randomInt(10000000, 99999999))])
   }
-  if (process.env.APP_MODE === 'production') return
+  if (process.env.APP_MODE === 'production'||!await isTestMode()) return
   for (const [examId, name] of [['junior-social-worker','初级社会工作师'],['mid-social-worker','中级社会工作师']]) {
     await db.query('INSERT INTO knowledge_nodes(id,title) VALUES($1,$2) ON CONFLICT DO NOTHING', [examId,name])
     for (let year = 2026; year <= 2029; year++) await db.query(`INSERT INTO exam_cycles(id,exam_id,year,ends_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [`${examId}-${year}`,examId,year,`${year}-05-31T23:59:59+08:00`])

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:api": "node --experimental-strip-types apps/api/src/main.ts",
+    "dev:api": "node scripts/local-postgres.mjs && node --experimental-strip-types apps/api/src/main.ts",
     "dev:admin": "vite --config apps/admin/vite.config.ts",
     "build:admin": "vite build --config apps/admin/vite.config.ts",
     "check": "tsc --noEmit && vue-tsc --noEmit -p apps/admin/tsconfig.json",
@@ -46,6 +46,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite-tools": "0.2.21",
     "@playwright/test": "^1.55.0",
     "@types/express": "^5.0.3",
     "@types/multer": "^2.2.0",

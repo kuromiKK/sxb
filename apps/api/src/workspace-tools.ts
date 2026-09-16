@@ -61,9 +61,10 @@ export async function runAgentModel(actor:string,body:any,test=false,transport=u
   await recordAgentCall(actor,config,'success',test,Date.now()-started,data.usage)
   return {id:data.id,object:'chat.completion',choices:data.choices,usage:data.usage}
  }catch(e:any){
-  await recordAgentCall(actor,config,'failed',test,Date.now()-started)
-  if(e.status)throw e
-  return fail(502,'模型请求失败，请检查 API 地址、密钥、模型权限或超时设置')
+  const errors:Record<number,string>={400:'模型服务拒绝了请求（HTTP 400），请检查所选模型是否支持工具调用及当前参数',401:'模型服务密钥验证失败（HTTP 401），请在 AI配置与数据中检查 API Key',403:'模型服务拒绝访问（HTTP 403），请检查密钥权限及账户状态',404:'模型服务未找到接口或模型（HTTP 404），请核对 API 地址和模型 ID',429:'模型服务限流或额度不足（HTTP 429），请稍后重试并检查账户额度'}
+  const message=e.status?e.message:errors[e.upstreamStatus]||(e.code==='AI_TIMEOUT'?'模型响应超时，请稍后重试；是否计费请核对服务商账单':'模型请求失败，请检查 API 地址、密钥、模型权限或超时设置')
+  await recordAgentCall(actor,config,'failed',test,Date.now()-started,undefined,message)
+  return fail(e.status||(e.upstreamStatus===429?429:502),message)
  }finally{active.delete(actor)}
 }
 workspaceTools.post('/page-agent/chat/completions',limits,async(req,res)=>{
@@ -78,11 +79,11 @@ export async function testAgentModel(actor:string){
  if(!valid)fail(502,'接口可达，但模型没有正确完成工具调用测试')
  return {status:'success',mode:'live',message:'模型连接成功，工具调用测试通过',durationMs:Date.now()-start}
 }
-async function recordAgentCall(actor:string,config:any,status:string,test:boolean,durationMs:number,usage?:any){
+async function recordAgentCall(actor:string,config:any,status:string,test:boolean,durationMs:number,usage?:any,error?:string){
  const input=usage?.prompt_tokens??null,output=usage?.completion_tokens??null,cached=usage?.prompt_tokens_details?.cached_tokens??(usage?0:null)
  const cost=input!==null&&output!==null&&cached!==null&&config.inputPrice>0?tokenCost(input,output,cached,config):null
  const pricing={inputPrice:config.inputPrice,outputPrice:config.outputPrice,cachedPrice:config.cachedPrice,currency:'CNY',unit:'1M tokens',source:'administrator',mode:'live'}
- await db.query("INSERT INTO ai_calls(id,feature_id,user_id,model,endpoint,status,input_tokens,output_tokens,cached_tokens,cost_yuan,pricing,duration_ms,error,is_test) VALUES($1,'page-agent',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",[id(),actor,config.model,aiBaseUrl(config.baseUrl)+'/chat/completions',status,input,output,cached,cost,JSON.stringify(pricing),durationMs,status==='failed'?'模型请求失败':null,test])
+ await db.query("INSERT INTO ai_calls(id,feature_id,user_id,model,endpoint,status,input_tokens,output_tokens,cached_tokens,cost_yuan,pricing,duration_ms,error,is_test) VALUES($1,'page-agent',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",[id(),actor,config.model,aiBaseUrl(config.baseUrl)+'/chat/completions',status,input,output,cached,cost,JSON.stringify(pricing),durationMs,status==='failed'?error||'模型请求失败':null,test])
  await audit(actor,'page-agent.model','page-agent',{model:config.model,status,test,durationMs})
 }
 workspaceTools.post('/page-agent/task-log',async(req,res)=>{

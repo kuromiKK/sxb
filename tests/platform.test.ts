@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import express from 'express'
 import { ZodError } from 'zod'
+import {isolatedAdminProof} from './helpers/admin-proof.ts'
 
 test('persistent platform business rules', async t => {
   process.env.APP_MODE='test'
@@ -26,6 +27,7 @@ test('persistent platform business rules', async t => {
   const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r))
   const base=`http://127.0.0.1:${(server.address() as any).port}/api`
   const req=async(path:string,method='GET',body?:any,token='')=>{
+    if(path==='/auth/admin')body={...body,captchaProof:await isolatedAdminProof(body.phone)}
     const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:body===undefined?undefined:JSON.stringify(body)})
     return {status:r.status,data:await r.json() as any}
   }
@@ -165,8 +167,8 @@ test('persistent platform business rules', async t => {
     await t.test('AI rejects local/reserved addresses; production disables test payment',async()=>{
       for(const address of ['127.0.0.1','10.0.0.1','169.254.169.254','172.16.0.1','192.168.1.1','::1','::ffff:127.0.0.1'])assert.equal(ai.privateAddress(address),true)
       assert.equal(ai.privateAddress('1.1.1.1'),false)
-      process.env.APP_MODE='production'
-      try {assert.equal((await req('/orders/test/test-payment','POST',{outcome:'success'},other)).status,403)}finally{process.env.APP_MODE='test'}
+      await db.query("UPDATE platform_environment SET mode='production' WHERE id=1")
+      try {assert.equal((await req('/orders/test/test-payment','POST',{outcome:'success'},other)).status,403)}finally{await db.query("UPDATE platform_environment SET mode='test' WHERE id=1")}
     })
   } finally { await new Promise<void>((r,e)=>server.close(err=>err?e(err):r()));await closeDatabase() }
 })

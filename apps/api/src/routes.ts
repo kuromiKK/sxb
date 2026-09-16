@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import {dataDictionary} from './data-dictionary.ts'
 import {environment} from './environment.ts'
+import {platformEnvironment,platformModeAdmin} from './platform-mode.ts'
 import {auditManagement} from './audit-management.ts'
 import { knowledgeStructure } from './knowledge-structure.ts'
 import { questionTypes } from './question-types.ts'
@@ -52,7 +53,7 @@ api.use(studyPublic)
 api.use('/content-preview',previewPublic)
 const phone = z.string().regex(/^1\d{10}$/,'请输入11位手机号')
 const text = z.string().min(1).max(200)
-api.get('/health', async (_req,res)=>{ await db.query('SELECT 1'); res.json({status:'ok',mode:process.env.APP_MODE||'test',database:process.env.DATABASE_URL?'PostgreSQL':'PGlite (persistent PostgreSQL)'}) })
+api.get('/health', async (_req,res)=>{ res.set('Cache-Control','no-store').json({status:'ok',mode:(await platformEnvironment()).mode,database:process.env.DATABASE_URL?'PostgreSQL':'PGlite (persistent PostgreSQL)'}) })
 api.use('/auth',rateLimit({windowMs:60_000,limit:15,standardHeaders:true,legacyHeaders:false,message:{message:'请求过于频繁，请稍后重试'}}))
 api.use(sitePublic)
 api.use(searchPublic)
@@ -60,8 +61,10 @@ api.use(integrationPublic)
 api.use(wechatLogin)
 api.use(paymentPublic)
 api.post('/auth/admin',async(req,res)=>{
-  const b=z.object({phone,password:z.string().min(1).max(200)}).parse(req.body)
-  const u=(await db.query(`SELECT * FROM users WHERE phone=$1 AND account_kind='admin' AND role='superadmin' AND enabled=true`,[b.phone])).rows[0]
+  const b=z.object({phone,password:z.string().min(1).max(200),captchaProof:z.string().max(200).optional()}).parse(req.body)
+  res.setHeader('Cache-Control','no-store')
+  await consumeCaptcha('admin-login',b.phone,req,b.captchaProof)
+  const u=(await db.query(`SELECT * FROM users WHERE phone=$1 AND account_kind='admin' AND admin_deleted_at IS NULL AND role='superadmin' AND enabled=true`,[b.phone])).rows[0]
   if(!u || !passwordValid(b.password,u.password_hash||'')) fail(401,'手机号或密码不正确')
   const token=await session(u.id,'admin'); await db.query('UPDATE users SET last_login_at=now() WHERE id=$1',[u.id]); await audit(u.id,'admin.login',u.id)
   res.json({token,user:{id:u.id,phone:u.phone,nickname:u.nickname,role:u.role}})
@@ -72,6 +75,7 @@ api.post('/auth/code',async(req,res)=>{
 api.post('/auth/phone',async(req,res)=>{
   const b=z.object({phone,code:z.string().regex(/^(\d{4}|\d{6})$/)}).parse(req.body)
   const outcome=await transaction(async c=>{
+    await platformEnvironment(c,true)
     const code=(await c.query('SELECT * FROM login_codes WHERE phone=$1 FOR UPDATE',[b.phone])).rows[0]
     if(!code || code.attempts>=5 || Date.parse(code.expires_at)<=Date.now()) return {error:'验证码已失效，请重新获取'}
     if(hash(b.phone+b.code)!==code.code_hash) {await c.query('UPDATE login_codes SET attempts=attempts+1 WHERE phone=$1',[b.phone]); return {error:'验证码不正确'} }
@@ -80,11 +84,12 @@ api.post('/auth/phone',async(req,res)=>{
     if(u && !u.enabled) return {error:'账号已停用，请联系客服'}
     const consent=await requireProtocolConsent(c,b.phone,u?.id)
     if(consent)return {consent}
-    return {user:await loginStudent(c,b.phone)}
+    const user=await loginStudent(c,b.phone)
+    return {user,token:await session(user.id,'student',c)}
   })
   if(outcome.error) fail(400,outcome.error)
   if(outcome.consent){res.json(outcome.consent);return}
-  res.json({token:await session(outcome.user.id),user:outcome.user})
+  res.json({token:outcome.token,user:outcome.user})
 })
 api.get('/exams',async(_req,res)=>res.json((await db.query(`SELECT e.*,(SELECT json_agg(json_build_object('id',c.id,'year',c.year,'startsAt',c.starts_at,'endsAt',c.ends_at) ORDER BY c.year) FROM exam_cycles c WHERE c.exam_id=e.id) AS cycles FROM exams e WHERE e.enabled AND EXISTS(SELECT 1 FROM exam_cycles c WHERE c.exam_id=e.id) ORDER BY e.id`)).rows))
 api.get('/exam-tree',async(_req,res)=>{
@@ -274,6 +279,7 @@ api.post('/ai/:feature',async(req,res)=>{
 
 api.use('/admin',requireAdmin)
 api.use('/admin/environment',environment)
+api.use('/admin/platform-mode',platformModeAdmin)
 api.use('/admin/data-dictionary',dataDictionary)
 api.use('/admin/audit',auditManagement)
 api.use('/admin/user-profiles',userProfiles)

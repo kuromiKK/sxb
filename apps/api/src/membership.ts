@@ -1,6 +1,7 @@
 import { db, transaction, type Queryable } from './db.ts'
 import { fail, id } from './security.ts'
 import { resolvePermissions, permissionCatalog } from './permission-policy.ts'
+import {isTestMode} from './platform-mode.ts'
 
 export const prices = { vip: 59900, svip: 79900, trial: 100, upgrade: 20000 } as const
 export type Product = keyof typeof prices
@@ -55,6 +56,7 @@ async function requireTrialEligible(connection:Queryable,userId:string) {
 }
 export async function createOrder(userId: string, examId: string, product: Product) {
   return transaction(async c => {
+    const test=await isTestMode(c,true)
     await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId])
     await expireOrders(c)
     if(product==='trial') await requireTrialEligible(c,userId)
@@ -67,17 +69,18 @@ export async function createOrder(userId: string, examId: string, product: Produ
     if (member.level === 'svip' || (member.level === 'vip' && !member.trial && product !== 'upgrade')) fail(400, '已有有效会员，请通过补差价升级或等待到期')
     if (product === 'trial' && member.level !== 'free') fail(400, '当前权益高于或等于体验权益')
     if((product==='vip'||product==='svip')&&(await c.query("SELECT 1 FROM orders WHERE user_id=$1 AND cycle_id=$2 AND product IN ('vip','svip','upgrade') AND paid_at IS NOT NULL LIMIT 1",[userId,cycle.id])).rows.length) fail(400,'该账号在此考试考期内已购买过正式权益，不能重复购买')
-    const order = (await c.query(`INSERT INTO orders(id,user_id,exam_id,cycle_id,product,amount_cents,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '30 minutes') RETURNING *`, ['SXB' + id().replaceAll('-', ''), userId, examId, cycle.id, product, prices[product]])).rows[0]
+    const order = (await c.query(`INSERT INTO orders(id,user_id,exam_id,cycle_id,product,amount_cents,expires_at,is_test_data) VALUES($1,$2,$3,$4,$5,$6,now()+interval '30 minutes',$7) RETURNING *`, ['SXB' + id().replaceAll('-', ''), userId, examId, cycle.id, product, prices[product],test])).rows[0]
     return { order, existing: false }
   })
 }
 export async function payTest(userId: string, orderId: string, outcome: 'success' | 'failure') {
-  if (process.env.APP_MODE === 'production') fail(403, '生产环境禁止模拟支付')
   return transaction(async c => {
+    if(!await isTestMode(c,true))fail(403,'生产环境禁止模拟支付')
     await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[userId])
     await expireOrders(c)
     const order = (await c.query('SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE', [orderId, userId])).rows[0]
     if (!order) fail(404, '订单不存在')
+    if(!order.is_test_data)fail(403,'正式订单不能使用模拟支付')
     if (order.status === 'paid') return order
     if (order.status !== 'pending_payment') fail(409, '订单已关闭，无法支付')
     const cycle=(await c.query('SELECT * FROM exam_cycles WHERE id=$1 AND starts_at<=now() AND ends_at>now() FOR SHARE',[order.cycle_id])).rows[0]

@@ -36,9 +36,9 @@ node scripts/start-local.mjs
 
 脚本不会占用 3000，不会停止已占用端口的进程。端口被其他程序占用时，应先核实所属程序；不要直接结束所有 Node 进程。日志位于 `.local/api.out.log`、`.local/api.err.log` 等文件。
 
-本机数据库是 PostgreSQL 内核的 PGlite，持久保存在 `.local/database`，重启不会清空。**同一目录只能由一个 API 进程打开**；API 运行时不要另外执行 `npm run seed`。迁移在启动时执行，示例数据只插入不存在的 ID，不覆盖后台已编辑的内容。
+本机网站已切换至 PostgreSQL 17.11，通过 `.env` 的 `DATABASE_URL` 连接 `sxb_local`。`node scripts/start-local.mjs` 会先启动本项目的 PostgreSQL，再启动网站服务；`npm run dev:api` 也会先检查数据库。原 `.local/database` 仅作为迁移前的回退副本，自动化测试仍使用独立临时 PGlite 数据库。迁移在启动时执行，示例数据只插入不存在的 ID，不覆盖后台已编辑的内容。详情见 [本机 PostgreSQL](LOCAL-POSTGRESQL.md)。
 
-备份需先停止此项目 API，再复制 `.local/database`、`.local/secret.key` 和 `.env` 到受保护的位置。数据库和加密密钥须配套保管。不要将这些文件、证书私钥、真实 AI Key 上传 GitHub。
+备份时先停止此项目 API 的写入，通过 PostgreSQL `pg_dump` 导出数据库，再配套备份上传目录、`.local/secret.key` 和 `.env`。不要在数据库运行时直接复制 PostgreSQL 数据目录作为备份。不要将数据库、上传内容、连接凭据、证书私钥或真实 AI Key 上传 GitHub。
 
 ## 推荐验收顺序
 

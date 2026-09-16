@@ -11,6 +11,7 @@
 .login-panel{display:flex;flex-direction:column;min-width:0;padding:42px clamp(32px,4.5vw,88px) 30px}
 .login-header{display:flex;align-items:center;gap:12px}
 .login-header .brand-icon{width:38px;height:38px;border-radius:11px;background:#1c3158}
+.login-header .login-brand-logo{width:38px;height:38px;flex:none;object-fit:contain;border-radius:11px}
 .login-header strong{font-size:20px;color:#182944;font-weight:650}
 .login-header>span:last-child{margin-left:6px;padding-left:18px;border-left:1px solid var(--line);color:var(--muted);font-size:13px}
 .login-main{width:100%;max-width:380px;margin:auto; padding:80px 0}

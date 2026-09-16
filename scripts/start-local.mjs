@@ -3,12 +3,14 @@ import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import net from 'node:net'
+import {startLocalPostgres} from './local-postgres.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 for (const file of ['.env', 'node_modules/vite/bin/vite.js', 'apps/user/node_modules/@dcloudio/vite-plugin-uni/bin/uni.js']) {
   if (!existsSync(resolve(root, file))) throw new Error(`Missing ${file}. See docs/LOCAL-TEST.md.`)
 }
 mkdirSync(resolve(root, '.local'), { recursive: true })
+await startLocalPostgres()
 const occupied = port => new Promise(resolve => {
   const socket = net.connect({ port, host: '127.0.0.1' })
   socket.once('connect', () => { socket.destroy(); resolve(true) })

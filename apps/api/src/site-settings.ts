@@ -6,6 +6,7 @@ import {db,transaction,type Queryable} from './db.ts'
 import {fail,id,hash,session} from './security.ts'
 import {messageDocument,messageHtml} from '../../shared/message-document.ts'
 import {lockResourceReferences,validateEditorImages} from './editor-images.ts'
+import {platformEnvironment,isTestMode} from './platform-mode.ts'
 
 const emptyDocument={type:'doc',content:[{type:'paragraph'}]}
 const paragraph=(text:string)=>({type:'doc',content:[{type:'paragraph',content:[{type:'text',text}]}]})
@@ -39,7 +40,7 @@ async function settingsAudit(c:Queryable,actor:string,action:string,target:strin
 export async function publishedPreferences(c:Queryable=db){return Object.fromEntries((await c.query('SELECT key,published FROM site_preferences')).rows.map(r=>[r.key,r.published])) as typeof siteDefaults}
 export async function publishedProtocols(c:Queryable=db){return (await c.query('SELECT p.kind,p.title,v.version,v.document,v.published_at FROM site_protocols p JOIN site_protocol_versions v ON v.kind=p.kind AND v.version=p.published_version ORDER BY p.kind')).rows.map(r=>({kind:r.kind,title:r.title,version:r.version,html:messageHtml(r.document),publishedAt:r.published_at}))}
 export const sitePublic=Router(),siteAdmin=Router()
-sitePublic.get('/site-settings',async(_req,res)=>{res.setHeader('Cache-Control','no-store');const data=await publishedPreferences();res.json({...data,about:{...data.about,html:messageHtml(data.about.document)},protocols:await publishedProtocols()})})
+sitePublic.get('/site-settings',async(_req,res)=>{res.setHeader('Cache-Control','no-store');const data=await publishedPreferences();res.json({...data,environment:(await platformEnvironment()).mode,about:{...data.about,html:messageHtml(data.about.document)},protocols:await publishedProtocols()})})
 siteAdmin.get('/',async(_req,res)=>res.json({preferences:(await db.query('SELECT * FROM site_preferences ORDER BY key')).rows,protocols:(await db.query(`SELECT p.*,v.document AS published_document,v.published_at FROM site_protocols p JOIN site_protocol_versions v ON v.kind=p.kind AND v.version=p.published_version ORDER BY p.kind`)).rows}))
 siteAdmin.put('/preferences/:key',async(req,res)=>{
  const key=z.enum(['basic','customer','search','about']).parse(req.params.key),input=z.object({revision:z.number().int().positive(),value:z.any()}).strict().parse(req.body)
@@ -49,7 +50,7 @@ siteAdmin.put('/preferences/:key',async(req,res)=>{
 })
 siteAdmin.post('/preferences/:key/publish',async(req,res)=>{
  const key=z.enum(['basic','customer','search','about']).parse(req.params.key),b=z.object({revision:z.number().int().positive()}).strict().parse(req.body)
- await transaction(async c=>{await lockResourceReferences(c);const row=(await c.query('SELECT * FROM site_preferences WHERE key=$1 FOR UPDATE',[key])).rows[0];if(row.revision!==b.revision)fail(409,'设置已被修改，请刷新后重试');await validateEditorImages(row.draft,c);await c.query('UPDATE site_preferences SET published=draft,revision=revision+1,published_at=now(),updated_at=now(),actor_id=$2 WHERE key=$1',[key,res.locals.user.id]);if(key==='basic')await c.query("UPDATE system_settings SET value=$1,updated_at=now(),actor_id=$2 WHERE key='site_domain'",[row.draft.siteDomain,res.locals.user.id]);await settingsAudit(c,res.locals.user.id,'settings.publish',key,{revision:row.revision+1})})
+ await transaction(async c=>{const test=await isTestMode(c,true);await lockResourceReferences(c);const row=(await c.query('SELECT * FROM site_preferences WHERE key=$1 FOR UPDATE',[key])).rows[0];if(row.revision!==b.revision)fail(409,'设置已被修改，请刷新后重试');if(key==='basic'&&!test&&!row.draft.siteDomain.startsWith('https://'))fail(400,'生产环境的前端访问域名必须使用 HTTPS');await validateEditorImages(row.draft,c);await c.query('UPDATE site_preferences SET published=draft,revision=revision+1,published_at=now(),updated_at=now(),actor_id=$2 WHERE key=$1',[key,res.locals.user.id]);if(key==='basic')await c.query("UPDATE system_settings SET value=$1,updated_at=now(),actor_id=$2 WHERE key='site_domain'",[row.draft.siteDomain,res.locals.user.id]);await settingsAudit(c,res.locals.user.id,'settings.publish',key,{revision:row.revision+1})})
  res.json({ok:true})
 })
 siteAdmin.get('/protocols/:kind/versions',async(req,res)=>{const kind=z.enum(['agreement','privacy']).parse(req.params.kind);res.json((await db.query('SELECT v.*,u.nickname AS publisher FROM site_protocol_versions v LEFT JOIN users u ON u.id=v.actor_id WHERE kind=$1 ORDER BY version DESC',[kind])).rows)})
@@ -78,13 +79,14 @@ export async function requireProtocolConsent(c:Queryable,phone:string,userId?:st
 export async function loginStudent(c:Queryable,phone:string){
  let user=(await c.query("SELECT id,phone,nickname,role,enabled FROM users WHERE phone=$1 AND account_kind='student'",[phone])).rows[0]
  if(user&&!user.enabled)fail(403,'账号已停用，请联系客服')
- if(!user)user=(await c.query("INSERT INTO users(id,phone,nickname,invite_code) VALUES($1,$2,$3,$4) ON CONFLICT(phone,account_kind) DO UPDATE SET phone=excluded.phone RETURNING id,phone,nickname,role,enabled",[id(),phone,`学生${phone.slice(-4)}`,String(randomInt(10000000,99999999))])).rows[0]
+ if(!user)user=(await c.query("INSERT INTO users(id,phone,nickname,invite_code,is_test_data) VALUES($1,$2,$3,$4,$5) ON CONFLICT(phone,account_kind) DO UPDATE SET phone=excluded.phone RETURNING id,phone,nickname,role,enabled",[id(),phone,`学生${phone.slice(-4)}`,String(randomInt(10000000,99999999)),await isTestMode(c)])).rows[0]
  if(!user.enabled)fail(403,'账号已停用，请联系客服')
  await c.query('UPDATE users SET last_login_at=now() WHERE id=$1',[user.id]);return user
 }
 sitePublic.post('/auth/protocol-consent',async(req,res)=>{
  const b=z.object({challenge:z.string().regex(/^[a-f0-9]{64}$/),confirmed:z.literal(true),versions:z.array(z.object({kind:z.enum(['agreement','privacy']),version:z.number().int().positive()}).strict()).length(2)}).strict().parse(req.body)
- const user=await transaction(async c=>{
+ const result=await transaction(async c=>{
+  await platformEnvironment(c,true)
   await lockProtocols(c)
   const challenge=(await c.query('SELECT * FROM protocol_login_challenges WHERE token_hash=$1 FOR UPDATE',[hash(b.challenge)])).rows[0]
   if(!challenge||challenge.used_at||Date.parse(challenge.expires_at)<=Date.now())fail(400,'登录确认已过期，请重新获取验证码')
@@ -93,6 +95,6 @@ sitePublic.post('/auth/protocol-consent',async(req,res)=>{
   const u=await loginStudent(c,challenge.phone)
   for(const p of current)await c.query('INSERT INTO user_protocol_consents(user_id,kind,version) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[u.id,p.kind,p.version])
   await c.query('UPDATE protocol_login_challenges SET used_at=now() WHERE token_hash=$1',[hash(b.challenge)])
-  return u
- });res.json({token:await session(user.id),user})
+  return {user:u,token:await session(u.id,'student',c)}
+ });res.json(result)
 })

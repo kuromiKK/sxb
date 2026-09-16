@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import express from 'express'
 import { ZodError } from 'zod'
+import {isolatedAdminProof} from './helpers/admin-proof.ts'
 
 test('administrator and student identities are isolated', async t => {
   process.env.APP_MODE = 'test'; process.env.DATABASE_URL = ''
@@ -21,6 +22,7 @@ test('administrator and student identities are isolated', async t => {
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r))
   const base = `http://127.0.0.1:${(server.address() as any).port}/api`
   async function req(path: string, method = 'GET', body?: any, token = '') {
+    if(path==='/auth/admin')body={...body,captchaProof:await isolatedAdminProof(body.phone)}
     const r = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: body === undefined ? undefined : JSON.stringify(body) })
     return { status: r.status, data: await r.json() as any }
   }
@@ -81,6 +83,28 @@ test('administrator and student identities are isolated', async t => {
       assert(!JSON.stringify(logs).includes('password_hash'))
       assert.equal((await req('/admin/roles', 'GET', undefined, admin)).data.length, 1)
       assert.equal((await req('/admin/roles', 'GET', undefined, student)).status, 403)
+    })
+    await t.test('delete protects owner and self, preserves history and student, revokes login permanently', async () => {
+      secondToken = (await req('/auth/admin', 'POST', { phone: secondPhone, password: 'Replaced-Password-4321' })).data.token
+      const protectedResult = await req(`/admin/administrators/${adminId}`, 'DELETE', undefined, secondToken)
+      assert.equal(protectedResult.status, 409); assert.match(protectedResult.data.message, /18600513966/)
+      assert.equal((await req(`/admin/administrators/${secondId}`, 'DELETE', undefined, secondToken)).status, 409)
+      assert.equal((await req(`/admin/administrators/${secondId}`, 'DELETE', undefined, student)).status, 403)
+      assert.equal((await req(`/admin/administrators/${studentId}`, 'DELETE', undefined, admin)).status, 404)
+      await db.query("INSERT INTO audit_logs(id,actor_id,action,target_id) VALUES('deleted-admin-history',$1,'administrator.update',$1)", [secondId])
+      assert.equal((await req(`/admin/administrators/${secondId}`, 'DELETE', undefined, admin)).status, 200)
+      assert.equal((await req('/admin/administrators?search='+secondPhone, 'GET', undefined, admin)).data.total, 0)
+      assert.equal((await req('/admin/dashboard', 'GET', undefined, secondToken)).status, 401)
+      assert.equal((await req('/auth/admin', 'POST', { phone: secondPhone, password: 'Replaced-Password-4321' })).status, 401)
+      assert.equal((await req(`/admin/administrators/${secondId}`, 'PATCH', { nickname: '不能恢复', enabled: true }, admin)).status, 404)
+      assert.equal((await req(`/admin/administrators/${secondId}/password`, 'POST', { password: 'Restore-Password-1234', reason: '不能恢复' }, admin)).status, 404)
+      assert.equal((await req(`/admin/administrators/${secondId}`, 'DELETE', undefined, admin)).status, 404)
+      const historical = (await db.query('SELECT u.nickname,u.enabled,u.password_hash,u.admin_deleted_at FROM audit_logs a JOIN users u ON a.actor_id=u.id WHERE a.id=$1', ['deleted-admin-history'])).rows[0]
+      assert.equal(historical.nickname, '已恢复'); assert.equal(historical.enabled, false); assert.equal(historical.password_hash, null); assert(historical.admin_deleted_at)
+      assert.equal((await db.query("SELECT count(*)::int n FROM users WHERE phone=$1 AND account_kind='student' AND enabled", [secondPhone])).rows[0].n, 1)
+      const logs = (await db.query("SELECT details FROM audit_logs WHERE action='administrator.delete' AND target_id=$1", [secondId])).rows
+      assert.equal(logs.length, 1); assert.equal(logs[0].details.phone, secondPhone)
+      assert.equal((await req('/admin/administrators', 'POST', { phone: secondPhone, nickname: '不能复用已删除身份', password: 'Test-Password-1234' }, admin)).status, 409)
     })
     await t.test('seed and migrations are idempotent, identities retain their data', async () => {
       await seed()

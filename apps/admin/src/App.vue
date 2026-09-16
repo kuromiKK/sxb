@@ -67,10 +67,13 @@ import PageAgentAssistant from './PageAgentAssistant.vue'
 import './styles/graph-theme.css'
 const settingsSection=ref('basic')
 const platformLogo=ref(''),platformLogoFailed=ref(false)
+const platformMode=ref('')
 async function loadBrand(){
- try{const settings=await request('/site-settings');platformLogo.value=settings.basic.logo||'';platformLogoFailed.value=false}catch{/* Keep the current brand if settings are temporarily unavailable. */}
+ try{const settings=await request('/site-settings');platformLogo.value=settings.basic.logo||'';platformLogoFailed.value=false;platformMode.value=settings.environment||''}catch{/* Keep the current brand if settings are temporarily unavailable. */}
 }
-onMounted(()=>{void loadBrand()})
+function refreshBrandOnFocus(){void loadBrand()}
+onMounted(()=>{void loadBrand();window.addEventListener('focus',refreshBrandOnFocus)})
+onUnmounted(()=>window.removeEventListener('focus',refreshBrandOnFocus))
 import KnowledgeGraph from './KnowledgeGraph.vue'
 import StyleComponents from './StyleComponents.vue'
 import { splitKnowledgeHandouts } from '../../shared/knowledge-handouts'
@@ -123,7 +126,7 @@ const formatDate=(v:any)=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'
 const money=(v:any)=>'¥'+Number(v||0).toFixed(2)
 const tokenNumber=(v:any)=>v===null||v===undefined?'未返回':Number(v).toLocaleString('zh-CN')
 const stateColor=(s:string)=>['published','paid','success'].includes(s)?'success':['review','pending_payment','refunding'].includes(s)?'warning':['failed'].includes(s)?'danger':'info'
-async function login(){if(loginBusy.value)return;loginBusy.value=true;loginError.value='';try{const r=await send('/auth/admin',loginForm);token.value=r.token;identity.value=r.user;sessionStorage.setItem('sxb-admin-token',r.token);loginForm.password='';await load()}catch(e:any){loginError.value=e.message}finally{loginBusy.value=false}}
+async function login(captchaProof:string){if(loginBusy.value)return;loginBusy.value=true;loginError.value='';try{const r=await send('/auth/admin',{...loginForm,captchaProof});token.value=r.token;identity.value=r.user;sessionStorage.setItem('sxb-admin-token',r.token);loginForm.password='';await load()}catch(e:any){loginError.value=e.message}finally{loginBusy.value=false}}
 async function logout(){try{await send('/auth/logout',{})}finally{token.value='';sessionStorage.removeItem('sxb-admin-token');identity.value=null}}
 function unauthorized(){token.value='';identity.value=null;sessionStorage.removeItem('sxb-admin-token')}
 function categoryNew(){examCategories.value?.open()}
@@ -254,7 +257,7 @@ async function commit(){importBusy.value=true;try{const r=await send('/admin/imp
 </script>
 
 <template>
-  <AdminLogin v-if="!token" v-model:phone="loginForm.phone" v-model:password="loginForm.password" :busy="loginBusy" :error="loginError" @submit="login" />
+  <AdminLogin v-if="!token" v-model:phone="loginForm.phone" v-model:password="loginForm.password" :busy="loginBusy" :error="loginError" :logo="platformLogo" @submit="login" />
   <div v-else class="admin-shell">
     <a class="skip-link" href="#workspace">跳至主要内容</a>
     <div v-if="mobileNav" class="nav-scrim" @click="mobileNav=false"></div>
@@ -272,10 +275,10 @@ async function commit(){importBusy.value=true;try{const r=await send('/admin/imp
           </div>
         </section>
       </nav>
-      <div class="sidebar-foot"><span class="environment-dot"></span>本地测试环境<span>v0.2</span></div>
+      <div class="sidebar-foot"><span class="environment-dot"></span>{{platformMode==='production'?'生产环境':platformMode==='test'?'测试环境':'环境读取中'}}<span>v0.2</span></div>
     </aside>
     <div class="shell-main">
-      <header class="topbar" data-page-agent-ignore="true"><nav class="breadcrumb" aria-label="面包屑导航"><button class="icon-button mobile-toggle" aria-label="打开菜单" @click="mobileNav=true"><Menu :size="20" /></button><span>{{ currentGroup }}</span><ChevronRight :size="14" aria-hidden="true" /><strong aria-current="page">{{ currentNav.name }}</strong></nav><div class="topbar-actions"><PageAgentAssistant :page="view"/><span class="test-indicator">测试环境</span><span class="avatar">管</span><div class="account"><strong>{{ identity?.nickname||'最高管理员' }}</strong><small>{{ identity?.phone }}</small></div><el-tooltip content="退出登录"><button class="icon-button" aria-label="退出登录" @click="logout"><LogOut :size="18" /></button></el-tooltip></div></header>
+      <header class="topbar" data-page-agent-ignore="true"><nav class="breadcrumb" aria-label="面包屑导航"><button class="icon-button mobile-toggle" aria-label="打开菜单" @click="mobileNav=true"><Menu :size="20" /></button><span>{{ currentGroup }}</span><ChevronRight :size="14" aria-hidden="true" /><strong aria-current="page">{{ currentNav.name }}</strong></nav><div class="topbar-actions"><PageAgentAssistant :page="view"/><span class="test-indicator" :class="{'is-production':platformMode==='production'}">{{platformMode==='production'?'生产环境':platformMode==='test'?'测试环境':'环境读取中'}}</span><span class="avatar">管</span><div class="account"><strong>{{ identity?.nickname||'最高管理员' }}</strong><small>{{ identity?.phone }}</small></div><el-tooltip content="退出登录"><button class="icon-button" aria-label="退出登录" @click="logout"><LogOut :size="18" /></button></el-tooltip></div></header>
       <main id="workspace" class="workspace" tabindex="-1">
         <div class="page-heading"><div><div class="eyebrow">{{ view==='dashboard'?'WORKSPACE OVERVIEW':view==='ai'?'AI OPERATIONS':'SXB CONSOLE' }}</div><h1>{{ currentNav.name }}</h1><p v-if="view==='dashboard'">{{ new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}) }} · 内容与业务概况</p><p v-else-if="view==='ai'">模型连接、功能权限与调用用量</p><p v-else-if="view==='orders'">商品定价与订单记录 · 权益按考试、考期生效</p></div><div class="heading-actions"><el-button v-if="view==='products'" type="primary" @click="productManagement?.open()"><Plus :size="17"/>新增商品</el-button><el-tooltip content="刷新数据"><el-button circle :loading="busy" aria-label="刷新数据" @click="load"><RefreshCw :size="17" /></el-button></el-tooltip><el-button v-if="view==='articles'" type="primary" @click="articleManagement?.open()"><Plus :size="17"/>新增文章</el-button><el-button v-if="view==='administrators'" type="primary" @click="administratorManagement?.open()"><Plus :size="17"/>新增管理员</el-button><el-button v-if="view==='knowledge-graph' && knowledgeGraph?.isDetail" :loading="knowledgeGraph?.exportBusy" :aria-busy="knowledgeGraph?.exportBusy" @click="knowledgeGraph?.exportExcel()" aria-label="导出知识图谱 Excel"><Download :size="17" aria-hidden="true"/>导出</el-button><el-button v-if="view==='knowledge-graph' && knowledgeGraph?.isDetail" @click="knowledgeGraph?.back()" aria-label="返回考试列表"><ArrowLeft :size="17" />返回</el-button><el-button v-if="view==='message-template'||view==='message-center'" type="primary" @click="messageManagement?.newItem()"><Plus :size="17" />{{ view==='message-template'?'新增模板':'新增消息' }}</el-button><el-button v-if="view==='referrals'" type="primary" @click="openReferral"><Plus :size="17" />创建推荐码</el-button><el-button v-if="view==='exam-categories'" type="primary" @click="categoryNew()"><Plus :size="17" />新增分类</el-button><el-button v-if="view==='question-types' && questionTypesPage?.isList" type="primary" @click="questionTypesPage?.open()"><Plus :size="17"/>新建题型</el-button><el-button v-if="view==='exam-projects'" type="primary" @click="projectNew()"><Plus :size="17" />新增考试项目</el-button><el-button v-if="isContent && kind!=='course'" type="primary" @click="openEditor()"><Plus :size="17" />新增{{ labels[kind] }}</el-button><template v-if="view==='question'"><el-button aria-label="导入题库" @click="questionTransfer?.open('import')"><Upload :size="17"/>导入</el-button><el-button aria-label="导出题库" @click="questionTransfer?.open('export')"><Download :size="17"/>导出</el-button></template></div></div>
         <el-alert v-if="error" type="error" :closable="false" :title="error" show-icon class="form-error" />
@@ -397,6 +400,7 @@ async function commit(){importBusy.value=true;try{const r=await send('/admin/imp
 @media(max-width:1100px) and (min-width:769px){.sidebar{width:224px}.shell-main{width:calc(100% - 224px);margin-left:224px}}
 @media(max-width:768px){.sidebar{width:240px;max-width:calc(100vw - 56px)}.shell-main{width:100%;margin-left:0}.sidebar .brand{padding-top:20px;padding-bottom:18px}.sidebar nav .nav-item{min-height:44px}}
 .pending-page{min-height:320px;border:1px solid var(--admin-border);border-radius:var(--admin-radius);background:var(--el-fill-color-blank)}
+.test-indicator.is-production{color:var(--el-color-success);background:var(--el-color-success-light-9)}
 .article-category{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--admin-text)}
 .article-category .el-select{width:180px}
 .form-columns.knowledge-meta {

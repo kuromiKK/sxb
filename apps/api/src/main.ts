@@ -14,6 +14,8 @@ Module({})(AppModule)
 await initSecrets()
 await seed()
 const app=await NestFactory.create(AppModule,{bodyParser:false})
+// Production Nginx connects over loopback and replaces forwarded client headers.
+if(process.env.TRUST_PROXY==='loopback')app.getHttpAdapter().getInstance().set('trust proxy','loopback')
 app.use(helmet())
 app.use(express.json({limit:'40mb',verify:(req,_res,buffer)=>{if(req.url?.split('?')[0]==='/api/payments/wechat/notify')(req as any).rawBody=buffer.toString('utf8')}}))
 app.enableCors({origin:[process.env.ADMIN_ORIGIN||'http://127.0.0.1:5180',process.env.USER_ORIGIN||'http://127.0.0.1:5174'],methods:['GET','POST','PUT','PATCH','DELETE']})

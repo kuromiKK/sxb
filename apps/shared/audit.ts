@@ -1,6 +1,6 @@
 /** Keep persisted action codes stable; all user-facing history uses this catalogue. */
 export const auditActions:Record<string,string>={
- 'admin.login':'管理员登录','administrator.create':'新增管理员','administrator.update':'修改管理员','administrator.password_reset':'重设管理员密码',
+ 'admin.login':'管理员登录','administrator.create':'新增管理员','administrator.update':'修改管理员','administrator.password_reset':'重设管理员密码','administrator.delete':'删除管理员',
  'ai.configure':'配置 AI 服务','ai.discover':'测试并读取模型','page-agent.model':'AI员工调用模型','page-agent.task':'AI员工执行任务',
  'article.save':'保存文章','article.status':'调整文章上下架','article.delete':'删除文章','cheatsheet.status':'调整小抄状态','cheatsheet.push':'推送考前小抄',
  'content.save':'保存教学内容','content.seed_test':'初始化测试教学内容','course.delete':'删除课程','course.status':'调整课程状态','knowledge.status':'调整知识节点状态','question.status':'调整题目状态',
@@ -11,7 +11,7 @@ export const auditActions:Record<string,string>={
  'order.close':'关闭订单','order.refund_requested':'登记线下退款','order.manual_refund_confirmed':'确认线下退款','order.delete_test':'删除测试订单','order.provider_payment':'接收支付结果',
  'product.save':'保存商品','product.publish':'上架商品','product.offline':'下架商品','product.delete':'删除商品',
  'question-type.save':'保存题型','question-type.status':'调整题型状态','referral.create':'新增推荐码','referral.status':'调整推荐码状态',
- 'settings.draft':'保存系统设置草稿','settings.publish':'发布系统设置','protocol.draft':'保存协议草稿','protocol.publish':'发布协议新版本',
+ 'settings.draft':'保存系统设置草稿','settings.publish':'发布系统设置','settings.environment':'切换运行环境','protocol.draft':'保存协议草稿','protocol.publish':'发布协议新版本',
  'user.developer':'设置开发者身份','user.status':'调整用户状态','user.enable':'启用用户','user.disable':'停用用户','user.inviter':'绑定推荐人'
 }
 export function auditActionLabel(action:string){

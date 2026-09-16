@@ -22,7 +22,6 @@ type HomeReportCard = Pick<MonthlyReport, 'id' | 'year' | 'month' | 'status'> & 
 }
 const selectedReport = ref<HomeReportCard | null>(null)
 const homeReportSlide = ref(0)
-const uni = (globalThis as any).uni
 const planProgress = computed(() => state.todayTarget ? Math.min(Math.round(state.todayDone / state.todayTarget * 100), 100) : 0)
 const masteryRingStyle = computed(() => ({ background: `conic-gradient(#6949df ${Math.max(exam.value.mastery, 4)}%, #e7e9f3 0)` }))
 const isFlagship = computed(() => account.permissions.reports === true)

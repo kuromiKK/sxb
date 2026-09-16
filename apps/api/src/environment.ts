@@ -3,6 +3,7 @@ import {arch,platform,release} from 'node:os'
 import {Router} from 'express'
 import {PGlite} from '@electric-sql/pglite'
 import {database,db} from './db.ts'
+import {platformEnvironment} from './platform-mode.ts'
 
 const root=new URL('../../../',import.meta.url)
 // Fixed allowlist only: never return environment variables, connection strings or paths.
@@ -26,7 +27,7 @@ environment.get('/',async(_req,res)=>{
  const system:Record<string,string>={win32:'Windows',linux:'Linux',darwin:'macOS'}
  res.set('Cache-Control','no-store').json({
   checkedAt:new Date().toISOString(),
-  runtime:{mode:process.env.APP_MODE==='production'?'生产模式':'测试模式',system:(system[platform()]||platform())+' '+release(),architecture:arch(),node:process.versions.node},
+  runtime:{mode:(await platformEnvironment()).mode==='production'?'生产模式':'测试模式',system:(system[platform()]||platform())+' '+release(),architecture:arch(),node:process.versions.node},
   projects:[
    {name:'AntV G6',purpose:'知识图谱的图形布局与交互展示',version:version('@antv/g6'),repository:'https://github.com/antvis/G6'},
    {name:'Page Agent',purpose:'AI 员工，通过自然语言操作后台页面',version:version('page-agent'),repository:'https://github.com/alibaba/page-agent'},
@@ -41,7 +42,7 @@ environment.get('/',async(_req,res)=>{
    {name:'Element Plus',purpose:'管理后台的表格、表单、抽屉等基础组件',version:version('element-plus'),repository:'https://github.com/element-plus/element-plus'},
    {name:'uni-app',purpose:'用户端 H5 与微信小程序跨端开发',version:version('@dcloudio/uni-app',true),repository:'https://github.com/dcloudio/uni-app'},
    {name:'NestJS',purpose:'后端 API 应用框架',version:version('@nestjs/core'),repository:'https://github.com/nestjs/nest'},
-   {name:'PGlite',purpose:'本地测试环境的嵌入式数据库',version:version('@electric-sql/pglite'),repository:'https://github.com/electric-sql/pglite'},
+   {name:'PGlite',purpose:'隔离的自动化测试使用的嵌入式数据库',version:version('@electric-sql/pglite'),repository:'https://github.com/electric-sql/pglite'},
    {name:'Alipay SDK',purpose:'支付宝支付接口对接',version:version('alipay-sdk'),repository:'https://github.com/alipay/alipay-sdk-nodejs-all'}
    ,{name:'阿里云短信 SDK',purpose:'阿里云短信发送与服务接口对接',version:version('@alicloud/dysmsapi20170525'),repository:'https://github.com/aliyun/alibabacloud-typescript-sdk'}
   ],

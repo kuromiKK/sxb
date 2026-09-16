@@ -8,17 +8,19 @@ import {pendingCheckout,trialWindow} from './product-orders.ts'
 import {randomBytes} from 'node:crypto'
 import QRCode from 'qrcode'
 import {rateLimit} from 'express-rate-limit'
+import {isTestMode} from './platform-mode.ts'
 export const paymentPublic=Router(),paymentStudent=Router()
 paymentStudent.use('/orders/:id/payment',rateLimit({windowMs:60000,limit:10,standardHeaders:true,legacyHeaders:false}))
 paymentStudent.use('/orders/:id/payment-status',rateLimit({windowMs:60000,limit:15,standardHeaders:true,legacyHeaders:false}))
 const channelSchema=z.enum(['native','h5','jsapi','mini','page','wap'])
 function returnAddress(url:string,orderId:string){const u=new URL(url);if(u.hash){const h=u.hash;u.hash=h+(h.includes('?')?'&':'?')+'orderId='+encodeURIComponent(orderId)}else u.searchParams.set('orderId',orderId);return u.toString()}
-async function paymentOptions(){const w=await providerSetting('payment'),a=await providerSetting('alipay');return {wechat:w.config.enabled?['native','h5','jsapi','mini'].filter(x=>w.config[x+'Enabled']):[],alipay:a.config.enabled?['page','wap'].filter(x=>a.config[x+'Enabled']):[],test:process.env.APP_MODE!=='production'&&!w.config.enabled&&!a.config.enabled}}
+async function paymentOptions(){const w=await providerSetting('payment'),a=await providerSetting('alipay'),test=await isTestMode();return {wechat:w.config.enabled?['native','h5','jsapi','mini'].filter(x=>w.config[x+'Enabled']):[],alipay:a.config.enabled&&(test||a.config.environment!=='sandbox')?['page','wap'].filter(x=>a.config[x+'Enabled']):[],test:test&&!w.config.enabled&&!a.config.enabled}}
 paymentStudent.get('/payments/options',async(_req,res)=>res.json(await paymentOptions()))
 paymentStudent.post('/orders/:id/payment',async(req,res)=>{
  const b=z.object({channel:channelSchema,confirmationToken:z.string().optional()}).strict().parse(req.body),provider=['page','wap'].includes(b.channel)?'alipay':'wechat',setting=await providerSetting(provider==='wechat'?'payment':'alipay'),c=setting.config,s=setting.credentials
  if(!c.enabled||!c[b.channel+'Enabled'])fail(400,'当前支付方式尚未开启')
  const r=await transaction(async conn=>{
+  if(!await isTestMode(conn,true)&&provider==='alipay'&&c.environment==='sandbox')fail(403,'生产环境禁止支付宝沙箱支付')
   const r=await pendingCheckout(conn,res.locals.user.id,String(req.params.id));if(r.paid)return {paid:true as const}
   if(Date.parse(r.order.expires_at)<Date.now()+65000)fail(409,'订单即将到期，请关闭后重新下单')
   if(r.window.shortened&&(!b.confirmationToken||r.order.checkout_confirmation?.token!==b.confirmationToken||r.order.checkout_confirmation.expires<Date.now()||r.order.checkout_confirmation.endsAt!==r.snapshot.endsAt))fail(409,'请重新确认实际可用体验时长')
