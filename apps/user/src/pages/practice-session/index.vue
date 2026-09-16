@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/app'
 import { getAnswered, recordToday, saveAnswered } from '@/utils/practice-plan'
 import { getWeakQuestions, type WeakPointDebugState } from '@/utils/weak-points'
 import DebugMenu from '@/components/DebugMenu.vue'
+import ConfiguredQuestion from '@/components/ConfiguredQuestion.vue'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
 import { api, refreshLearningPlan, showApiError, writeRecord } from '@/services/api'
@@ -130,9 +131,9 @@ onLoad(async (options?: Record<string, string>) => {
       list = queue.map(id => practiceQuestions.find(q => q.id === id)).filter(Boolean) as PracticeQuestion[]
     } catch (error) { showApiError(error); list=[] }
   }
-  else if (options.knowledgePointId) list = practiceQuestions.filter(item => item.knowledgePointId === options.knowledgePointId)
+  else if (options.knowledgePointId) list = practiceQuestions.filter(item => (item.knowledgePointIds || [item.knowledgePointId]).includes(options.knowledgePointId))
   else if (options.sectionId) {
-    list = practiceQuestions.filter(item => item.sectionId === options.sectionId)
+    list = practiceQuestions.filter(item => (item.linkedSectionIds || [item.sectionId]).includes(options.sectionId))
   }
   if (!options.knowledgePointId && nextMode === 'weak') {
     const homeDebugState = uni.getStorageSync('sxb-debug-state-刷题首页')
@@ -210,11 +211,23 @@ const submitAnswer = async () => {
   uni.setStorageSync('sxb-question-status', status)
   saveAnswered(exam.value.id, current.value.id, result)
   const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
-  const nextWrongIds = result === 'correct' ? wrongIds.filter(id => id !== current.value.id) : Array.from(new Set([...wrongIds, current.value.id]))
+  const nextWrongIds = result === 'correct' ? wrongIds : Array.from(new Set([...wrongIds, current.value.id]))
   uni.setStorageSync('sxb-wrong-questions', nextWrongIds)
   recordDailyQuestion()
   await refreshLearningPlan()
   } catch (error) { showApiError(error) } finally { submitting.value = false }
+}
+const configuredSubmitted = async (result: any) => {
+  sessionSelections.value[current.value.id] = []
+  recordDailyQuestion()
+  if (result.status === 'graded') {
+    const outcome: AnswerState = result.correct ? 'correct' : 'wrong'
+    answerStates.value[current.value.id] = outcome
+    saveAnswered(exam.value.id, current.value.id, outcome)
+    const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
+    uni.setStorageSync('sxb-wrong-questions', result.correct ? wrongIds : Array.from(new Set([...wrongIds, current.value.id])))
+    try { await refreshLearningPlan() } catch (error) { showApiError(error) }
+  }
 }
 const markRecite = async (remembered: boolean) => {
   try { await writeRecord('recite', current.value.id, { remembered }) } catch (error) { showApiError(error); return }
@@ -260,9 +273,10 @@ const applyDebug = (key: string) => { debugState.value = key; if (key === 'empty
 </script>
 
 <template>
-  <view class="session-page page safe-top"><view class="session-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-title"><text>{{ pageTitle }}</text><text>本次刷题 {{ elapsed }}</text></view><button class="favorite-button" :class="{ active: isFavorite }" @tap="toggleFavorite"><uni-icons :type="isFavorite ? 'star-filled' : 'star'" size="21" :color="isFavorite ? '#e98a3a' : '#8a96a7'" /></button></view><view v-if="loadingQuestions" class="empty-session" role="status"><text>正在加载计划题目</text></view><view v-else-if="!questions.length" class="empty-session"><uni-icons type="checkmarkempty" size="30" color="#1a9a7b" /><text>{{ knowledgePointSession ? '本知识点无题' : isPlanSession ? '当前计划范围暂无可练题目' : '本节暂无可练题目' }}</text><text>{{ knowledgePointSession ? '当前知识点暂未收录练习题，请返回继续学习其他内容' : isPlanSession ? '请回到学习计划选择已收录题目的科目和章' : '当前章节题库正在补充，请返回选择其他章节' }}</text><button @tap="back">返回上一页</button></view><template v-else><view class="progress-head"><text>第 {{ currentIndex + 1 }} / {{ questions.length }} 题</text><text>{{ progress }}%</text></view><view class="progress-track"><view :style="{ width: `${progress}%` }"></view></view><view class="question-params"><text>{{ current.typeName }}</text><text>{{ current.year }}年真题</text><text>{{ current.source }}</text><text>{{ current.difficulty }}</text></view>
+  <view class="session-page page safe-top"><view class="session-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-title"><text>{{ pageTitle }}</text><text>本次刷题 {{ elapsed }}</text></view><button class="favorite-button" :class="{ active: isFavorite }" @tap="toggleFavorite"><uni-icons :type="isFavorite ? 'star-filled' : 'star'" size="21" :color="isFavorite ? '#e98a3a' : '#8a96a7'" /></button></view><view v-if="loadingQuestions" class="empty-session" role="status"><text>正在加载计划题目</text></view><view v-else-if="!questions.length" class="empty-session"><uni-icons type="checkmarkempty" size="30" color="#1a9a7b" /><text>{{ knowledgePointSession ? '本知识点无题' : isPlanSession ? '当前计划范围暂无可练题目' : '本节暂无可练题目' }}</text><text>{{ knowledgePointSession ? '当前知识点暂未收录练习题，请返回继续学习其他内容' : isPlanSession ? '请回到学习计划选择已收录题目的科目和章' : '当前章节题库正在补充，请返回选择其他章节' }}</text><button @tap="back">返回上一页</button></view><template v-else><view class="progress-head"><text>第 {{ currentIndex + 1 }} / {{ questions.length }} 题</text><text>{{ progress }}%</text></view><view class="progress-track"><view :style="{ width: `${progress}%` }"></view></view><view class="question-params"><text>{{ current.typeName }}</text><text>{{ current.year ? current.year+'年真题' : '' }}</text><text>{{ current.source }}</text><text>{{ current.difficulty }}</text></view>
 
-    <template v-if="mode === 'recite'"><view class="recite-card"><view class="recite-label"><uni-icons type="flag" size="18" color="#6949df" /><text>挖空回忆</text></view><text class="question-stem">{{ current.stem }}</text><view class="blank-area"><text v-for="(_, index) in current.answer" :key="index">第 {{ index + 1 }} 处答案</text></view><button v-if="!reciteRevealed" class="reveal-button" @tap="reciteRevealed = true">查看答案</button><view v-else class="recite-answer"><text>参考答案</text><text>{{ current.answer.map(index => current.options[index]).join('；') }}</text><text>{{ current.explanation }}</text><view class="recite-actions"><button @tap="markRecite(false)">还没记住</button><button @tap="markRecite(true)">记住了</button></view></view></view></template>
+    <ConfiguredQuestion v-if="current.type==='configured'" :key="current.id" :question="current" :exam-id="exam.id" @submitted="configuredSubmitted" @busy="submitting=$event"/>
+    <template v-else-if="mode === 'recite'"><view class="recite-card"><view class="recite-label"><uni-icons type="flag" size="18" color="#6949df" /><text>挖空回忆</text></view><text class="question-stem">{{ current.stem }}</text><view class="blank-area"><text v-for="(_, index) in current.answer" :key="index">第 {{ index + 1 }} 处答案</text></view><button v-if="!reciteRevealed" class="reveal-button" @tap="reciteRevealed = true">查看答案</button><view v-else class="recite-answer"><text>参考答案</text><text>{{ current.answer.map(index => current.options[index]).join('；') }}</text><text>{{ current.explanation }}</text><view class="recite-actions"><button @tap="markRecite(false)">还没记住</button><button @tap="markRecite(true)">记住了</button></view></view></view></template>
 
     <template v-else><text class="question-stem">{{ current.stem }}</text><view class="options"><view v-for="(option, index) in current.options" :key="option" class="option" :class="optionClass(index)" @tap="chooseOption(index)"><text class="option-letter">{{ String.fromCharCode(65 + index) }}</text><text class="option-text">{{ option }}</text><uniIcons v-if="answered && current.answer.includes(index)" type="checkmarkempty" size="21" color="#1a9a7b" /><uniIcons v-else-if="answered && selected.includes(index)" type="closeempty" size="21" color="#d45d63" /></view></view><button v-if="current.type === 'multiple' && !answered && selected.length" class="submit-button" @tap="submitAnswer">确认答案</button><view v-if="answered" class="analysis-card" :class="isCorrect ? 'correct' : 'wrong'"><view class="result-line"><view class="result-icon"><uni-icons :type="isCorrect ? 'checkmarkempty' : 'closeempty'" size="20" :color="isCorrect ? '#1a9a7b' : '#d45d63'" /></view><view><text>{{ isCorrect ? '回答正确' : '回答错误' }}</text><text>你的答案：{{ selectedAnswer }}　正确答案：{{ correctAnswer }}</text></view></view><view class="analysis-content"><text class="analysis-title">答案解析</text><text class="analysis-text">{{ current.explanation }}</text></view></view></template>
     <view class="knowledge-float" @tap="openKnowledge"><view class="knowledge-link"><view><text>{{ knowledgeLine }}</text><text class="knowledge-title">{{ current.knowledgePointId.replace('kp-', '').replaceAll('-', '.') }} {{ current.knowledgePointTitle }}</text></view><uni-icons type="forward" size="20" color="#7e8ca0" /></view></view><view class="session-bottom"><button :disabled="currentIndex === 0" @tap="previous"><uni-icons type="back" size="18" color="#526783" />上一题</button><button class="note-bottom" @tap="openNote"><uni-icons type="compose" size="18" color="#7655df" />记笔记</button><button @tap="next">{{ nextLabel }}<uni-icons type="forward" size="18" color="#526783" /></button></view></template>

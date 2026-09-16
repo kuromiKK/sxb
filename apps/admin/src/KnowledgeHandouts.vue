@@ -2,22 +2,16 @@
 import { ref, onBeforeUnmount } from 'vue'
 import { FileText, Upload, Trash2 } from 'lucide-vue-next'
 import { send } from './api'
+import { uploadResource } from './utils/upload-resource'
 type Handout = { assetId:string; title:string }
 const props=defineProps<{modelValue:Handout[];examId:string;contentId:string}>()
 const emit=defineEmits<{ 'update:modelValue':[Handout[]]; busy:[boolean] }>()
 const source=ref('upload'),name=ref(''),url=ref(''),file=ref<File>(),busy=ref(false),progress=ref(0),error=ref('')
-const input=ref<HTMLInputElement>();let xhr:XMLHttpRequest|undefined
+const input=ref<HTMLInputElement>();let xhr:ReturnType<typeof uploadResource>|undefined
 function choose(event:Event){file.value=(event.target as HTMLInputElement).files?.[0];if(file.value&&!name.value)name.value=file.value.name;error.value=''}
-function upload():Promise<any>{
-  return new Promise((resolve,reject)=>{
-    const request=new XMLHttpRequest();xhr=request
-    request.open('POST',`/api/admin/media/upload?${new URLSearchParams({examId:props.examId,contentId:props.contentId,kind:'handout'})}`)
-    request.setRequestHeader('Authorization','Bearer '+sessionStorage.getItem('sxb-admin-token'))
-    request.upload.onprogress=e=>{if(e.lengthComputable)progress.value=Math.round(e.loaded/e.total*100)}
-    request.onload=()=>{try{const data=JSON.parse(request.responseText);request.status<300?resolve(data):reject(new Error(data.message||'上传失败'))}catch{reject(new Error('上传结果异常，请重试'))}}
-    request.onerror=()=>reject(new Error('连接中断，请重试'));request.onabort=()=>reject(new Error('已取消上传'))
-    const data=new FormData();data.append('file',file.value!);request.send(data)
-  })
+function upload(){
+  xhr=uploadResource(file.value!,{examId:props.examId,contentId:props.contentId,kind:'handout',onProgress:value=>progress.value=value})
+  return xhr.promise
 }
 async function add(){
   if(busy.value)return;error.value=''

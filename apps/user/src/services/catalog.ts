@@ -17,7 +17,7 @@ export async function refreshCatalog() {
   examNotices.splice(0, examNotices.length, ...data.articles)
   const selected = exams.find(e => e.id === examId)
   if (selected) {
-    const cycle = selected.cycles.find((c: any) => Date.parse(c.endsAt) > Date.now())
+    const cycle = selected.cycles.find((c: any) => Date.parse(c.startsAt) <= Date.now() && Date.parse(c.endsAt) > Date.now())
     const next = { ...exam, id: examId, name: selected.name, totalQuestions: data.practiceQuestions.length, totalCourses: data.courseCatalog.length,
       totalKnowledge: knowledgeSubjects.flatMap(s => s.chapters.flatMap(c => c.sections.flatMap(t => t.points))).length,
       daysLeft: cycle ? Math.max(0, Math.ceil((Date.parse(cycle.endsAt) - Date.now()) / 86400000)) : 0,

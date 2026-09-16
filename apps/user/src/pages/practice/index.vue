@@ -39,7 +39,7 @@ onShow(() => {
   void refreshLearningPlan().then(refreshPlanState).catch(showApiError)
   state.selectedTab = 3
   answerVersion.value++
-  wrongCount.value = (uni.getStorageSync('sxb-wrong-questions') || ['q-002', 'q-004', 'q-006']).length
+  wrongCount.value = (uni.getStorageSync('sxb-wrong-questions') || []).length
   favoriteCount.value = (uni.getStorageSync('sxb-favorite-items') || ['kp-1-1-1', 'course-ability-section-1-1', 'q-001']).length
 })
 

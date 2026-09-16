@@ -22,6 +22,7 @@ test('manual exam entitlements are independent, reversible and audited', async t
   for (const exam of ['manual-exam-a','manual-exam-b']) {
     await db.query('INSERT INTO exams(id,name) VALUES($1,$2)', [exam, exam])
     await db.query('INSERT INTO exam_cycles(id,exam_id,year,ends_at) VALUES($1,$2,2090,$3),($4,$2,2091,$5),($6,$2,2000,$7)', [exam+'-2090', exam, '2090-05-31T15:59:59Z', exam+'-2091', '2091-05-31T15:59:59Z', exam+'-2000', '2000-05-31T15:59:59Z'])
+    await db.query("UPDATE exam_cycles SET starts_at='2001-01-01T00:00:00Z' WHERE id=$1",[exam+'-2090'])
   }
   const adminToken = await session(adminId, 'admin'), studentToken = await session('manual-student'), otherToken = await session('other-student')
   const app = express(); app.use(express.json()); app.use('/api', api)
@@ -79,7 +80,8 @@ test('manual exam entitlements are independent, reversible and audited', async t
     })
     await t.test('manual free/VIP override a paid SVIP; restoring retains original payment data', async () => {
       assert.equal((await restore()).status, 200)
-      const order = (await req('/orders', 'POST', { examId: a, product: 'svip' }, studentToken)).data.order
+      assert.equal((await req('/admin/products/manual-svip','PUT',{version:0,config:{title:'人工权益回归商品',type:'entitlement',examId:a,cycleId:a+'-2090',level:'svip',priceCents:79900,status:'published'}})).status,200)
+      const order = (await req('/orders', 'POST', { productId:'manual-svip' }, studentToken)).data.order
       assert(order.id)
       assert.equal((await req(`/orders/${order.id}/test-payment`, 'POST', { outcome: 'success' }, studentToken)).status, 200)
       const snapshot = (await req('/orders', 'GET', undefined, studentToken)).data
@@ -112,18 +114,18 @@ test('manual exam entitlements are independent, reversible and audited', async t
       }
       assert.equal((await state(b)).history.length, 1)
     })
-    await t.test('manual expiration respects exam dates and SVIP next-cycle downgrade', async () => {
+    await t.test('manual VIP and SVIP expire without next-cycle carryover', async () => {
       const sample = { level: 'svip', ends_at: '2090-05-31T15:59:59Z', next_ends_at: '2091-05-31T15:59:59Z', revoked: false }
       const end = Date.parse(sample.ends_at), next = Date.parse(sample.next_ends_at)
       assert.equal(manualEffective(sample, end-1)?.level, 'svip')
-      assert.equal(manualEffective(sample, end)?.level, 'vip')
+      assert.equal(manualEffective(sample, end), null)
       assert.equal(manualEffective(sample, next), null)
       assert.equal(manualEffective({ ...sample, level: 'vip' }, end), null)
       assert.equal(manualEffective({ ...sample, level: 'free' }, end-1)?.level, 'free')
       assert.equal(manualEffective({ ...sample, revoked: true }, end-1), null)
       await set('svip', (await state(b)).version, b)
       await db.query('UPDATE exam_cycles SET ends_at=now()-interval \'1 day\' WHERE id=$1', [b+'-2090'])
-      assert.equal((await rights('manual-student', b)).level, 'vip')
+      assert.equal((await rights('manual-student', b)).level, 'free')
       await db.query('UPDATE exam_cycles SET ends_at=now()-interval \'1 day\' WHERE id=$1', [b+'-2091'])
       assert.equal((await rights('manual-student', b)).level, 'free')
     })

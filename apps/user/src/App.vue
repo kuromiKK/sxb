@@ -2,18 +2,31 @@
 import { onLaunch } from '@dcloudio/uni-app'
 import { refreshCatalog } from '@/services/catalog'
 import { refreshRights, refreshPersonalData, showApiError, token } from '@/services/api'
+import { finishLearningBootstrap } from '@/utils/learning-bootstrap'
+import {refreshSiteSettings} from '@/services/site-settings'
 
-onLaunch(() => {
-  uni.showLoading({ title: '加载中' })
+onLaunch((options) => {
+  const initialPath=options?.path?'/'+options.path.replace(/^\//,''):'/pages/index/index'
+  const initialQuery=new URLSearchParams(options?.query||{}).toString()
+  const initialRoute=initialPath+(initialQuery?'?'+initialQuery:'')
+  // Preview never boots a student account, catalog, rights, or personal learning data.
+  if(initialPath==='/pages/content-preview/index') { finishLearningBootstrap();return }
+  void refreshSiteSettings().catch(()=>{})
+  // Public entry pages work immediately. Prepare learning data in the background without recreating their forms.
+  const publicEntry=['/pages/search/index','/pages/login/index'].includes(initialPath)||(initialPath==='/pages/profile-center/index'&&['about','agreement','privacy'].includes(String(options?.query?.mode||'')))
+  if(!publicEntry)uni.showLoading({ title: '加载中' })
   void refreshCatalog().then(() => refreshRights().catch(error => { if (token()) throw error })).then(refreshPersonalData).then(() => {
+    if(publicEntry){finishLearningBootstrap();return}
     const pages = getCurrentPages()
     const current = pages[pages.length - 1] as any
-    const route = current?.$page?.fullPath || '/pages/index/index'
-    uni.reLaunch({ url: route })
+    const route = current?.$page?.fullPath || initialRoute
+    uni.reLaunch({ url: route, complete: finishLearningBootstrap })
   }).catch(error => {
+    finishLearningBootstrap()
+    if(publicEntry)return
     showApiError(error)
     uni.showModal({ title: '学习数据未能加载', content: '当前显示内容尚未同步，不能作为真实学习数据。请确认本地服务正在运行后重试。', showCancel: false, confirmText: '知道了' })
-  }).finally(() => uni.hideLoading())
+  }).finally(() => {if(!publicEntry)uni.hideLoading()})
 })
 </script>
 

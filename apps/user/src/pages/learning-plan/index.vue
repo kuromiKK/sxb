@@ -66,8 +66,8 @@ const stage = computed(() => {
 const weekdays = ['日', '一', '二', '三', '四', '五', '六']
 const subjectLabel = (subject: typeof knowledgeSubjects[number]) => subject.name.replace('（初级）', '').replace('（中级）', '')
 const selectedChapterCount = computed(() => selectedChapterIds.value.length)
-const subjectQuestionCount = (subjectId: string) => practiceQuestions.filter(q => q.subjectId === subjectId && (q.type as string) !== 'subjective').length
-const chapterQuestionCount = (chapterId: string) => practiceQuestions.filter(q => q.chapterId === chapterId && (q.type as string) !== 'subjective').length
+const subjectQuestionCount = (subjectId: string) => practiceQuestions.filter(q => (q.linkedSubjectIds||[q.subjectId]).includes(subjectId) && (q.type as string) !== 'subjective').length
+const chapterQuestionCount = (chapterId: string) => practiceQuestions.filter(q => (q.linkedChapterIds || [q.chapterId]).includes(chapterId) && (q.type as string) !== 'subjective').length
 const useAutoTarget = () => { targetCustomized.value = false; target.value = autoDaily.value }
 
 const isSubjectSelected = (subject: typeof knowledgeSubjects[number]) => subject.chapters.length > 0 && subject.chapters.every(chapter => selectedChapterIds.value.includes(chapter.id))

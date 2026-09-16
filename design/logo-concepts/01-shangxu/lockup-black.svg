@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 256" role="img" aria-labelledby="title description">
+  <title id="title">上行宝 · 上序 · 图文组合</title>
+  <desc id="description">原创路径图形。从“上”字提取竖干、短横与基座。两处同向切角带来前进感，留白把学习过程分成清晰的阶段；不用箭头，也能读出“上行”。 文字为可编辑文本，使用 Noto Sans SC Bold，未转曲。</desc>
+  <g id="symbol" fill="#000000">
+    <path id="upper-structure" d="M108 164V54Q108 48 114 48H142V98H202L182 130H142V164Z"/>
+    <path id="foundation" d="M48 184H208L188 216H48Z"/>
+  </g>
+  <g id="wordmark" fill="#000000">
+    <text x="270" y="170" font-family="Noto Sans SC, Microsoft YaHei, sans-serif" font-size="98" font-weight="700" letter-spacing="4">上行宝</text>
+  </g>
+</svg>

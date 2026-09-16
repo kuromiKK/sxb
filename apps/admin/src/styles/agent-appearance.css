@@ -1,0 +1,7 @@
+.agent-themed .agent-panel-title,.agent-themed .agent-welcome-icon,.agent-themed .agent-progress{color:var(--agent-accent-text)}
+.agent-themed .el-button--primary{--el-button-text-color:var(--agent-button-text);--el-button-hover-text-color:var(--agent-button-text);--el-button-active-text-color:var(--agent-button-text)}
+.agent-themed .el-button--primary.is-plain{--el-button-text-color:var(--agent-accent-text)}
+.agent-themed .el-select-dropdown__item.is-selected{color:var(--agent-accent-text)}
+.agent-themed .el-alert--info.is-light{background:var(--el-fill-color-light);color:var(--el-text-color-regular)}
+.agent-themed .el-button.is-disabled{opacity:.6}
+.agent-themed :focus-visible{outline:2px solid var(--agent-accent-text);outline-offset:3px}

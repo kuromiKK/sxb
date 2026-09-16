@@ -169,6 +169,8 @@ export const knowledgeSubjects: KnowledgeSubject[] = baseKnowledgeSubjects.map(s
 export type CourseType = 'video' | 'audio' | 'article'
 export type CourseLesson = {
   id: string
+  title?: string
+  knowledgePointId?: string
   subjectId: string
   subjectName: string
   chapterId: string
@@ -231,7 +233,7 @@ export const courseCatalog: CourseLesson[] = [
   makeCourse('practice-section-3-1', { type: 'audio', intro: '用音频快速复盘服务计划与目标制定，适合通勤和碎片时间学习。', totalMinutes: 19, canTrial: true, hasHandout: false, handoutName: '', progress: 0, currentMinute: 0, completed: false }),
 ]
 
-export type PracticeQuestionType = 'single' | 'multiple'
+export type PracticeQuestionType = 'single' | 'multiple' | 'configured'
 export type PracticeQuestion = {
   id: string
   subjectId: string
@@ -250,6 +252,10 @@ export type PracticeQuestion = {
   answer: number[]
   explanation: string
   knowledgePointId: string
+  knowledgePointIds?: string[]
+  linkedSubjectIds?: string[]
+  linkedChapterIds?: string[]
+  linkedSectionIds?: string[]
   knowledgePointTitle: string
 }
 

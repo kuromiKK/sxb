@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" fill="none" class="sxb-energy" role="img" aria-labelledby="sxb-energy-title">
+  <title id="sxb-energy-title">椭圆轨道环绕的几何能量核心</title>
+  <style>
+    /* Override these variables on the inline SVG or any ancestor:
+       --energy-bg, --energy-ice, --energy-violet, --energy-white.
+       No bitmap, external dependency, JavaScript or filter is used. */
+    .sxb-energy { background:var(--energy-bg,#080f23); }
+    .sxb-energy .energy-ice { stroke:var(--energy-ice,#8cdcff); }
+    .sxb-energy .energy-violet { stroke:var(--energy-violet,#9c8aff); }
+    .sxb-energy .energy-white { stroke:var(--energy-white,#e3f5ff); }
+    .sxb-energy .energy-orbits { transform-origin:400px 500px; animation:energy-orbit-turn 100s linear infinite; }
+    .sxb-energy .energy-core { transform-origin:400px 500px; animation:energy-core-breathe 8s ease-in-out infinite; }
+    @keyframes energy-orbit-turn { to { transform:rotate(360deg); } }
+    @keyframes energy-core-breathe { 0%,100% { opacity:.86; transform:scale(.98); } 50% { opacity:1; transform:scale(1.02); } }
+    @media (prefers-reduced-motion:reduce) {
+      .sxb-energy .energy-orbits,.sxb-energy .energy-core { animation:none; transform:none; opacity:1; }
+    }
+  </style>
+  <defs>
+    <radialGradient id="energy-atmosphere">
+      <stop stop-color="var(--energy-violet,#9c8aff)" stop-opacity=".13"/>
+      <stop offset=".52" stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".035"/>
+      <stop offset="1" stop-color="var(--energy-ice,#8cdcff)" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="energy-aura">
+      <stop stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".3"/>
+      <stop offset=".28" stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".09"/>
+      <stop offset="1" stop-color="var(--energy-ice,#8cdcff)" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="energy-heart">
+      <stop stop-color="var(--energy-white,#e3f5ff)" stop-opacity=".95"/>
+      <stop offset=".18" stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".6"/>
+      <stop offset=".5" stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".1"/>
+      <stop offset="1" stop-color="var(--energy-ice,#8cdcff)" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="energy-edge" x1="323" y1="384" x2="477" y2="616" gradientUnits="userSpaceOnUse">
+      <stop stop-color="var(--energy-white,#e3f5ff)"/>
+      <stop offset=".45" stop-color="var(--energy-ice,#8cdcff)"/>
+      <stop offset="1" stop-color="var(--energy-violet,#9c8aff)"/>
+    </linearGradient>
+    <linearGradient id="energy-facet" x1="345" y1="422" x2="456" y2="581" gradientUnits="userSpaceOnUse">
+      <stop stop-color="var(--energy-ice,#8cdcff)" stop-opacity=".12"/>
+      <stop offset="1" stop-color="var(--energy-violet,#9c8aff)" stop-opacity=".025"/>
+    </linearGradient>
+  </defs>
+  <path fill="var(--energy-bg,#080f23)" d="M0 0h800v1000H0z"/>
+  <ellipse cx="400" cy="500" rx="330" ry="350" fill="url(#energy-atmosphere)"/>
+  <!-- A quiet outer field reserves generous space above and below the focal point. -->
+  <g class="energy-ice" opacity=".1" stroke-width=".7">
+    <circle cx="400" cy="500" r="238" stroke-dasharray="1 11"/>
+    <path d="M400 236v18m0 492v18M136 500h18m492 0h18"/>
+    <path d="M212 312l9 9m358 358 9 9M212 688l9-9m358-358 9-9"/>
+    <path d="M387 198h26m-13-13v26M387 802h26m-13-13v26" opacity=".6"/>
+  </g>
+  <g class="energy-orbits">
+    <g transform="rotate(-32 400 500)">
+      <ellipse cx="400" cy="500" rx="279" ry="112" class="energy-ice" stroke-width="1" opacity=".3"/>
+      <ellipse cx="400" cy="500" rx="290" ry="123" class="energy-ice" stroke-width=".6" stroke-dasharray="68 16 2 16" opacity=".12"/>
+      <path d="M121 500a279 112 0 0 1 151-99" class="energy-white" stroke-width="1.6" opacity=".8" stroke-linecap="round"/>
+      <circle cx="121" cy="500" r="4" fill="var(--energy-ice,#8cdcff)"/>
+      <circle cx="121" cy="500" r="9" class="energy-ice" opacity=".22"/>
+      <circle cx="653" cy="547" r="2.5" fill="var(--energy-white,#e3f5ff)" opacity=".8"/>
+    </g>
+    <g transform="rotate(51 400 500)">
+      <ellipse cx="400" cy="500" rx="254" ry="107" class="energy-violet" stroke-width="1" opacity=".4"/>
+      <path d="M540 411a254 107 0 0 1 114 89" class="energy-violet" stroke-width="1.8" opacity=".9" stroke-linecap="round"/>
+      <circle cx="654" cy="500" r="4" fill="var(--energy-violet,#9c8aff)"/>
+      <circle cx="654" cy="500" r="10" class="energy-violet" opacity=".2"/>
+      <circle cx="175" cy="550" r="2" fill="var(--energy-violet,#9c8aff)" opacity=".7"/>
+    </g>
+    <ellipse cx="400" cy="500" rx="189" ry="171" transform="rotate(-15 400 500)" class="energy-ice" stroke-width=".7" opacity=".13"/>
+  </g>
+  <g class="energy-core">
+    <circle cx="400" cy="500" r="152" fill="url(#energy-aura)"/>
+    <circle cx="400" cy="500" r="140" class="energy-ice" stroke-width=".7" stroke-dasharray="2 9" opacity=".35"/>
+    <path d="M400 361l120 69v140l-120 69-120-69V430Z" class="energy-ice" stroke-width=".65" opacity=".16"/>
+    <path d="M400 378l106 61v122l-106 61-106-61V439Z" class="energy-violet" stroke-width=".8" opacity=".3"/>
+    <!-- Intersecting facets create a precise, three-dimensional crystalline core. -->
+    <path d="M400 394l92 53v106l-92 53-92-53V447Z" fill="url(#energy-facet)" stroke="url(#energy-edge)" stroke-width="1.5"/>
+    <g stroke="url(#energy-edge)" stroke-linejoin="round">
+      <path d="M400 394l-55 74 55 138 55-138Zm-92 53 92 53 92-53M308 553l92-53 92 53M400 394v106m0 0v106" stroke-width="1.1" opacity=".82"/>
+      <path d="m345 468 55-31 55 31v64l-55 31-55-31Zm0 0 110 64m0-64-110 64m55-95v126M308 447l37 21m110 0 37-21M308 553l37-21m110 0 37 21" stroke-width=".8" opacity=".65"/>
+      <path d="m400 452 42 24v48l-42 24-42-24v-48Zm0 0v48m-42-24 42 24 42-24m-42 24v48" stroke-width="1.2"/>
+    </g>
+    <circle cx="400" cy="500" r="62" fill="url(#energy-heart)"/>
+    <path d="m400 484 14 8v16l-14 8-14-8v-16Z" fill="var(--energy-ice,#8cdcff)" fill-opacity=".16" class="energy-white" stroke-width="1"/>
+    <circle cx="400" cy="500" r="3" fill="var(--energy-white,#e3f5ff)"/>
+    <g fill="var(--energy-white,#e3f5ff)">
+      <circle cx="400" cy="394" r="2.5"/><circle cx="492" cy="447" r="2"/>
+      <circle cx="308" cy="553" r="2"/><circle cx="400" cy="606" r="2.5"/>
+    </g>
+  </g>
+  <g fill="var(--energy-ice,#8cdcff)">
+    <circle cx="206" cy="390" r="1.5" opacity=".5"/><circle cx="594" cy="624" r="1.5" opacity=".6"/>
+    <circle cx="315" cy="734" r="1" opacity=".45"/><circle cx="550" cy="290" r="1" opacity=".4"/>
+  </g>
+</svg>

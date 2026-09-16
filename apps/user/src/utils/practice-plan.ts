@@ -1,3 +1,4 @@
+import { supportsAutomaticGrading } from '../../../shared/question-types'
 import { knowledgeSubjects, practiceQuestions, type PracticeQuestion } from '@/mock/data'
 import { getFavoriteIds } from '@/utils/favorites'
 import { api, learningPlan } from '@/services/api'
@@ -47,24 +48,24 @@ export const getFavoriteQuestionIds = () => getFavoriteIds().filter(id => practi
 
 const chapterQuestionIds = (chapterIds: string[]) => {
   const selected = new Set(chapterIds)
-  return practiceQuestions.filter(q => selected.has(q.chapterId)).map(q => q.id)
+  return practiceQuestions.filter(q => (q.linkedChapterIds||[q.chapterId]).some(id=>selected.has(id))).map(q => q.id)
 }
 
 export const getPlanQuestions = (plan: Pick<PracticePlan, 'subjectIds' | 'chapterIds' | 'includeWrong' | 'round'> & Partial<Pick<PracticePlan, 'years' | 'sources'>>): PracticeQuestion[] => {
-  if (Array.isArray(plan.chapterIds)) return practiceQuestions.filter(q => plan.chapterIds.includes(q.chapterId) && (q.type as string) !== 'subjective')
+  if (Array.isArray(plan.chapterIds)) return practiceQuestions.filter(q => (q.linkedChapterIds||[q.chapterId]).some(id=>plan.chapterIds.includes(id)) && supportsAutomaticGrading(q))
   const subjectIds = new Set(plan.subjectIds)
   const chapterIds = new Set<string>([])
   const years = new Set(plan.years || [])
   const sourceSet = new Set(plan.sources || [])
   const selectedByChapter = chapterIds.size ? new Set(chapterQuestionIds([...chapterIds])) : null
-  const base = practiceQuestions.filter(q => (!subjectIds.size || subjectIds.has(q.subjectId)) && (!years.size || years.has(q.year)) && (!selectedByChapter || selectedByChapter.has(q.id)))
+  const base = practiceQuestions.filter(q => (!subjectIds.size || (q.linkedSubjectIds||[q.subjectId]).some(id=>subjectIds.has(id))) && (!years.size || years.has(q.year)) && (!selectedByChapter || selectedByChapter.has(q.id)))
   const ids = new Set<string>()
   // New plans use chapterIds as the source of truth. Legacy plans still load safely.
   if (chapterIds.size || !plan.sources) base.forEach(q => ids.add(q.id))
   if (sourceSet.has('chapter')) base.forEach(q => ids.add(q.id))
   if (sourceSet.has('favorite')) getFavoriteQuestionIds().forEach(id => ids.add(id))
   if (sourceSet.has('wrong') || plan.includeWrong || plan.round === 'consolidation') getWrongIds().forEach(id => ids.add(id))
-  return practiceQuestions.filter(q => ids.has(q.id) && (!subjectIds.size || subjectIds.has(q.subjectId)) && (!years.size || years.has(q.year)) && (!selectedByChapter || selectedByChapter.has(q.id)))
+  return practiceQuestions.filter(q => ids.has(q.id) && (!subjectIds.size || (q.linkedSubjectIds||[q.subjectId]).some(id=>subjectIds.has(id))) && (!years.size || years.has(q.year)) && (!selectedByChapter || selectedByChapter.has(q.id)))
 }
 
 export const getPlanCompletedCount = (plan: Pick<PracticePlan, 'examId'> & { questionIds?: string[] }) => {
@@ -109,7 +110,7 @@ export const getQuestionIdsForChapters = (chapterIds: string[]) => chapterQuesti
 const allChapterIds = () => knowledgeSubjects.flatMap(subject => subject.chapters.map(chapter => chapter.id))
 
 export const defaultPlan = (examId: string, daysLeft: number): PracticePlan => {
-  const subjectIds = Array.from(new Set(practiceQuestions.map(q => q.subjectId)))
+  const subjectIds = Array.from(new Set(practiceQuestions.flatMap(q => q.linkedSubjectIds||[q.subjectId])))
   const chapterIds = allChapterIds()
   const questionIds = getQuestionIdsForChapters(chapterIds)
   const total = questionIds.length

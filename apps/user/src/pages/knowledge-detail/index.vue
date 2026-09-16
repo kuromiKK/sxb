@@ -1,30 +1,33 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
-import StudyContent from '@/components/StudyContent.vue'
-import KnowledgeHandouts from '@/components/KnowledgeHandouts.vue'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
+import KnowledgeReading from '@/components/KnowledgeReading.vue'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { backOrFallback } from '@/utils/navigation'
-import { courseCatalog, knowledgeSubjects, type KnowledgePoint } from '@/mock/data'
+import { courseCatalog, knowledgeSubjects, type CourseLesson, type KnowledgePoint } from '@/mock/data'
 import { useAppStore } from '@/store/app'
 import { hasFullCourseAccess } from '@/utils/course-access'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
 import { api, token, selectedExamId, showApiError } from '@/services/api'
 
+import { createLearningVisit } from '@/utils/learning-visit'
+const visit=createLearningVisit()
+onUnload(()=>visit.close())
+onHide(()=>visit.leave())
 const pointId = ref('kp-1-1-1')
 const favorite = ref(false)
 const note = ref('')
 const saved = ref(false)
-const { state } = useAppStore()
+const { requireLogin } = useAppStore()
 
-const allPoints = knowledgeSubjects.flatMap(subject => subject.chapters.flatMap(chapter => chapter.sections.flatMap(section => section.points.map(point => ({ point, subject, chapter, section })))))
-const record = computed(() => allPoints.find(item => item.point.id === pointId.value))
+const allPoints = computed(() => knowledgeSubjects.flatMap(subject => subject.chapters.flatMap(chapter => chapter.sections.flatMap(section => section.points.map(point => ({ point, subject, chapter, section }))))))
+const record = computed(() => allPoints.value.find(item => item.point.id === pointId.value))
 const point = computed<KnowledgePoint>(() => record.value?.point as KnowledgePoint)
-const currentIndex = computed(() => allPoints.findIndex(item => item.point.id === pointId.value))
+const currentIndex = computed(() => allPoints.value.findIndex(item => item.point.id === pointId.value))
 const hasPrevious = computed(() => currentIndex.value > 0)
-const hasNext = computed(() => currentIndex.value >= 0 && currentIndex.value < allPoints.length - 1)
-const sectionCourse = computed(() => courseCatalog.find(course => course.sectionId === record.value?.section.id && !(course as any).knowledgePointId))
+const hasNext = computed(() => currentIndex.value >= 0 && currentIndex.value < allPoints.value.length - 1)
+const relatedCourses = computed(() => courseCatalog.filter(course => course.knowledgePointId === pointId.value || (course.sectionId === record.value?.section.id && !course.knowledgePointId)))
 const practiceProgress = computed(() => point.value.questionTotal
   ? Math.min(Math.round(point.value.questionDone / point.value.questionTotal * 100), 100)
   : 0)
@@ -36,7 +39,7 @@ async function loadContent(){
     const path=`/knowledge-content/${encodeURIComponent(current)}`
     let result:any
     try{result=await api(`${path}${wasLoggedIn?'/member':''}`)}catch(error){if(wasLoggedIn&&!token())result=await api(path);else throw error}
-    if(pointId.value===current)richContent.value=result
+    if(pointId.value===current){richContent.value=result;void visit.begin(current)}
   }catch(e:any){if(pointId.value===current)contentError.value=e.message}finally{if(pointId.value===current)contentBusy.value=false}
 }
 onShow(()=>{void loadContent()})
@@ -47,13 +50,12 @@ onLoad((options) => {
 })
 const back = () => backOrFallback('/pages/knowledge/index')
 function loadPointState() {
-  if(token() && record.value)void api('/learning-events','POST',{examId:selectedExamId(),kind:'knowledge',sourceId:pointId.value}).catch(showApiError)
   favorite.value = getFavoriteIds().includes(pointId.value)
   note.value = getNoteBySource(pointId.value, 'knowledge')?.content || uni.getStorageSync(`sxb-knowledge-note-${pointId.value}`) || ''
   saved.value = false
 }
 const showPoint = (index: number) => {
-  const target = allPoints[index]
+  const target = allPoints.value[index]
   if (!target) return
   pointId.value = target.point.id
   void loadContent()
@@ -71,12 +73,13 @@ const openPractice = () => {
   const returnUrl = `/pages/knowledge-detail/index?id=${encodeURIComponent(pointId.value)}`
   uni.navigateTo({ url: `/pages/practice-session/index?knowledgePointId=${encodeURIComponent(pointId.value)}&returnUrl=${encodeURIComponent(returnUrl)}` })
 }
-const openCourse = () => {
-  if (!sectionCourse.value) return uni.showToast({ title: '本节暂未配置精讲课', icon: 'none' })
-  if (!sectionCourse.value.canTrial && !hasFullCourseAccess()) {
-    return uni.showModal({ title: '当前权限不足', content: '该节精讲课需要完整权限，购买后即可学习。', confirmText: '去购买', success: result => { if (result.confirm) uni.showToast({ title: state.isLoggedIn ? '权限购买页将在“我的”页面开放' : '请先登录', icon: 'none' }) } })
+const openCourse = (course: CourseLesson) => {
+  const url = `/pages/course-detail/index?id=${encodeURIComponent(course.id)}`
+  if (!requireLogin(url)) return
+  if (!hasFullCourseAccess()) {
+    return uni.showModal({ title: '当前权限不足', content: '学习此课程需要当前考试的对应权益，可前往查看在售套餐。', confirmText: '查看套餐', success: result => { if (result.confirm) uni.navigateTo({ url: '/pages/products/index' }) } })
   }
-  uni.navigateTo({ url: `/pages/course-detail/index?id=${encodeURIComponent(sectionCourse.value.id)}` })
+  uni.navigateTo({ url })
 }
 const toggleFavorite = async () => {
   await setFavorite(pointId.value, 'knowledge', !favorite.value)
@@ -89,15 +92,12 @@ const saveNote = async () => { if (!note.value.trim()) return uni.showToast({ ti
 <template>
   <view v-if="record" class="detail-page safe-top">
     <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">知识点详情</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
-    <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
-    <view class="point-hero"><view class="hero-top"><view class="hero-icon"><uni-icons type="map" size="24" color="#fff" /></view><view class="hero-title-wrap"><text class="hero-title">{{ point.title }}</text><view class="hero-tags"><text class="star-tag" :class="`star-${point.stars}`">{{ point.stars }}星</text><text class="mastery-tag">掌握 {{ point.mastery }}%</text></view></view></view><view class="hero-stats"><view><text>{{ point.questionTotal }}</text><text>包含题目</text></view><view><text>{{ point.questionDone }}</text><text>已做题目</text></view><view><text>{{ point.questionTotal ? Math.round(point.questionDone / point.questionTotal * 100) : 0 }}%</text><text>完成进度</text></view></view></view>
-    <view class="content-card"><view class="card-title-row"><view class="card-title"><view class="title-bar"></view><text>{{ richContent?.isKnowledgeCourse?'知识点课程':'知识点内容' }}</text></view></view><text v-if="contentBusy" class="content-text">正在加载…</text><view v-else-if="contentError"><text class="content-text">{{ contentError }}</text><button @tap="loadContent">重试</button></view><StudyContent v-else-if="richContent" :blocks="richContent.blocks" /></view>
-    <KnowledgeHandouts v-if="richContent" :items="richContent.handouts||[]" />
+    <KnowledgeReading :title="point.title" :path="[record.subject.name,`第${record.chapter.no}章`,`第${record.section.no}节`]" :stars="point.stars" :mastery="point.mastery" :question-total="point.questionTotal" :question-done="point.questionDone" :blocks="richContent?.blocks" :busy="contentBusy" :error="contentError" :heading="richContent?.isKnowledgeCourse?'知识点课程':'知识点内容'" @retry="loadContent"/>
     <view class="extension-card">
       <view class="extension-title"><text>学习延伸</text><text>继续巩固本知识点</text></view>
       <view class="extension-row practice-row" :class="{ disabled: !point.questionTotal }" @tap="openPractice"><view class="extension-icon practice"><uni-icons type="compose" size="20" :color="point.questionTotal ? '#3569e8' : '#9aa5b4'" /></view><view class="extension-copy practice-copy"><view class="practice-copy-head"><text>本知识点刷题</text><text v-if="point.questionTotal">{{ practiceProgress }}%</text></view><text class="practice-meta">{{ point.questionTotal ? `已完成 ${point.questionDone} / 共 ${point.questionTotal} 题` : '本知识点无题' }}</text><view v-if="point.questionTotal" class="practice-progress"><view :style="{ width: `${practiceProgress}%` }"></view></view></view><uni-icons v-if="point.questionTotal" type="forward" size="18" color="#8a96a7" /></view>
       <view v-if="point.content?.trim()" class="extension-row recite-row" @tap="openRecite"><view class="extension-icon recite"><uni-icons type="flag" size="20" color="#9a6a1d" /></view><view class="extension-copy"><text>背诵本篇</text><text>智能挖空关键内容，强化主动记忆</text></view><uni-icons type="forward" size="18" color="#8a96a7" /></view>
-      <view class="extension-row course-row" :class="{ disabled: !sectionCourse }" @tap="openCourse"><view class="extension-icon course"><uni-icons type="videocam" size="20" :color="sectionCourse ? '#6b55c5' : '#9aa5b4'" /></view><view class="extension-copy"><text>所属精讲课</text><text>{{ sectionCourse ? `第${sectionCourse.sectionNo}节 ${sectionCourse.sectionName} · ${sectionCourse.typeName} · ${sectionCourse.totalMinutes}分钟` : '本节暂无精讲课' }}</text></view><uni-icons type="forward" size="18" :color="sectionCourse ? '#8a96a7' : '#c1c8d2'" /></view>
+      <view v-for="course in relatedCourses" :key="course.id" class="extension-row course-row" @tap="openCourse(course)"><view class="extension-icon course"><uni-icons :type="course.type === 'video' ? 'videocam' : course.type === 'audio' ? 'sound' : 'compose'" size="20" color="#6b55c5" /></view><view class="extension-copy"><text>{{ course.knowledgePointId ? '知识点配套课' : '本节精品课' }} · {{ course.title }}</text><text>{{ course.typeName }}{{ course.type === 'article' ? '' : ' · ' + course.totalMinutes + '分钟' }}{{course.hasHandout?' · 含讲义':''}}</text></view><uni-icons type="forward" size="18" color="#8a96a7" /></view>
     </view>
     <view class="note-card"><view class="card-title-row"><view class="card-title"><view class="title-bar orange"></view><text>我的笔记</text></view><text class="content-hint">写下你的理解和易错提醒</text></view><textarea v-model="note" maxlength="1000" placeholder="在这里记录这个知识点的记忆方法、易错点或补充内容" placeholder-class="note-placeholder" /><view class="note-footer"><text>{{ note.length }} / 1000</text><button class="save-note" :class="{ saved }" @tap="saveNote"><uni-icons :type="saved ? 'checkmarkempty' : 'compose'" size="15" color="#fff" />{{ saved ? '已保存' : '保存笔记' }}</button></view></view>
     <view class="point-navigation">

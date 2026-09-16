@@ -16,11 +16,11 @@ export async function refreshOrders() {
   const rows = await api<any[]>('/orders')
   const names: Record<string, string> = { vip: 'VIP', svip: 'SVIP', upgrade: 'VIP 升 SVIP', trial: 'VIP 24小时体验' }
   const orders: RightsOrder[] = rows.map(row => ({
-    no: row.id, productName: `${row.exam_name} ${names[row.product]}`, rightsName: names[row.product],
+    no: row.id, productName: row.product_snapshot?.frontendTitle || row.product_snapshot?.title || `${row.exam_name} ${names[row.product]}`, rightsName: row.product_snapshot?.level?.toUpperCase() || names[row.product],
     createdAt: Date.parse(row.created_at), expiresAt: Date.parse(row.expires_at), paidAt: row.paid_at ? Date.parse(row.paid_at) : undefined,
     amount: (row.amount_cents / 100).toFixed(2), status: row.status === 'pending_payment' ? 'pending' : ['paid','refunding'].includes(row.status) ? 'completed' : 'closed',
-    backendStatus: row.status, paymentMethod: row.paid_at ? '微信测试支付（未扣款）' : undefined,
-    validity: row.product === 'trial' ? '付款成功后24小时' : '至对应考期结束，具体日期以考试配置为准', closeReason: row.close_reason,
+    backendStatus: row.status, paymentMethod: row.paid_at ? ({wechat:'微信支付',alipay:'支付宝支付',alipay_sandbox:'支付宝沙箱（未扣款）',wechat_test:'微信测试支付（未扣款）'} as Record<string,string>)[row.payment_method]||'支付已确认' : undefined,
+    validity: row.entitlement_revoked ? '此订单权益已撤销' : row.entitlement_ends_at ? '有效至 '+new Date(row.entitlement_ends_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : row.product_snapshot ? (row.product==='trial'?`付款成功后最多 ${row.product_snapshot.trialHours} 小时，最晚至 `:'有效至 ')+new Date(row.product_snapshot.endsAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : '至订单对应考期结束', closeReason: row.close_reason,
   }))
   persistOrders(orders)
   return orders

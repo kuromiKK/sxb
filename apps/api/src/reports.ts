@@ -4,9 +4,9 @@ import { fail, id } from './security.ts'
 
 export const shanghaiDay = (date = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
 export async function initLearningTables() {
-  await db.query(`CREATE TABLE IF NOT EXISTS learning_events (id text PRIMARY KEY,user_id text NOT NULL REFERENCES users(id),exam_id text NOT NULL REFERENCES exams(id),kind text NOT NULL,source_id text NOT NULL,minutes integer NOT NULL DEFAULT 0 CHECK(minutes BETWEEN 0 AND 240),created_at timestamptz NOT NULL DEFAULT now())`)
+  await db.query(`CREATE TABLE IF NOT EXISTS learning_events (id text PRIMARY KEY,user_id text NOT NULL REFERENCES users(id),exam_id text NOT NULL REFERENCES knowledge_nodes(id),kind text NOT NULL,source_id text NOT NULL,minutes integer NOT NULL DEFAULT 0 CHECK(minutes BETWEEN 0 AND 240),created_at timestamptz NOT NULL DEFAULT now())`)
   await db.query(`CREATE INDEX IF NOT EXISTS events_user_date ON learning_events(user_id,exam_id,created_at)`)
-  await db.query(`CREATE TABLE IF NOT EXISTS monthly_reports (user_id text NOT NULL REFERENCES users(id),exam_id text NOT NULL REFERENCES exams(id),month text NOT NULL,payload jsonb NOT NULL,generated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,exam_id,month))`)
+  await db.query(`CREATE TABLE IF NOT EXISTS monthly_reports (user_id text NOT NULL REFERENCES users(id),exam_id text NOT NULL REFERENCES knowledge_nodes(id),month text NOT NULL,payload jsonb NOT NULL,generated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,exam_id,month))`)
 }
 export async function recordLearning(userId: string, examId: string, kind: string, sourceId: string, minutes = 0) {
   await db.query('INSERT INTO learning_events(id,user_id,exam_id,kind,source_id,minutes) VALUES($1,$2,$3,$4,$5,$6)', [id(),userId,examId,kind,sourceId,minutes])

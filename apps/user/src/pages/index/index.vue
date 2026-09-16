@@ -9,6 +9,8 @@ import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/uti
 import { createRightsOrder, loadOrders, persistOrders, type PaymentMethod } from '@/utils/orders'
 import { api, account, learningPlan, refreshLearningPlan, refreshRights, showApiError, token, selectedExamId } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
+import {siteSettings,refreshSiteSettings} from '@/services/site-settings'
+onShow(()=>{void refreshSiteSettings().catch(()=>{})})
 
 const { state, exam, todayRemaining, refreshPlanState, requireLogin, login, logout } = useAppStore()
 const promoExpanded = ref(true)
@@ -20,12 +22,7 @@ type HomeReportCard = Pick<MonthlyReport, 'id' | 'year' | 'month' | 'status'> & 
 }
 const selectedReport = ref<HomeReportCard | null>(null)
 const homeReportSlide = ref(0)
-type StudyPlan = { name: string; icon: string; price: number; color: string; includedCount: number; intro: string }
 const uni = (globalThis as any).uni
-const purchaseVisible = ref(false)
-const purchaseProcessing = ref(false)
-const selectedPlan = ref<StudyPlan>()
-const selectedPurchaseMethod = ref<PaymentMethod>('wechat')
 const planProgress = computed(() => state.todayTarget ? Math.min(Math.round(state.todayDone / state.todayTarget * 100), 100) : 0)
 const masteryRingStyle = computed(() => ({ background: `conic-gradient(#6949df ${Math.max(exam.value.mastery, 4)}%, #e7e9f3 0)` }))
 const isFlagship = computed(() => account.permissions.reports === true)
@@ -65,44 +62,12 @@ const openExamSwitch = () => uni.navigateTo({ url: '/pages/exam-switch/index', a
 const openSearch = () => uni.navigateTo({ url: '/pages/search/index' })
 const openMessages = () => uni.navigateTo({ url: '/pages/profile-center/index?mode=announcements' })
 const hasUnreadMessages = computed(() => uni.getStorageSync('sxb-unread-announcements') !== false)
-const openTrial = () => openPlanPayment({ name: 'VIP 24小时体验', icon: 'clock', price: 1, color: 'trial', includedCount: 7, intro: '' })
-const paymentMethodLabel = (method: PaymentMethod) => method === 'alipay' ? '支付宝支付' : '微信支付'
-const openPlanPayment = (plan: StudyPlan) => {
-  if (!requireLogin('/pages/index/index')) return
-  if (plan.color === 'basic') return showMessage('免费版无需购买')
-  selectedPlan.value = account.level === 'vip' && !account.trial && plan.color === 'flagship' ? { ...plan, name: 'VIP 升级 SVIP', price: 200 } : plan
-  selectedPurchaseMethod.value = 'wechat'
-  purchaseProcessing.value = false
-  purchaseVisible.value = true
-}
-const closePlanPayment = () => {
-  if (purchaseProcessing.value) return
-  purchaseVisible.value = false
-  selectedPlan.value = undefined
-}
-const confirmPlanPayment = async () => {
-  const plan = selectedPlan.value
-  if (!plan || purchaseProcessing.value) return
-  purchaseProcessing.value = true
-  try {
-    if (selectedPurchaseMethod.value !== 'wechat') throw new Error('首版仅支持微信测试支付')
-    const product = plan.color === 'trial' ? 'trial' : plan.price === 200 ? 'upgrade' : plan.color === 'flagship' ? 'svip' : 'vip'
-    const result = await api('/orders', 'POST', { examId: exam.value.id, product })
-    if (result.existing) {
-      await refreshOrders()
-      purchaseVisible.value = false
-      uni.navigateTo({ url: '/pages/profile-center/index?mode=orders' })
-      return showMessage('已有待支付订单，请核对后继续支付')
-    }
-    await api(`/orders/${result.order.id}/test-payment`, 'POST', { outcome: 'success' })
-    await refreshRights()
-    await refreshOrders()
-    await refreshMonthlyReports()
-    purchaseVisible.value = false
-    selectedPlan.value = undefined
-    showMessage('测试支付成功，未扣款，权益已生效')
-  } catch (error) { showApiError(error) } finally { purchaseProcessing.value = false }
-}
+const openTrial = () => uni.navigateTo({url:'/pages/products/index?type=trial'})
+const openPlanPayment = (plan:any) => uni.navigateTo({url:'/pages/products/index?id='+encodeURIComponent(plan.id)})
+const products=ref<any[]>([])
+const trialProduct=computed(()=>products.value.find(p=>p.type==='trial'))
+const plans=computed(()=>products.value.filter(p=>p.type==='entitlement'))
+async function loadProducts(){const examId=selectedExamId();try{const list=await api<any[]>('/products?examId='+encodeURIComponent(examId));if(examId===selectedExamId())products.value=list}catch(e){products.value=[];showApiError(e)}}
 const reportMonthName = (month: number) => ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][month - 1]
 const reportGenerationLabel = (item: Pick<MonthlyReport, 'month'>) => `${item.month === 12 ? 1 : item.month + 1}月1日生成`
 const reportCalendar = (item: MonthlyReport) => {
@@ -148,7 +113,7 @@ const applyHomeDebug = (key: string) => {
   }
   rightsLevel.value = rightsMap[key] || 'none'
   uni.setStorageSync('sxb-demo-rights', rightsLevel.value)
-  showMessage(`已切换为${key === 'unpaid' ? '未付款' : key === 'trial' ? '1元试听' : key === 'basic' ? '免费版' : key === 'pro' ? 'VIP' : 'SVIP'}用户`)
+  showMessage(`已切换为${key === 'unpaid' ? '未付款' : key === 'trial' ? '1元试听' : key === 'basic' ? '普通会员' : key === 'pro' ? 'VIP' : 'SVIP'}用户`)
   */
 }
 const openFlagshipRights = () => {
@@ -156,6 +121,7 @@ const openFlagshipRights = () => {
   uni.navigateTo({ url: '/pages/profile-center/index?mode=rights' })
 }
 onShow(() => {
+  void loadProducts()
   void loadContentNotices()
   state.selectedTab = 0
   void refreshRights().then(refreshMonthlyReports).catch(showApiError)
@@ -165,7 +131,7 @@ onShow(() => {
 
 const stages = [
   { round: '01', title: '先认识考试，再看清知识结构', summary: '知道考什么、怎么考，复习才不会走弯路。', tone: 'blue', actions: [
-    { no: '1.1', name: '了解考试', icon: 'info', meta: '约5分钟', description: '查看科目、题型、报考要求和重要时间节点。', route: '/pages/exam-notice-detail/index?id=exam-guide', message: '' },
+    { no: '1.1', name: '了解考试', icon: 'info', meta: '约5分钟', description: '查看科目、题型、报考要求和重要时间节点。', route: '/pages/exam-notice-detail/index', message: '' },
     { no: '1.2', name: '了解章节', icon: 'map', meta: '全科结构', description: '先看全科章节结构，明确需要学习的知识范围。', route: '/pages/knowledge/index?mode=all', message: '' },
   ] },
   { round: '02', title: '理解重点，边学边练', summary: '从知识图谱建立框架，用精讲课和题目完成理解。', tone: 'purple', actions: [
@@ -184,24 +150,18 @@ const stages = [
   ] },
 ]
 
-const benefitCatalog = ['全科题库与历年真题', '知识图谱与全部章节', '精讲课程与章节讲义', '错题本与收藏夹', '学习笔记与重点标记', '智能刷题与组卷', 'AI挖空背诵', '阶段学习报告', '题库持续更新', '专属学习服务']
-const plans: StudyPlan[] = [
-  { name: '免费版', icon: 'compose', price: 0, color: 'basic', includedCount: 2, intro: '适合先用题库建立备考节奏' },
-  { name: 'VIP', icon: 'star', price: 599, color: 'pro', includedCount: 7, intro: '所选考试专属 · 有效至本考期结束' },
-  { name: 'SVIP', icon: 'medal', price: 799, color: 'flagship', includedCount: 10, intro: '所选考试专属 · 考期结束后转为VIP' },
-]
 </script>
 
 <template>
   <view class="home page safe-top">
     <view class="top-actions">
       <button class="exam-entry" @tap="openExamSwitch"><view class="exam-entry-icon"><uni-icons type="calendar" size="17" color="#3569e8" /></view><view class="exam-entry-copy"><view><text>{{ exam.name }}</text><uni-icons type="arrowdown" size="14" color="#3569e8" /></view></view></button>
-      <button class="search-button" aria-label="搜索" @tap="openSearch"><uni-icons type="search" size="23" color="#4c54b5" /></button><button class="message-button" aria-label="消息中心" @tap="openMessages"><uni-icons type="notification" size="22" color="#4c54b5" /><view v-if="hasUnreadMessages" class="message-dot"></view></button>
+      <button v-if="siteSettings.search.enabled" class="search-button" aria-label="搜索" @tap="openSearch"><uni-icons type="search" size="23" color="#4c54b5" /></button><button class="message-button" aria-label="消息中心" @tap="openMessages"><uni-icons type="notification" size="22" color="#4c54b5" /><view v-if="hasUnreadMessages" class="message-dot"></view></button>
     </view>
 
     <view class="overview"><view class="overview-copy"><text class="overview-title">距离考试还有 <text>{{ exam.daysLeft }}</text> 天</text><text class="overview-sub">按计划完成每一次练习，上岸会更有把握</text></view><view class="mastery"><view class="mastery-ring" :style="masteryRingStyle"><view class="mastery-center"><text>{{ exam.mastery }}%</text></view></view><text>掌握程度</text></view></view>
 
-    <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">上行宝 · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button class="trial-btn" @tap="openTrial"><text class="trial-price">¥1</text><text>体验当前考试VIP，限24小时</text><uni-icons type="arrowright" size="18" color="#fff" /></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text><text class="trial-price">¥1</text> 体验VIP内容 · 24小时</text><text>展开查看 ›</text></view></view>
+    <view class="promo" :class="{ collapsed: !promoExpanded }"><view class="promo-head"><view><text class="promo-kicker">{{siteSettings.basic.name}} · 全链路备考</text><text class="promo-title">把知识学懂，把每一道题做会</text></view><button class="collapse-btn" @tap="promoExpanded = !promoExpanded">{{ promoExpanded ? '收起' : '展开' }}</button></view><view v-if="promoExpanded" class="promo-content"><text class="promo-desc">从知识图谱到精讲课程，从智能刷题到考前背诵，一套清晰路径陪你完成整场考试。</text><view class="promo-stats"><view><text>{{ exam.totalKnowledge }}</text><text>知识点</text></view><view><text>{{ exam.totalQuestions }}</text><text>精选题目</text></view><view><text>{{ exam.totalCourses }}</text><text>精讲课程</text></view></view><view class="promo-tags"><text>专业知识图谱</text><text>四阶段复习</text><text>错题专项巩固</text></view><button v-if="trialProduct" class="trial-btn" @tap="openTrial"><text class="trial-price">¥{{(trialProduct.priceCents/100).toFixed(2)}}</text><text>{{trialProduct.title}} · {{trialProduct.trialHours}}小时</text><uni-icons type="arrowright" size="18" color="#fff"/></button></view><view v-else class="promo-mini" @tap="promoExpanded = true"><text>{{trialProduct?trialProduct.title:'查看备考服务'}}</text><text>展开查看 ›</text></view></view>
 
     <view class="section-head"><view><text class="section-title">我的学习计划</text><text class="section-subtitle">今天多完成一点，考前就多一分从容</text></view><button class="plan-edit" @tap="gated('/pages/learning-plan/index')">修改计划 <uni-icons type="compose" size="14" color="#3569e8" /></button></view>
     <view class="plan-board"><view class="plan-main"><view class="remaining"><text>{{ todayRemaining }}</text><text>题</text><text>今日还需完成</text></view><view class="days-left"><text>{{ exam.daysLeft }}</text><text>距离考试天数</text></view></view><view class="progress-track"><view :style="{ width: `${planProgress}%` }"></view></view><view class="plan-foot"><text>今日已完成 {{ state.todayDone }} / {{ state.todayTarget }} 题</text><text>{{ learningPlan.data?.progress.isRest ? '今天休息' : todayRemaining === 0 ? '今日目标已完成' : '计划进行中' }}</text></view><text class="plan-note">按剩余题量和学习日安排，可随时修改科目、章、每日题量与休息日。</text></view>
@@ -241,24 +201,12 @@ const plans: StudyPlan[] = [
       <button role="button" tabindex="0" aria-label="下一个月报" :aria-disabled="homeReportSlide >= visibleHomeReports.length - 1" :disabled="homeReportSlide >= visibleHomeReports.length - 1" @keydown.enter="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++" @keydown.space.prevent="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++" @tap="homeReportSlide < visibleHomeReports.length - 1 && homeReportSlide++"><uni-icons type="forward" size="19" color="#536987" /></button>
     </view>
 
-    <view class="section-head"><view><text class="section-title">选择你的学习版本</text><text class="section-subtitle">权益可按备考阶段选择，SVIP包含全部服务</text></view></view>
-    <view class="price-list"><view v-for="plan in plans" :key="plan.name" class="price-card" :class="plan.color"><view class="price-pattern"></view><text v-if="plan.color === 'flagship'" class="recommended">推荐版本</text><view class="plan-heading"><view class="plan-icon"><uni-icons :type="plan.icon" size="22" :color="plan.color === 'flagship' ? '#f2b04f' : plan.color === 'pro' ? '#6949df' : '#3569e8'" /></view><view><text class="plan-name">{{ plan.name }}</text><text class="plan-intro">{{ plan.intro }}</text></view></view><view class="price"><text>¥</text><text>{{ plan.price }}</text><text class="original">¥{{ plan.price * 2 }}</text></view><view class="benefits"><view v-for="(benefit, index) in benefitCatalog" :key="benefit" class="benefit-row" :class="{ unavailable: index >= plan.includedCount }"><view class="benefit-check"><uni-icons v-if="index < plan.includedCount" type="checkmarkempty" size="14" :color="plan.color === 'flagship' ? '#f2b04f' : '#fff'" /><uni-icons v-else type="closeempty" size="13" color="#a9b3c2" /></view><text>{{ benefit }}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">选择{{ plan.name }}<uni-icons type="arrowright" size="15" :color="plan.color === 'flagship' ? '#1d2d43' : '#fff'" /></button></view></view>
-    <view v-if="purchaseVisible && selectedPlan" class="home-payment-mask" @tap="closePlanPayment">
-      <view class="home-payment-dialog" @tap.stop>
-        <view class="home-payment-top"><view class="home-payment-icon"><uni-icons type="wallet" size="28" color="#fff" /></view><view><text>订单支付</text><text>选择支付方式并完成付款</text></view><button :disabled="purchaseProcessing" @tap="closePlanPayment"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
-        <view class="home-payment-product"><view><text>上行宝{{ selectedPlan.name }}</text><text>{{ selectedPlan.color === 'trial' ? '支付后24小时' : '当前考试权益，有效至本考期结束' }}</text></view><text>¥{{ selectedPlan.price }}</text></view>
-        <view class="home-payment-methods"><text>选择支付方式</text><view>
-          <view :class="{ active: selectedPurchaseMethod === 'wechat' }" @tap="selectedPurchaseMethod = 'wechat'"><view class="home-pay-brand wechat">微</view><view><text>微信支付</text><text>使用微信安全支付</text></view><uni-icons :type="selectedPurchaseMethod === 'wechat' ? 'checkbox-filled' : 'circle'" size="21" :color="selectedPurchaseMethod === 'wechat' ? '#19a974' : '#b2bbc7'" /></view>
-          <!-- #ifdef H5 -->
-          <!-- #endif -->
-        </view></view>
-        <view v-if="purchaseProcessing" class="home-payment-processing"><view></view><text>正在发起{{ paymentMethodLabel(selectedPurchaseMethod) }}</text></view>
-        <view class="home-payment-actions"><button :disabled="purchaseProcessing" @tap="closePlanPayment">暂不支付</button><button :disabled="purchaseProcessing" @tap="confirmPlanPayment">{{ purchaseProcessing ? '支付处理中' : `${paymentMethodLabel(selectedPurchaseMethod)} ¥${selectedPlan.price}` }}</button></view>
-      </view>
-    </view>
+    <view class="section-head"><view><text class="section-title">本考期权益套餐</text><text class="section-subtitle">选择适合你的权益，至本考期结束</text></view></view>
+    <view v-if="!plans.length" class="promo-desc">当前考试暂无在售套餐</view>
+    <view class="price-list"><view v-for="plan in plans" :key="plan.id" class="price-card" :class="plan.level==='svip'?'flagship':'pro'"><view class="plan-heading"><view><text class="plan-name">{{plan.title}}</text><text class="plan-intro">{{plan.intro}}</text></view></view><view class="price"><text>¥</text><text>{{(plan.priceCents/100).toFixed(2)}}</text><text v-if="plan.originalPriceCents" class="original">¥{{(plan.originalPriceCents/100).toFixed(2)}}</text></view><view class="benefits"><view v-for="benefit in plan.permissions" :key="benefit" class="benefit-row"><view class="benefit-check"><uni-icons type="checkmarkempty" size="14" color="#fff"/></view><text>{{benefit}}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">查看套餐详情<uni-icons type="arrowright" size="15" color="#fff"/></button></view></view>
     <view v-if="reportAccessVisible" class="report-access-mask" @tap="reportAccessVisible = false"><view class="report-access-modal" @tap.stop><view class="report-access-mark"><uni-icons type="medal" size="27" color="#e4c36f" /></view><text class="report-access-title">学习报告为SVIP专享</text><text class="report-access-copy">升级SVIP后，可以查看每月学习日历、刷题趋势、知识点掌握变化和学习建议。</text><view class="report-access-preview"><text>{{ selectedReport?.month || '本' }}月学习报告</text><text>完整记录每个月的成长</text></view><button class="report-access-primary" @tap="openFlagshipRights">查看SVIP权益</button><button class="report-access-cancel" @tap="reportAccessVisible = false">暂不升级</button></view></view>
     <AppTabBar active="home" />
-    <DebugMenu page="首页账号权限" :options="[{ key:'logged-out',label:'未登录用户' },{ key:'unpaid',label:'已登录未付款用户' },{ key:'trial',label:'1元试听用户' },{ key:'basic',label:'免费版用户' },{ key:'pro',label:'VIP用户' },{ key:'flagship',label:'SVIP用户' }]" @select="applyHomeDebug" />
+    <DebugMenu page="首页账号权限" :options="[{ key:'logged-out',label:'未登录用户' },{ key:'unpaid',label:'已登录未付款用户' },{ key:'trial',label:'1元试听用户' },{ key:'basic',label:'普通会员' },{ key:'pro',label:'VIP用户' },{ key:'flagship',label:'SVIP用户' }]" @select="applyHomeDebug" />
   </view>
 </template>
 

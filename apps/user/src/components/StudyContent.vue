@@ -2,17 +2,30 @@
 import { ref, watch } from 'vue'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { api, token } from '@/services/api'
-const props=defineProps<{blocks:any[]}>()
+import VerificationGate from './VerificationGate.vue'
+import {verifiedDownload,openDownload} from '@/utils/verified-download'
+const verification=ref<InstanceType<typeof VerificationGate>>()
+const props=defineProps<{blocks:any[];preview?:boolean}>()
 const urls=ref<Record<string,string>>({}),busy=ref(''),errors=ref<Record<string,string>>({})
 watch(()=>props.blocks,()=>{urls.value={};errors.value={}})
 function membership(){const redirect=location.hash.slice(1)||'/pages/knowledge/index';uni.navigateTo({url:token()?'/pages/profile-center/index?mode=rights':`/pages/login/index?redirect=${encodeURIComponent(redirect)}`})}
 async function open(block:any){
+  if(props.preview){
+    if(!block.url?.startsWith('/api/content-preview/')){errors.value[block.assetId]='该资源暂时无法预览';return}
+    if(block.kind==='handout'){
+      // #ifdef H5
+      const a=document.createElement('a');a.href=block.url;a.target='_blank';a.rel='noreferrer';a.click()
+      // #endif
+    }else urls.value[block.assetId]=block.url
+    return
+  }
   if(block.locked){uni.showModal({title:'当前考试会员专属',content:'音视频和讲义需具备对应考试的会员权限。',confirmText:token()?'查看权益':'去登录',success:r=>{if(r.confirm)membership()}});return}
   busy.value=block.assetId;delete errors.value[block.assetId]
-  try{const data=await api(`/media/${block.assetId}/ticket`,'POST',{});if(block.kind==='handout'){const a=document.createElement('a');a.href=data.url;a.target='_blank';a.rel='noreferrer';a.click()}else urls.value[block.assetId]=data.url}catch(e:any){errors.value[block.assetId]=e.message}finally{busy.value=''}
+  try{if(block.kind==='handout'){const data=await verifiedDownload(verification.value!,`/media/${block.assetId}/ticket`);openDownload(data.url)}else{const data=await api(`/media/${block.assetId}/ticket`,'POST',{});urls.value[block.assetId]=data.url}}catch(e:any){errors.value[block.assetId]=e.message}finally{busy.value=''}
 }
 </script>
 <template><view class="study-content">
+  <VerificationGate ref="verification"/>
   <view v-for="(block,index) in blocks" :key="`${index}-${block.assetId||'text'}`" class="content-block">
     <rich-text v-if="block.kind==='text'" class="study-prose" :nodes="block.html" />
     <image v-else-if="block.kind==='image'&&block.url" class="study-image" :src="block.url" mode="widthFix" :alt="block.title" @error="errors[block.assetId]='图片加载失败，请重新打开页面'" />

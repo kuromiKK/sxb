@@ -51,11 +51,11 @@ test('rich content, exam permissions and protected media',async t=>{
       const range=await fetch(base.replace('/api','')+ticket.data.url,{headers:{Range:'bytes=0-7'}});assert.equal(range.status,206);assert.equal((await range.arrayBuffer()).byteLength,8)
       assert.equal((await fetch(base+'/media/image/'+imageId)).status,404)
     })
-    await t.test('single knowledge document, explicit course flag, no protected URL leakage',async()=>{
+    await t.test('single knowledge document, derived course flag, no protected URL leakage',async()=>{
       audioId=await external('audio',point)
       const row=await current(point);row.payload={...row.payload,isKnowledgeCourse:false,document:{type:'doc',content:[paragraph,resource(imageId,'image'),resource(audioId,'audio')]}}
       assert.equal((await save(row)).status,200)
-      const publicResult=await req(`/knowledge-content/${point}`,'GET',undefined,'');assert.equal(publicResult.status,200);assert.equal(publicResult.data.isKnowledgeCourse,false)
+      const publicResult=await req(`/knowledge-content/${point}`,'GET',undefined,'');assert.equal(publicResult.status,200);assert.equal(publicResult.data.isKnowledgeCourse,true)
       assert.equal(publicResult.data.blocks.find((b:any)=>b.kind==='audio').locked,true)
       assert(!JSON.stringify(publicResult.data).includes('https://example.com'))
       const catalog=await req('/catalog/'+exam);assert(!JSON.stringify(catalog.data).includes('assetId'))

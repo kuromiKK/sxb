@@ -1,35 +1,47 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
+import {onShow} from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
-import { searchResults } from '@/mock/data'
-import { useAppStore } from '@/store/app'
+import {api,selectedExamId} from '@/services/api'
+import {siteSettings,refreshSiteSettings} from '@/services/site-settings'
+import {refreshCatalog} from '@/services/catalog'
+import {learningReady} from '@/utils/learning-bootstrap'
 import { backOrFallback } from '@/utils/navigation'
 
-const { requireLogin } = useAppStore()
 const keyword = ref('')
-const activeTab = ref('全部')
-const tabs = ['全部', '精讲课', '知识点', '文章']
-const results = computed(() => searchResults.filter(item => (!keyword.value || `${item.title}${item.description}${item.keyword}`.includes(keyword.value)) && (activeTab.value === '全部' || item.typeName === activeTab.value)))
-const search = () => { if (!keyword.value.trim()) uni.showToast({ title: '请输入搜索内容', icon: 'none' }) }
+const activeTab=ref(''),results=ref<any[]>([]),total=ref(0),page=ref(1),busy=ref(false),searched=ref(false),error=ref(''),currentExam=ref(selectedExamId())
+const typeNames:Record<string,string>={knowledge:'知识点',course:'精品课',faq:'常见问题'}
+const tabs=computed(()=>[{value:'',label:'全部'},...siteSettings.search.types.map(value=>({value,label:typeNames[value]}))])
+const examName=ref(String(uni.getStorageSync('sxb-current-exam')?.name||'当前考试'))
+const historyKey=()=>`sxb-search-history-${currentExam.value}`
+const history=ref<string[]>([])
+let revision=0,timer:ReturnType<typeof setTimeout>|undefined
+function loadHistory(){const stored=uni.getStorageSync(historyKey());history.value=Array.isArray(stored)?stored.filter((v:any)=>typeof v==='string').slice(0,10):[]}
+async function search(more=false){clearTimeout(timer);const rev=++revision,q=keyword.value.trim(),examId=currentExam.value;error.value='';if(!more){results.value=[];total.value=0;page.value=1}if(!q){searched.value=false;busy.value=false;return}searched.value=true;busy.value=true;const targetPage=more?page.value+1:1
+ try{const data=await api('/search?'+new URLSearchParams({examId,q,type:activeTab.value,page:String(targetPage)}));if(rev!==revision||examId!==currentExam.value)return;if(data.disabled){siteSettings.search.enabled=false;return}results.value=more?[...results.value,...data.items]:data.items;total.value=data.total;page.value=targetPage;history.value=[q,...history.value.filter(v=>v!==q)].slice(0,10);uni.setStorageSync(historyKey(),history.value)}catch(e:any){if(rev===revision)error.value=e.message}finally{if(rev===revision)busy.value=false}}
+function clearHistory(){history.value=[];uni.removeStorageSync(historyKey())}
+function choose(value:string){activeTab.value=value;void search()}
+function fromHistory(value:string){keyword.value=value;void search()}
+watch(keyword,()=>{revision++;clearTimeout(timer);busy.value=false;error.value='';results.value=[];searched.value=false;total.value=0},{flush:'sync'})
+onShow(async()=>{const exam=selectedExamId();if(currentExam.value!==exam){currentExam.value=exam;keyword.value='';results.value=[];revision++}loadHistory();try{await refreshSiteSettings();if(activeTab.value&&!siteSettings.search.types.includes(activeTab.value))activeTab.value='';await learningReady;if(currentExam.value===exam)examName.value=String(uni.getStorageSync('sxb-current-exam')?.name||'当前考试')}catch(e:any){error.value=e.message}})
+onUnmounted(()=>{revision++;clearTimeout(timer)})
 const goBack = () => backOrFallback('/pages/index/index')
-const open = (item: typeof searchResults[number]) => {
-  if (item.type === 'article') {
-    uni.navigateTo({ url: `/pages/exam-notice-detail/index?id=${encodeURIComponent(item.targetId)}` })
-    return
-  }
-  const url = item.type === 'course'
-    ? `/pages/course-detail/index?id=${encodeURIComponent(item.targetId)}`
-    : `/pages/knowledge-detail/index?id=${encodeURIComponent(item.targetId)}`
-  if (requireLogin(url)) uni.navigateTo({ url })
-}
+async function open(item:any){if(busy.value)return;busy.value=true;try{if(item.kind!=='faq')await refreshCatalog();uni.navigateTo({url:item.kind==='faq'?'/pages/profile-center/index?mode=faq&articleId='+encodeURIComponent(item.id):`/pages/${item.kind==='course'?'course':'knowledge'}-detail/index?id=${encodeURIComponent(item.id)}`})}catch(e:any){error.value=e.message}finally{busy.value=false}}
 </script>
 
 <template>
-  <view class="search-page safe-top"><view class="search-head"><view class="back" @tap="goBack"><uni-icons type="back" size="21" color="#44536a" /></view><view class="search-input"><uni-icons type="search" size="20" color="#6f7f96" /><input v-model="keyword" confirm-type="search" focus placeholder="搜索课程、知识点、文章" @confirm="search" /><text v-if="keyword" @tap="keyword = ''">×</text></view></view><view class="tabs"><text v-for="tab in tabs" :key="tab" :class="{ active: activeTab === tab }" @tap="activeTab = tab">{{ tab }}</text></view><view class="results"><view v-for="item in results" :key="item.id" class="result" @tap="open(item)"><view class="result-icon" :class="item.type">{{ item.type === 'course' ? '课' : item.type === 'knowledge' ? '点' : '文' }}</view><view class="result-copy"><view class="result-title"><text>{{ item.title }}</text><text class="result-tag" :class="`${item.type}-tag`">{{ item.typeName }}</text></view><text class="result-desc">{{ item.description }}</text></view><text class="arrow">›</text></view><view v-if="!results.length" class="empty">没有找到相关内容，换个关键词试试</view></view></view>
+ <view class="search-page safe-top"><view class="search-head"><button class="back" aria-label="返回" @tap="goBack"><uni-icons type="back" size="21" color="#44536a"/></button><view class="search-input"><input v-model="keyword" aria-label="搜索内容" maxlength="100" confirm-type="search" :placeholder="siteSettings.search.placeholder" @confirm="search()"/><button v-if="keyword" class="clear-search" aria-label="清空搜索" @tap="keyword=''">×</button></view><button class="submit-search" :disabled="busy||!siteSettings.search.enabled" @tap="search()">搜索</button></view>
+ <text class="search-scope">{{examName}} · 仅搜索本考试及适用的常见问题</text>
+ <view v-if="!siteSettings.search.enabled" class="search-state">搜索功能暂未开放</view>
+ <template v-else><view class="tabs"><button v-for="tab in tabs" :key="tab.value" :class="{active:activeTab===tab.value}" @tap="choose(tab.value)">{{tab.label}}</button></view>
+ <view v-if="error" class="search-state" role="alert"><text>{{error}}</text><button @tap="search()">重试</button></view>
+ <view v-else-if="!searched" class="search-history"><view><text>最近搜索</text><button v-if="history.length" @tap="clearHistory">清空</button></view><view class="history-chips"><button v-for="h in history" :key="h" @tap="fromHistory(h)">{{h}}</button></view><text v-if="!history.length" class="search-hint">输入关键词，查找知识点、精品课或常见问题</text></view>
+ <template v-else><text class="search-count">{{busy&&!results.length?'正在搜索…':`共 ${total} 条结果`}}</text><view class="results"><button v-for="item in results" :key="item.id" class="result" @tap="open(item)"><view class="result-icon" :class="item.kind">{{item.kind==='course'?'课':item.kind==='knowledge'?'点':'文'}}</view><view class="result-copy"><view class="result-title"><text>{{item.title}}</text><text class="result-tag" :class="`${item.kind}-tag`">{{typeNames[item.kind]}}</text></view><text class="result-desc">{{item.path.slice(0,item.kind==='faq'?undefined:-1).join(' › ')}}</text></view><text class="arrow">›</text></button><view v-if="!busy&&!results.length" class="empty">没有找到相关内容，换个关键词试试</view></view><button v-if="results.length<total" class="load-more" :loading="busy" :disabled="busy" @tap="search(true)">加载更多</button></template></template></view>
 </template>
 
 <style scoped lang="scss">
 .search-page{min-height:100vh;background:#f5f7fb;padding:36rpx 32rpx;}.search-head{display:flex;align-items:center;gap:14rpx;}.back{width:54rpx;height:54rpx;display:flex;align-items:center;justify-content:center;flex:none;background:#e9efff;border-radius:14rpx;}.search-input{height:76rpx;flex:1;display:flex;align-items:center;gap:12rpx;padding:0 18rpx;background:#fff;border:1rpx solid #e1e7f1;border-radius:13rpx;box-shadow:0 6rpx 18rpx rgba(40,58,91,.04);}.search-input input{height:76rpx;flex:1;color:#25344b;font-size: var(--sxb-text-body);}.search-input>text{font-size: var(--sxb-text-heading);color:#96a1aa;}.tabs{display:flex;gap:32rpx;border-bottom:1rpx solid #e4e9f1;margin-top:27rpx;}.tabs text{padding:0 0 17rpx;color:#8c98a5;font-size: var(--sxb-text-body);position:relative;}.tabs text.active{color:#3569e8;font-weight:700;}.tabs text.active:after{content:"";position:absolute;height:5rpx;background:linear-gradient(90deg,#3569e8,#7655df);bottom:-1rpx;left:4rpx;right:4rpx;border-radius:5rpx;}.results{display:flex;flex-direction:column;margin-top:8rpx;background:#fff;border:1rpx solid #e3e8f1;border-radius:12rpx;padding:0 18rpx;}.result{display:flex;align-items:center;gap:16rpx;padding:24rpx 0;border-bottom:1rpx solid #edf0f2;}.result:last-child{border-bottom:0;}.result-icon{width:58rpx;height:58rpx;border-radius:14rpx;display:flex;align-items:center;justify-content:center;font-size: var(--sxb-text-body);font-weight:700;flex:none;}.course{background:#e9efff;color:#3569e8;}.knowledge{background:#f0ecff;color:#7655df;}.article{background:#fff0e5;color:#d9782f;}.result-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:8rpx;}.result-title{display:flex;align-items:center;gap:10rpx;}.result-title>text:first-child{font-size: var(--sxb-text-title);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.result-tag{font-size: var(--sxb-text-small);padding:4rpx 8rpx;border-radius:5rpx;flex:none;}.course-tag{color:#3569e8;background:#e9efff;}.knowledge-tag{color:#7655df;background:#f0ecff;}.article-tag{color:#d9782f;background:#fff0e5;}.result-desc{font-size: var(--sxb-text-body);color:#8995a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.arrow{font-size: var(--sxb-text-page);color:#a1abb4;}.empty{text-align:center;color:#9ca6ae;font-size: var(--sxb-text-item);padding:110rpx 0;background:transparent;border:0;}
 
 @import '@/styles/content-system.scss';
+.search-page{padding:24px 18px;box-sizing:border-box;max-width:430px;margin:auto}.search-head{gap:8px}.search-input{height:44px;padding:0 12px;min-width:0;box-sizing:border-box}.search-input input{height:44px;min-width:0;font-size:14px}.search-head .back{width:38px;height:44px;margin:0;padding:0}.submit-search{font-size:14px;color:#3569e8;background:transparent;padding:8px 0;margin:0;flex:none;min-height:44px;line-height:28px}.clear-search{background:none;margin:0;padding:0 2px;font-size:22px;color:#748198;line-height:36px}.search-page button:after{border:0}.search-scope{display:block;font-size:12px;line-height:1.7;color:#687991;margin:16px 0}.tabs{gap:0;justify-content:space-between;margin-top:18px}.tabs button{margin:0;padding:10px 0;min-height:44px;background:none;font-size:14px;color:#687991;border-radius:0;line-height:24px}.tabs button.active{color:#3569e8;font-weight:700;border-bottom:2px solid #3569e8}.search-count{display:block;font-size:12px;color:#687991;margin:18px 0 10px}.results{padding:0 14px}.result{width:100%;text-align:left;background:white;margin:0;line-height:1.6;border-radius:0;padding:20px 0;gap:10px}.result-title{flex-wrap:wrap;gap:6px}.result-title>text:first-child{font-size:15px;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}.result-tag{font-size:11px;padding:2px 5px}.result-desc{font-size:12px;line-height:1.7;white-space:normal;color:#65768c}.faq{background:#fff0e5;color:#b96023}.faq-tag{background:#fff0e5;color:#b96023}.search-state{padding:50px 12px;text-align:center;font-size:14px;line-height:1.8;color:#65768c}.search-state button,.load-more{background:#edf2fb;color:#3569e8;font-size:14px;min-height:44px;margin-top:16px}.search-history{padding:22px 0}.search-history>view:first-child{display:flex;align-items:center;justify-content:space-between;font-size:15px;color:#263b5a}.search-history>view:first-child button{background:none;padding:0;margin:0;font-size:13px;color:#65768c;min-height:44px}.history-chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}.history-chips button{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;padding:8px 12px;background:#eaf0f8;color:#4c607b;font-size:13px;line-height:1.7;border-radius:8px}.search-hint{display:block;color:#687991;font-size:13px;line-height:1.8;margin-top:18px}.empty{font-size:14px;color:#687991;padding:50px 0}
 </style>

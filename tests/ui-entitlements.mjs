@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import {finishLoginConsent} from './helpers/login-consent.mjs'
 import { chromium, expect } from '@playwright/test'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -23,10 +24,9 @@ try {
   await student.locator('.code-button').click()
   const { testCode } = await (await codeResponse).json()
   await student.locator('.field input').nth(1).fill(testCode)
-  await student.locator('.agreement').click()
   const studentResponse = student.waitForResponse(r => r.url().endsWith('/api/auth/phone') && r.status() === 200)
   await student.locator('.login-button').click()
-  const studentSession = await (await studentResponse).json()
+  const studentSession = await finishLoginConsent(student,await (await studentResponse).json())
   await student.locator('.home').waitFor()
   const studentHeaders = { Authorization: `Bearer ${studentSession.token}` }
 
@@ -47,23 +47,23 @@ try {
       }
     }
   }
-  await admin.getByPlaceholder('搜索学员姓名或手机号').fill(phone)
-  await admin.getByRole('button', { name: '搜索学员', exact: true }).click()
+  await admin.getByRole('textbox', { name: '搜索用户', exact: true }).fill(phone)
+  await admin.getByRole('button', { name: '查询', exact: true }).click()
   const row = admin.locator('.el-table__row').filter({ hasText: phone })
   await expect(row).toHaveCount(1)
-  await row.getByRole('button', { name: '权益管理' }).click()
+  await row.getByRole('button', { name: '人工权益管理', exact: true }).click()
   const dialog = admin.getByRole('dialog', { name: '人工权益管理', exact: true })
-  await expect(dialog.locator('.current-level')).toContainText('免费用户')
+  await expect(dialog.locator('.current-level')).toContainText('普通会员')
   await dialog.getByRole('button', { name: '保存权益', exact: true }).click()
   await expect(dialog).toContainText('请填写至少2个字的调整原因')
-  await dialog.getByPlaceholder('例如：验证初级考试SVIP的学习报告权限').fill('【测试】用户管理权益切换')
+  await dialog.getByPlaceholder('请说明赠送、补偿或修正权益的原因').fill('【测试】用户管理权益切换')
   await dialog.locator('.el-radio-button').filter({ hasText: /^VIP$/ }).click()
   await dialog.getByRole('button', { name: '保存权益', exact: true }).click()
   await admin.locator('.el-message-box').getByRole('button', { name: '取消', exact: true }).click()
-  await expect(dialog.locator('.current-level')).toContainText('免费用户')
+  await expect(dialog.locator('.current-level')).toContainText('普通会员')
 
-  for (const [level, label, studentLabel] of [['vip','VIP','VIP'], ['svip','SVIP','SVIP'], ['free','免费用户','免费版']]) {
-    await dialog.getByPlaceholder('例如：验证初级考试SVIP的学习报告权限').fill(`【测试】切换至${label}`)
+  for (const [level, label, studentLabel] of [['vip','VIP','VIP'], ['svip','SVIP','SVIP'], ['free','普通会员','普通会员']]) {
+    await dialog.getByPlaceholder('请说明赠送、补偿或修正权益的原因').fill(`【测试】切换至${label}`)
     await dialog.locator('.el-radio-button').filter({ hasText: new RegExp(`^${label}$`) }).click()
     await dialog.getByRole('button', { name: '保存权益', exact: true }).click()
     const saved = admin.waitForResponse(r => r.url() === endpoint+'/'+examId && r.request().method() === 'PUT' && r.status() === 200)
@@ -96,16 +96,16 @@ try {
     assert(bound.x >= 0 && bound.x+bound.width <= width)
   }
   await admin.setViewportSize({ width: 1440, height: 1100 })
-  await dialog.getByPlaceholder('例如：验证初级考试SVIP的学习报告权限').fill('【测试】恢复原订单权益')
+  await dialog.getByPlaceholder('请说明赠送、补偿或修正权益的原因').fill('【测试】恢复原订单权益')
   await dialog.getByRole('button', { name: '恢复订单权益', exact: true }).click()
   await admin.getByRole('button', { name: '确认生效', exact: true }).click()
-  await expect(dialog.locator('.current-level')).toContainText('订单权益')
+  await expect(dialog.locator('.current-level')).toContainText('默认权益')
   await expect(dialog.getByRole('button', { name: '恢复订单权益', exact: true })).toBeDisabled()
   // A new selection must not display another exam's history or stale form state.
   await dialog.locator('.el-select').first().click()
   await admin.getByRole('option', { name: '中级社会工作师', exact: true }).click()
   await expect(dialog).toContainText('该考试暂无人工调整记录')
-  await expect(dialog.locator('.current-level')).toContainText('免费用户')
+  await expect(dialog.locator('.current-level')).toContainText('普通会员')
   await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(dialog).toBeHidden()
   assert.deepEqual(errors, [])

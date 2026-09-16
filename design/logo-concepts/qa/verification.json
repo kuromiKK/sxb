@@ -1,0 +1,190 @@
+{
+  "svgFiles": [
+    {
+      "file": "01-shangxu\\lockup-black.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "01-shangxu\\lockup-white.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "01-shangxu\\lockup.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "01-shangxu\\mark-black.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "01-shangxu\\mark-white.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "01-shangxu\\mark.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\lockup-black.svg",
+      "paths": 1,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\lockup-white.svg",
+      "paths": 1,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\lockup.svg",
+      "paths": 1,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\mark-black.svg",
+      "paths": 1,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\mark-white.svg",
+      "paths": 1,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "02-xingdai\\mark.svg",
+      "paths": 1,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\lockup-black.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\lockup-white.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\lockup.svg",
+      "paths": 2,
+      "editableText": 1,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\mark-black.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\mark-white.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    },
+    {
+      "file": "03-zhizhan\\mark.svg",
+      "paths": 2,
+      "editableText": 0,
+      "valid": true
+    }
+  ],
+  "allLocalLinksExist": true,
+  "browserVerification": {
+    "widthsWithoutHorizontalOverflow": [
+      375,
+      768,
+      1024,
+      1440
+    ],
+    "actualSvgSizes": [
+      24,
+      48,
+      128
+    ],
+    "font": "Noto Sans SC Bold",
+    "horizontalSvgImagesLoaded": 3,
+    "reverseTheme": "passed",
+    "applicationSwitchToC": "passed",
+    "consoleErrors": 0,
+    "visualReview": [
+      "overview.png",
+      "desktop brand / horizontal combinations",
+      "mobile application preview"
+    ]
+  },
+  "perConceptApplicationPreviews": {
+    "date": "2026-09-17",
+    "conceptCount": 3,
+    "scenesPerConcept": [
+      "APP icon",
+      "website logo",
+      "poster logo"
+    ],
+    "directlyAfterSmallSizeCheck": true,
+    "widthsWithoutHorizontalOrSceneOverflow": [
+      375,
+      768,
+      1024,
+      1440
+    ],
+    "actualSvgSizesPreserved": [
+      24,
+      48,
+      128
+    ],
+    "brandColorsPreservedInReverseMode": true,
+    "visualReview": [
+      "desktop three-column comparison",
+      "375px mobile scenes",
+      "768px tablet scenes"
+    ],
+    "consoleErrorsOrWarnings": 0
+  },
+  "physicalApplicationPreviews": {
+    "date": "2026-09-17",
+    "conceptCount": 3,
+    "newScenesPerConcept": [
+      "business card",
+      "paper cup",
+      "T-shirt",
+      "brochure",
+      "book"
+    ],
+    "totalScenesPerConcept": 8,
+    "editableApplicationSvgs": 15,
+    "xmlParsed": true,
+    "imagesLoaded": 15,
+    "widthsWithoutHorizontalOrSceneOverflow": [
+      375,
+      768,
+      1024,
+      1440
+    ],
+    "consoleErrorsOrWarnings": 0,
+    "visualReview": [
+      "desktop: business card, cup, T-shirt, brochure, book"
+    ],
+    "productionStatus": "design mockups; copy and production specifications pending"
+  }
+}

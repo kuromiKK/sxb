@@ -66,10 +66,10 @@ try {
   const {testCode}=await (await codeResponse).json()
   await expect(user.locator('.login-tip')).toContainText(testCode)
   await user.locator('.field input').nth(1).fill(testCode)
-  await user.locator('.agreement').click()
   const loginResponse=user.waitForResponse(r=>r.url().endsWith('/api/auth/phone')&&r.status()===200)
   await user.locator('.login-button').click()
-  const session=await (await loginResponse).json()
+  const {finishLoginConsent}=await import('./helpers/login-consent.mjs')
+  const session=await finishLoginConsent(user,await (await loginResponse).json())
   await user.locator('.home.page').waitFor()
   const catalog=await (await context.request.get('http://127.0.0.1:5174/api/catalog/junior-social-worker')).json()
   const question=catalog.practiceQuestions[0]

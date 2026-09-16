@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 280" role="img" aria-labelledby="title desc" font-family="Noto Sans SC, Microsoft YaHei, sans-serif">
+<title id="title">上行宝 · 行带 · 书籍应用示意</title>
+<desc id="desc">封面与书脊的矢量设计预览。文字为示意内容，非印刷生产文件。</desc>
+<rect width="400" height="280" fill="#eef1f6"/>
+
+    <g transform="translate(54 40) rotate(-9 76 101)">
+      <rect x="4" y="6" width="149" height="198" fill="#18294412"/>
+      <path d="M0 0H149V193L142 200H0Z" fill="#fff" stroke="#cbd4e2"/>
+      <path d="M0 191H149L142 200H0Z" fill="#e3e8f0"/>
+      <rect width="149" height="58" fill="#3569E8"/>
+      <g transform="translate(13 14) scale(0.10546875)" fill="#fff"><path d="M192 40H104C71 40 48 62 48 94C48 116 59 130 80 142L155 184H64L44 216H156C188 216 212 193 212 162C212 140 200 124 178 112L101 72H172Z"/></g><text x="43" y="33.44" font-size="13.23" fill="#fff" font-weight="700" >上行宝</text>
+      <text x="19" y="97" font-size="22" fill="#182944" font-weight="700" >错题复盘</text>
+      <text x="19" y="124" font-size="15" fill="#3569E8" font-weight="700" >学习笔记</text>
+      <text x="19" y="161" font-size="9" fill="#606a77" font-weight="400" >理解 · 整理 · 再练习</text>
+      <text x="19" y="181" font-size="7" fill="#606a77" font-weight="400" >封面示意 / 非正式出版物</text>
+      <path d="M7 0V191" stroke="#18294412" stroke-width="2"/>
+    </g>
+    <g transform="translate(191 30) rotate(7 78 106)">
+      <rect x="5" y="7" width="153" height="211" fill="#18294412"/>
+      <path d="M0 0H153V204L147 213H0Z" fill="#fff" stroke="#cbd4e2"/>
+      <path d="M0 202H153L147 213H0Z" fill="#e3e8f0"/>
+      <rect width="153" height="203" fill="#3569E8"/>
+      <path d="M8 0V203" stroke="#ffffff25" stroke-width="2"/>
+      <g transform="translate(16 15) scale(0.09765625)" fill="#fff"><path d="M192 40H104C71 40 48 62 48 94C48 116 59 130 80 142L155 184H64L44 216H156C188 216 212 193 212 162C212 140 200 124 178 112L101 72H172Z"/></g><text x="44" y="33.0" font-size="12.25" fill="#fff" font-weight="700" >上行宝</text>
+      <text x="20" y="88" font-size="23" fill="#fff" font-weight="700" >备考知识</text>
+      <text x="20" y="118" font-size="23" fill="#fff" font-weight="700" >手册</text>
+      <text x="21" y="143" font-size="8" fill="#e3ebff" font-weight="400" >把知识学懂，把题目做会。</text>
+      <g transform="translate(92 150) scale(0.16015625)" fill="#fff"><path d="M192 40H104C71 40 48 62 48 94C48 116 59 130 80 142L155 184H64L44 216H156C188 216 212 193 212 162C212 140 200 124 178 112L101 72H172Z"/></g>
+      <text x="21" y="187" font-size="8" fill="#e3ebff" font-weight="400" >样书 / 内容待定</text>
+    </g>
+</svg>

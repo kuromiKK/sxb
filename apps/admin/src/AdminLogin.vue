@@ -1,0 +1,37 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { ArrowRight, GraduationCap, LockKeyhole, Pause, Play, ShieldCheck, UserRound } from 'lucide-vue-next'
+import energySvg from './assets/login-energy.svg?raw'
+import './styles/login.css'
+const phone=defineModel<string>('phone',{required:true})
+const password=defineModel<string>('password',{required:true})
+defineProps<{busy:boolean;error:string}>()
+const emit=defineEmits<{submit:[]}>()
+const paused=ref(false)
+</script>
+<template>
+  <div class="login-screen">
+    <div class="login-frame">
+      <aside class="login-art" :class="{'is-paused':paused}" aria-label="几何能量核心主视觉">
+        <div class="login-art-svg" v-html="energySvg" aria-hidden="true"></div>
+        <button class="login-motion" type="button" :aria-label="paused?'播放背景动画':'暂停背景动画'" :title="paused?'播放背景动画':'暂停背景动画'" :aria-pressed="paused" @click="paused=!paused"><Play v-if="paused" :size="15" aria-hidden="true"/><Pause v-else :size="15" aria-hidden="true"/></button>
+      </aside>
+      <section class="login-panel">
+        <header class="login-header"><span class="brand-icon"><GraduationCap :size="24" aria-hidden="true"/></span><strong>上行宝</strong><span>管理后台</span></header>
+        <main class="login-main">
+          <div class="login-eyebrow"><span></span>管理工作空间</div>
+          <h1>欢迎回来</h1>
+          <p>登录账号，继续今天的工作。</p>
+          <el-form label-position="top" @submit.prevent="emit('submit')" :aria-busy="busy">
+            <el-form-item label="管理员手机号"><el-input v-model="phone" autocomplete="username" inputmode="tel" size="large" placeholder="请输入手机号" maxlength="11" :disabled="busy" required><template #prefix><UserRound :size="18" aria-hidden="true"/></template></el-input></el-form-item>
+            <el-form-item label="登录密码"><el-input v-model="password" type="password" autocomplete="current-password" show-password size="large" placeholder="请输入密码" :disabled="busy" required><template #prefix><LockKeyhole :size="18" aria-hidden="true"/></template></el-input></el-form-item>
+            <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="form-error"/>
+            <el-button type="primary" native-type="submit" size="large" class="login-submit" :loading="busy"><span>登录</span><ArrowRight v-if="!busy" :size="18" aria-hidden="true"/></el-button>
+          </el-form>
+          <div class="login-security"><ShieldCheck :size="16" aria-hidden="true"/><span>仅限授权管理员访问</span></div>
+        </main>
+        <footer class="login-footer"><span>上行宝管理平台</span><span>专注内容 · 连接成长</span></footer>
+      </section>
+    </div>
+  </div>
+</template>

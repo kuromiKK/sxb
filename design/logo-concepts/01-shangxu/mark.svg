@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">上行宝 · 上序 · 图形标</title>
+  <desc id="description">原创路径图形。从“上”字提取竖干、短横与基座。两处同向切角带来前进感，留白把学习过程分成清晰的阶段；不用箭头，也能读出“上行”。</desc>
+  <g id="symbol" fill="#3569E8">
+    <path id="upper-structure" d="M108 164V54Q108 48 114 48H142V98H202L182 130H142V164Z"/>
+    <path id="foundation" d="M48 184H208L188 216H48Z"/>
+  </g>
+</svg>

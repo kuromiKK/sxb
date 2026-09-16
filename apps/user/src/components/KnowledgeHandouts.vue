@@ -2,6 +2,9 @@
 import { ref } from 'vue'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { api, token } from '@/services/api'
+import VerificationGate from './VerificationGate.vue'
+import {verifiedDownload,openDownload} from '@/utils/verified-download'
+const verification=ref<InstanceType<typeof VerificationGate>>()
 defineProps<{items:Array<{assetId:string;title:string;locked:boolean;fileType:string;sizeBytes:number}>}>()
 const busy=ref(''),error=ref('')
 const openLibrary=()=>uni.navigateTo({url:'/pages/profile-center/index?mode=handouts'})
@@ -12,13 +15,14 @@ async function download(item:any){
   if(item.locked){uni.showModal({title:'当前考试会员专属',content:'下载讲义需要对应考试的会员权限。',confirmText:token()?'查看权益':'去登录',success:r=>{if(r.confirm)uni.navigateTo({url:token()?'/pages/profile-center/index?mode=rights':`/pages/login/index?redirect=${encodeURIComponent(location.hash.slice(1))}`})}});return}
   busy.value=item.assetId
   try{
-    const result=await api(`/study-handouts/${encodeURIComponent(item.assetId)}/download`)
-    const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noreferrer';link.click()
+    const result=await verifiedDownload(verification.value!,`/study-handouts/${encodeURIComponent(item.assetId)}/download`)
+    openDownload(result.url)
     uni.showToast({title:'已发起下载，可在我的讲义中查看',icon:'none'})
   }catch(e:any){error.value=e.message}finally{busy.value=''}
 }
 </script>
 <template>
+  <VerificationGate ref="verification"/>
   <view v-if="items.length" class="knowledge-handouts">
     <view class="handout-heading"><text>配套讲义</text><button @tap="openLibrary">我的讲义<uni-icons type="right" size="14" color="#3569e8" /></button></view>
     <view v-for="item in items" :key="item.assetId" class="handout-row">

@@ -1,4 +1,4 @@
-import { practiceQuestions, type PracticeQuestion } from '@/mock/data'
+import { knowledgeSubjects, practiceQuestions, type PracticeQuestion } from '@/mock/data'
 import { getAnswered } from '@/utils/practice-plan'
 
 export type WeakPointDebugState = 'normal' | 'weak-demo' | 'weak-empty'
@@ -15,9 +15,11 @@ export type WeakKnowledgePoint = {
 const groupByKnowledgePoint = (questions: PracticeQuestion[]) => {
   const groups = new Map<string, PracticeQuestion[]>()
   questions.forEach((question) => {
-    const group = groups.get(question.knowledgePointId) || []
-    group.push(question)
-    groups.set(question.knowledgePointId, group)
+    for(const pointId of new Set(question.knowledgePointIds||[question.knowledgePointId])){
+      const group=groups.get(pointId)||[]
+      group.push(question)
+      groups.set(pointId,group)
+    }
   })
   return groups
 }
@@ -34,7 +36,7 @@ export const getWeakKnowledgePoints = (
     const correct = pointQuestions.filter(question => answers[question.id] === 'correct').length
     return {
       id,
-      title: pointQuestions[0].knowledgePointTitle,
+      title: knowledgeSubjects.flatMap(s=>s.chapters.flatMap(c=>c.sections.flatMap(t=>t.points))).find(p=>p.id===id)?.title || pointQuestions[0].knowledgePointTitle,
       total: pointQuestions.length,
       correct,
       accuracy: correct / pointQuestions.length,

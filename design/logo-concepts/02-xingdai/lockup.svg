@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 256" role="img" aria-labelledby="title description">
+  <title id="title">上行宝 · 行带 · 图文组合</title>
+  <desc id="description">原创路径图形。以 SXB 的首字母 S 为骨架，将上下两段学习路径连成一条连续带。斜向负空间与端部切角呼应“行”，不勉强拼入 X、B。 文字为可编辑文本，使用 Noto Sans SC Bold，未转曲。</desc>
+  <g id="symbol" fill="#3569E8">
+    <path id="continuous-s-ribbon" d="M192 40H104C71 40 48 62 48 94C48 116 59 130 80 142L155 184H64L44 216H156C188 216 212 193 212 162C212 140 200 124 178 112L101 72H172Z"/>
+  </g>
+  <g id="wordmark" fill="#182944">
+    <text x="270" y="170" font-family="Noto Sans SC, Microsoft YaHei, sans-serif" font-size="98" font-weight="700" letter-spacing="4">上行宝</text>
+  </g>
+</svg>

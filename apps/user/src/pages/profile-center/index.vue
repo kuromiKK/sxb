@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, onUnmounted, ref, nextTick } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
@@ -9,6 +9,13 @@ import { createRightsOrder, getActivePendingOrder, loadOrders, normalizeOrders, 
 import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
 import { api, account, refreshRights, showApiError, token } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
+import { payConfiguredOrder } from '@/utils/product-payment'
+import CustomerService from '@/components/CustomerService.vue'
+import ProtocolArticle from '@/components/ProtocolArticle.vue'
+import VerificationGate from '@/components/VerificationGate.vue'
+import {verifiedDownload,openDownload} from '@/utils/verified-download'
+const verification=ref<InstanceType<typeof VerificationGate>>()
+import {siteSettings,refreshSiteSettings} from '@/services/site-settings'
 
 type CenterMode = 'report' | 'record' | 'handouts' | 'rights' | 'orders' | 'announcements' | 'faq' | 'security' | 'about' | 'agreement' | 'privacy'
 const { exam, logout } = useAppStore()
@@ -50,15 +57,11 @@ type HandoutRecord = {
   fileType: string
 }
 const handoutConfirmVisible = ref(false)
-const handoutVerifyVisible = ref(false)
 const activeHandout = ref<HandoutRecord>()
-const handoutVerificationCode = ref('')
-const handoutInputCode = ref('')
-const qrPattern = Array.from({ length: 64 }, (_, index) => [0, 1, 3, 5, 6, 8, 10, 11, 14, 16, 18, 19, 22, 24, 27, 29, 31, 34, 36, 37, 40, 42, 44, 46, 49, 51, 53, 55, 57, 60, 62, 63].includes(index))
 const titles: Record<CenterMode, string> = {
   report: '学习报告', record: '学习记录', handouts: '我的讲义', rights: '我的权益', orders: '我的订单', announcements: '消息中心', faq: '常见问题', security: '设置', about: '关于上行宝', agreement: '用户服务协议', privacy: '隐私政策',
 }
-const title = computed(() => titles[mode.value])
+const title = computed(() => mode.value==='about'?'关于'+siteSettings.basic.name:titles[mode.value])
 
 const records = ref<Array<{icon:string;color:string;title:string;meta:string}>>([])
 const recordStats = ref({ days: 0, answers: 0, minutes: 0 })
@@ -78,10 +81,21 @@ async function bindInviter() {
   } catch (error) { showApiError(error) } finally { inviterBusy.value = false }
 }
 const handouts = ref<HandoutRecord[]>([])
-const announcements = ref<Array<{id:string;title:string;date:string;content:string;deliveryId?:string;read?:boolean}>>([])
+const announcements = ref<Array<{id:string;title:string;date:string;content:string;contentHtml?:string;schedule?:{contentId?:string};deliveryId?:string;read?:boolean}>>([])
 const unreadAnnouncementIds = ref<string[]>([])
-const faqs = ref<Array<{id:string;title:string;content:string}>>([])
+const faqs = ref<Array<{id:string;title:string;content:string;contentHtml?:string}>>([])
+const faqLoading=ref(false),faqError=ref('')
+const targetFaq=ref('')
+const directProtocol=ref(false)
+let faqRevision=0
+async function loadFaqs(){
+ const rev=++faqRevision,examId=exam.value.id;faqLoading.value=true;faqError.value='';faqs.value=[]
+ try{const data=await api<any[]>('/faqs/'+encodeURIComponent(examId));if(rev===faqRevision&&exam.value.id===examId){faqs.value=data;const index=data.findIndex(x=>x.id===targetFaq.value);visibleCount.value=Math.max(12,index+1);expanded.value=index>=0?targetFaq.value:'';if(targetFaq.value&&index<0)faqError.value='该常见问题已下架或不适用于当前考试'}}
+ catch(e:any){if(rev===faqRevision)faqError.value=e.message||'加载失败，请重试'}finally{if(rev===faqRevision){faqLoading.value=false;if(targetFaq.value&&!faqError.value){await nextTick();uni.pageScrollTo({selector:'.faq-list .fold-content',duration:0})}}}
+}
+onShow(()=>{if(mode.value==='faq')void loadFaqs();if(['about','agreement','privacy'].includes(mode.value))void refreshSiteSettings().catch(()=>{})})
 async function loadCenterData() {
+  if(['faq','about','agreement','privacy'].includes(mode.value))return
   const data = await api(`/catalog/${exam.value.id}`)
   const serverMessages = token() && mode.value==='announcements' ? await api<any[]>(`/messages?examId=${encodeURIComponent(exam.value.id)}`) : []
   announcements.value = serverMessages.length
@@ -107,11 +121,13 @@ const visibleAnnouncements = computed(() => announcements.value.slice(0, visible
 const visibleFaqs = computed(() => faqs.value.slice(0, visibleCount.value))
 
 onLoad((options) => {
+  if(options?.articleId)targetFaq.value=String(options.articleId)
   const next = options?.mode as CenterMode
+  directProtocol.value=next==='agreement'||next==='privacy'
   if (next && titles[next]) mode.value = next
   void loadCenterData().catch(showApiError)
   if(mode.value==='report')void refreshMonthlyReports().catch(showApiError)
-  if (token()) void refreshOrders().then(items => { orders.value = items }).catch(showApiError)
+  if (token()&&['orders','rights'].includes(mode.value)) void refreshOrders().then(items => { orders.value = items }).catch(showApiError)
 })
 
 const orderTimer = setInterval(() => {
@@ -120,7 +136,7 @@ const orderTimer = setInterval(() => {
 }, 1000)
 onUnmounted(() => clearInterval(orderTimer))
 
-const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy') { switchMode('about'); return } backOrFallback('/pages/profile/index') }
+const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy') { if(directProtocol.value)backOrFallback('/pages/login/index');else switchMode('about');return } backOrFallback('/pages/profile/index') }
 const toggle = async (id: string) => {
   expanded.value = expanded.value === id ? '' : id
   if(mode.value==='announcements' && token()){
@@ -131,7 +147,8 @@ const toggle = async (id: string) => {
   }
 }
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
-const switchMode = (next: CenterMode) => { mode.value = next; expanded.value = '' }
+const openCheatsheet=(id:string)=>uni.navigateTo({url:'/pages/cheatsheet-detail/index?id='+encodeURIComponent(id)})
+const switchMode = (next: CenterMode) => { mode.value = next; expanded.value = '';if(next==='faq')void loadFaqs() }
 const loadMore = () => { visibleCount.value += 12 }
 const openMonthlyReport = (item: MonthlyReport) => {
   if(item.locked)return toast('学习报告仅限当前考试SVIP用户')
@@ -166,37 +183,21 @@ const openHandoutDownload = (item: HandoutRecord) => {
   activeHandout.value = item
   handoutConfirmVisible.value = true
 }
-const openHandoutVerification = () => {
-  handoutConfirmVisible.value = false
-  handoutVerificationCode.value = String(Math.floor(1000 + Math.random() * 9000))
-  handoutInputCode.value = ''
-  handoutVerifyVisible.value = true
-}
-const refreshHandoutCode = () => {
-  handoutVerificationCode.value = String(Math.floor(1000 + Math.random() * 9000))
-  handoutInputCode.value = ''
-}
 const saveHandoutDownloadRecord = (item: HandoutRecord) => {
   const stored: Record<string, Pick<HandoutRecord, 'downloadedAt' | 'downloadedVersion'>> = uni.getStorageSync('sxb-handout-download-records') || {}
   stored[item.id] = { downloadedAt: item.downloadedAt, downloadedVersion: item.downloadedVersion }
   uni.setStorageSync('sxb-handout-download-records', stored)
 }
-const verifyHandoutDownload = async () => {
-  if(handoutInputCode.value.trim()!==handoutVerificationCode.value)return toast('验证码不正确，请重新输入')
+const openHandoutVerification = async () => {
+  handoutConfirmVisible.value=false
   if(!activeHandout.value)return
   try {
-    const result=await api(activeHandout.value.downloadPath)
-    handoutVerifyVisible.value=false
-    // #ifdef H5
-    const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noreferrer';link.click()
-    // #endif
-    // #ifndef H5
-    uni.downloadFile({url:result.url,success:r=>{if(r.statusCode===200)uni.openDocument({filePath:r.tempFilePath,showMenu:true});else toast('下载失败')},fail:()=>toast('下载失败')})
-    // #endif
+    const result=await verifiedDownload(verification.value!,activeHandout.value.downloadPath)
+    openDownload(result.url)
     await loadCenterData()
   }catch(error){showApiError(error)}
 }
-const orderStatusLabel = (status: RightsOrder['status']) => status === 'pending' ? '待支付' : status === 'completed' ? '已完成' : '已关闭'
+const orderStatusLabel = (status: RightsOrder['status'], backend?: string) => backend === 'refunding' ? '退款处理中' : backend === 'refunded' ? '已退款' : status === 'pending' ? '待支付' : status === 'completed' ? '已支付' : '已关闭'
 const formatOrderTime = (timestamp?: number) => timestamp ? new Date(timestamp).toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-') : '—'
 const orderCountdown = (item: RightsOrder) => {
   if (item.status !== 'pending' || !item.expiresAt) return ''
@@ -210,7 +211,8 @@ const updateOrder = (orderNo: string, update: Partial<RightsOrder>) => {
   orders.value = orders.value.map(item => item.no === orderNo ? { ...item, ...update } : item)
   persistOrders(orders.value)
 }
-const continuePayment = (item: RightsOrder) => {
+const continuePayment = async (item: RightsOrder) => {
+  try{const options=await api('/payments/options');if(!options.test){uni.navigateTo({url:'/pages/payment/index?orderId='+encodeURIComponent(item.no)});return}}catch(e){showApiError(e);return}
   orderDialogOrder.value = item
   orderDialogMode.value = 'pay'
   selectedPaymentMethod.value = item.lastPaymentMethod || 'wechat'
@@ -232,9 +234,7 @@ const startRightsPurchase = () => {
     purchaseNoticeVisible.value = true
     return
   }
-  orderDialogOrder.value = undefined
-  orderDialogMode.value = 'create'
-  orderDialogVisible.value = true
+  uni.navigateTo({url:'/pages/products/index'})
 }
 const openPendingOrder = () => {
   if (!activePurchaseOrder.value) return
@@ -257,7 +257,8 @@ const selectPaymentMethod = (method: PaymentMethod) => {
 const finishPaymentAttempt = async (item: RightsOrder) => {
   try {
     if (selectedPaymentMethod.value !== 'wechat') throw new Error('首版仅支持微信测试支付')
-    const result = await api(`/orders/${item.no}/test-payment`, 'POST', { outcome: simulateNextPaymentFailure.value ? 'failure' : 'success' })
+    const result = await payConfiguredOrder(item.no, simulateNextPaymentFailure.value ? 'failure' : 'success')
+    if(!result){paymentPhase.value='select';return}
     simulateNextPaymentFailure.value = false
     orders.value = await refreshOrders()
     await refreshRights()
@@ -303,13 +304,8 @@ const submitPayment = (item: RightsOrder) => {
 const confirmOrderDialog = async () => {
   try {
   if (orderDialogMode.value === 'create') {
-    const result = await api('/orders', 'POST', { examId: exam.value.id, product: account.level === 'vip' && !account.trial ? 'upgrade' : 'svip' })
-    orders.value = await refreshOrders()
-    const order = orders.value.find(item => item.no === result.order.id)!
-    expandedOrderNo.value = order.no
     closeOrderDialog()
-    switchMode('orders')
-    toast('订单已创建，请在30分钟内支付')
+    uni.navigateTo({url:'/pages/products/index'})
     return
   }
   const item = orderDialogOrder.value
@@ -386,32 +382,32 @@ const applyAnnouncementDebug = (key: string) => {
 
     <view v-else-if="mode === 'handouts'" class="content-block handout-block"><view class="page-note"><uni-icons type="info" size="18" color="#3569e8" /><text>下面是已经下载过的讲义记录，点击可重复下载。</text></view><view class="list-card handout-list"><view v-for="item in handouts" :key="item.id" class="handout-row" :class="`is-${handoutState(item)}`" @tap="openHandoutDownload(item)"><view class="pdf-icon">{{ item.fileType }}</view><view class="handout-record-copy"><text>{{ item.title }}</text><text>{{ item.size }} · 下载于 {{ item.downloadedAt }} · v{{ item.downloadedVersion }}</text></view><view class="handout-row-action"><button :disabled="handoutState(item) === 'removed'" @tap.stop="openHandoutDownload(item)">{{ handoutActionLabel(item) }}</button></view></view></view></view>
 
-    <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>{{ account.level.toUpperCase() }}</text><view><text>{{ account.level === 'svip' ? 'SVIP' : account.level === 'vip' ? 'VIP' : '免费版' }}</text><text>{{ account.expiresAt ? `有效至 ${new Date(account.expiresAt).toLocaleDateString()}` : '当前考试免费权益' }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in account.permissionLabels" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><text class="page-note">按当前考试实际权益展示；资料开放时间、发布状态及 AI 服务启用状态另行生效。</text><button class="primary-button" @tap="startRightsPurchase">续费或升级</button></view>
+    <view v-else-if="mode === 'rights'" class="content-block"><view class="rights-hero"><text>{{ account.level === 'free' ? '普通会员' : account.level.toUpperCase() }}</text><view><text>{{ account.level === 'svip' ? 'SVIP' : account.level === 'vip' ? 'VIP' : '普通会员' }}</text><text>{{ account.expiresAt ? `有效至 ${new Date(account.expiresAt).toLocaleDateString()}` : '当前考试普通会员权益' }}</text></view></view><view class="section-label">当前已解锁</view><view class="benefit-list"><view v-for="item in account.permissionLabels" :key="item"><uni-icons type="checkmarkempty" size="18" color="#1a9a7b" /><text>{{ item }}</text></view></view><text class="page-note">按当前考试实际权益展示；资料开放时间、发布状态及 AI 服务启用状态另行生效。</text><button class="primary-button" @tap="startRightsPurchase">查看会员商品</button></view>
 
-    <view v-else-if="mode === 'orders'" class="content-block order-block"><view class="order-tip"><uni-icons type="info" size="18" color="#5f748b" /><text>待支付订单30分钟内有效，点击订单可展开查看详情。</text></view><view class="order-list"><view v-for="item in sortedOrders" :key="item.no" class="order-item" :class="[`status-${item.status}`, { expanded: expandedOrderNo === item.no }]" @tap="toggleOrder(item.no)"><view class="order-summary"><view class="order-main"><view class="order-title-line"><text>{{ item.productName }}</text><text class="order-status">{{ orderStatusLabel(item.status) }}</text></view><text class="order-time">{{ formatOrderTime(item.createdAt) }}</text></view><view class="order-price"><text>¥{{ item.amount }}</text><uni-icons :type="expandedOrderNo === item.no ? 'up' : 'down'" size="17" color="#8995a5" /></view></view><view v-if="item.status === 'pending'" class="pending-countdown"><view class="pulse-dot"></view><text>支付剩余 {{ orderCountdown(item) }}</text></view><view v-if="expandedOrderNo === item.no" class="order-detail" @tap.stop><view class="detail-line"><text>订单编号</text><text>{{ item.no }}</text></view><view class="detail-line"><text>购买权益</text><text>{{ item.rightsName }}</text></view><view class="detail-line"><text>权益期限</text><text>{{ item.validity || '—' }}</text></view><view class="detail-line"><text>支付方式</text><text>{{ item.paymentMethod || '待选择' }}</text></view><view v-if="item.paidAt" class="detail-line"><text>支付时间</text><text>{{ formatOrderTime(item.paidAt) }}</text></view><view v-if="item.lastPaymentError" class="detail-line payment-failed-line"><text>最近支付</text><text>{{ paymentMethodLabel(item.lastPaymentMethod) }}失败 · {{ item.lastPaymentError }}</text></view><view v-if="item.closeReason" class="detail-line close-reason"><text>关闭原因</text><text>{{ item.closeReason }}</text></view><view class="detail-line total-line"><text>实付金额</text><text>¥{{ item.amount }}</text></view><view v-if="item.status === 'pending'" class="order-actions"><button class="secondary" @tap="cancelOrder(item)">取消订单</button><button @tap="continuePayment(item)">继续支付</button></view><view v-else-if="item.status === 'completed'" class="order-actions"><button class="secondary" @tap="serviceVisible = true">联系客服</button><button @tap="viewRights">查看当前权益</button></view><view v-else class="order-actions single"><button @tap="repurchase">重新购买</button></view></view></view></view></view>
+    <view v-else-if="mode === 'orders'" class="content-block order-block"><view class="order-tip"><uni-icons type="info" size="18" color="#5f748b" /><text>待支付订单30分钟内有效，点击订单可展开查看详情。</text></view><view class="order-list"><view v-for="item in sortedOrders" :key="item.no" class="order-item" :class="[`status-${item.status}`, { expanded: expandedOrderNo === item.no }]" @tap="toggleOrder(item.no)"><view class="order-summary"><view class="order-main"><view class="order-title-line"><text>{{ item.productName }}</text><text class="order-status">{{ orderStatusLabel(item.status, item.backendStatus) }}</text></view><text class="order-time">{{ formatOrderTime(item.createdAt) }}</text></view><view class="order-price"><text>¥{{ item.amount }}</text><uni-icons :type="expandedOrderNo === item.no ? 'up' : 'down'" size="17" color="#8995a5" /></view></view><view v-if="item.status === 'pending'" class="pending-countdown"><view class="pulse-dot"></view><text>支付剩余 {{ orderCountdown(item) }}</text></view><view v-if="expandedOrderNo === item.no" class="order-detail" @tap.stop><view class="detail-line"><text>订单编号</text><text>{{ item.no }}</text></view><view class="detail-line"><text>购买权益</text><text>{{ item.rightsName }}</text></view><view class="detail-line"><text>权益期限</text><text>{{ item.validity || '—' }}</text></view><view class="detail-line"><text>支付方式</text><text>{{ item.paymentMethod || '待选择' }}</text></view><view v-if="item.paidAt" class="detail-line"><text>支付时间</text><text>{{ formatOrderTime(item.paidAt) }}</text></view><view v-if="item.lastPaymentError" class="detail-line payment-failed-line"><text>最近支付</text><text>{{ paymentMethodLabel(item.lastPaymentMethod) }}失败 · {{ item.lastPaymentError }}</text></view><view v-if="item.closeReason" class="detail-line close-reason"><text>关闭原因</text><text>{{ item.closeReason }}</text></view><view class="detail-line total-line"><text>实付金额</text><text>¥{{ item.amount }}</text></view><view v-if="item.status === 'pending'" class="order-actions"><button class="secondary" @tap="cancelOrder(item)">取消订单</button><button @tap="continuePayment(item)">继续支付</button></view><view v-else-if="item.status === 'completed'" class="order-actions"><button class="secondary" @tap="serviceVisible = true">联系客服</button><button @tap="viewRights">查看当前权益</button></view><view v-else class="order-actions single"><button @tap="repurchase">重新购买</button></view></view></view></view></view>
 
-    <view v-else-if="mode === 'announcements'" class="content-block"><view class="list-card fold-list announcement-list"><view v-for="item in visibleAnnouncements" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><view class="notice-title"><view v-if="unreadAnnouncementIds.includes(item.id)" class="item-unread"></view><text>{{ item.title }}</text></view><text>{{ item.date }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><view v-if="expanded === item.id" class="fold-content"><text>{{ item.content }} 公告详情将持续补充图文、流程说明和相关附件，用户可在这里完整查看，不受首页摘要长度限制。</text><view v-if="item.id.includes('notice-1')" class="notice-media"><uni-icons type="image" size="28" color="#fff" /><text>内部版 0.1 功能更新概览</text></view></view></view><view v-if="visibleAnnouncements.length < announcements.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部公告</text></view></view>
+<view v-else-if="mode === 'announcements'" class="content-block"><view class="list-card fold-list announcement-list"><view v-for="item in visibleAnnouncements" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><view class="notice-title"><view v-if="unreadAnnouncementIds.includes(item.id)" class="item-unread"></view><text>{{ item.title }}</text></view><text>{{ item.date }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><view v-if="expanded === item.id" class="fold-content"><rich-text v-if="item.contentHtml" :nodes="item.contentHtml"/><text v-else>{{ item.content }}</text><button v-if="item.schedule?.contentId" @tap.stop="openCheatsheet(item.schedule.contentId)">查看资料</button><view v-if="item.id.includes('notice-1')" class="notice-media"><uni-icons type="image" size="28" color="#fff" /><text>内部版 0.1 功能更新概览</text></view></view></view><view v-if="visibleAnnouncements.length < announcements.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部公告</text></view></view>
 
-    <view v-else-if="mode === 'faq'" class="content-block"><view class="list-card fold-list faq-list"><view v-for="item in visibleFaqs" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><text>{{ item.title }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><text v-if="expanded === item.id" class="fold-content">{{ item.content }} 如仍未解决，可以从页面底部联系客服获取进一步帮助。</text></view><view v-if="visibleFaqs.length < faqs.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部问题</text></view></view>
+    <view v-else-if="mode === 'faq'" class="content-block"><view v-if="faqLoading" class="list-end">正在加载常见问题…</view><view v-else-if="faqError" class="list-end" @tap="loadFaqs">{{faqError}} · 点击重试</view><view v-else-if="!faqs.length" class="list-end">暂无常见问题</view><view v-else class="list-card fold-list faq-list"><view v-for="item in visibleFaqs" :key="item.id" class="fold-item" @tap="toggle(item.id)"><view class="fold-head"><view><text>{{ item.title }}</text></view><uni-icons :type="expanded === item.id ? 'up' : 'down'" size="17" color="#8b96a5" /></view><view v-if="expanded === item.id" class="fold-content"><rich-text v-if="item.contentHtml" :nodes="item.contentHtml"/><text v-else>{{ item.content }}</text></view></view><view v-if="visibleFaqs.length < faqs.length" class="announcement-load-more" @tap="loadMore"><text>加载更多</text><uni-icons type="arrowdown" size="17" color="#5b50b9" /></view><text v-else class="list-end">已加载全部问题</text></view></view>
 
     <view v-else-if="mode === 'security'" class="content-block"><view class="list-card settings-list security-list"><view><text>登录手机号</text><text>{{ maskedPhone || '未登录' }}</text></view><view><text>微信账号</text><text>尚未接入</text></view><view><text>我的推荐码</text><text>{{ me.invite_code || '-' }}</text></view><view @tap="!me.inviter_id && (inviterVisible = true)"><text>绑定推荐码</text><text>{{ me.inviter_id ? '已绑定' : '未绑定' }}</text></view><view @tap="startBind"><text>更换绑定手机号</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view class="logout-row" @tap="logoutVisible = true"><text>退出登录</text><uni-icons type="right" size="18" color="#c85056" /></view></view></view>
 
-    <view v-else-if="mode === 'about'" class="about-block"><view class="brand-mark">上</view><text class="brand-name">上行宝</text><text class="brand-version">内部版 0.1</text><view class="list-card settings-list about-menu"><view @tap="switchMode('agreement')"><text>用户服务协议</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view @tap="switchMode('privacy')"><text>隐私政策</text><uni-icons type="right" size="18" color="#a2adbb" /></view><view><text>当前版本</text><text>0.1.0</text></view></view><text class="copyright">Copyright © 2026 上行宝</text></view>
+    <view v-else-if="mode === 'about'" class="about-block"><image v-if="siteSettings.basic.logo" class="about-logo" :src="siteSettings.basic.logo" mode="aspectFit" alt="平台 Logo"/><view v-else class="brand-mark">{{siteSettings.basic.name.slice(0,1)}}</view><text class="brand-name">{{siteSettings.basic.name}}</text><view class="about-intro"><rich-text :nodes="siteSettings.about.html"/></view><view class="list-card settings-list about-menu"><view @tap="switchMode('agreement')"><text>用户服务协议</text><text>V{{siteSettings.protocols.find(p=>p.kind==='agreement')?.version||'—'}} ›</text></view><view @tap="switchMode('privacy')"><text>隐私政策</text><text>V{{siteSettings.protocols.find(p=>p.kind==='privacy')?.version||'—'}} ›</text></view></view><text v-if="siteSettings.about.operator" class="copyright">{{siteSettings.about.operator}}</text><text v-if="siteSettings.about.copyright" class="copyright">{{siteSettings.about.copyright}}</text><text v-if="siteSettings.about.filing" class="copyright">{{siteSettings.about.filing}}</text></view>
 
-    <view v-else class="article-block"><text class="article-title">{{ title }}</text><text class="article-date">更新日期：2026年8月11日</text><text class="article-text" v-if="mode === 'agreement'">欢迎使用上行宝。使用本产品前，请仔细阅读并理解本协议。上行宝为用户提供考试知识点、课程、题库、学习计划以及相关学习服务。用户应妥善保管账号信息，不得以任何方式转让、出租或共享付费权益。平台展示的学习数据用于帮助用户安排复习，不构成考试通过承诺。课程、题目、讲义及其他内容的知识产权归权利人所有，未经许可不得复制、传播或用于商业用途。</text><text class="article-text" v-else>上行宝重视用户个人信息和学习数据的保护。为完成登录、同步学习进度、保存错题收藏和处理订单，我们会在必要范围内处理手机号、账号标识、学习记录及订单信息。我们不会向无关第三方出售个人信息。用户可以申请查询、更正或删除相关信息。正式上线前，隐私政策将根据实际接入的服务和权限进一步完善。</text></view>
+    <ProtocolArticle v-else :kind="mode"/>
     <view v-if="markAllReadStep" class="modal-mask announcement-modal-mask" @tap="markAllReadStep = 0"><view class="announcement-modal" @tap.stop><view class="announcement-modal-accent"></view><view class="announcement-modal-icon"><uni-icons type="email-filled" size="30" color="#fff" /></view><text class="announcement-modal-title">全部标记为已读？</text><text class="announcement-modal-desc">将清除 {{ unreadAnnouncementIds.length }} 条公告的未读标记，公告内容仍会保留。</text><view class="announcement-modal-count"><text>{{ unreadAnnouncementIds.length }}</text><text>条未读公告</text></view><view class="announcement-modal-actions"><button @tap="markAllReadStep = 0">暂不处理</button><button @tap="confirmMarkAllRead">确定</button></view></view></view>
-    <view v-if="serviceVisible || logoutVisible || bindVisible" class="modal-mask" @tap="serviceVisible = false; logoutVisible = false; bindVisible = false">
-      <view v-if="serviceVisible" class="center-modal" @tap.stop><view class="qr-code"><view v-for="(filled, index) in qrPattern" :key="index" :class="{ filled }"></view></view><text class="modal-title">扫一扫联系客服</text><text class="modal-desc">使用微信扫一扫，添加上行宝企业微信客服</text><text class="modal-time">工作日 09:00-18:00 · SXB-KF01</text><button class="modal-cancel" @tap="serviceVisible = false">关闭</button></view>
-      <view v-else-if="logoutVisible" class="center-modal logout-modal" @tap.stop><view class="modal-mark danger-mark"><uni-icons type="undo" size="27" color="#fff" /></view><text class="modal-title">确认退出登录？</text><text class="modal-desc modal-copy">退出后仍可浏览公开内容，错题、收藏和学习进度不会丢失；深度学习功能需要重新登录。</text><button class="logout-confirm" @tap="confirmSignOut">确认退出</button><button class="modal-cancel" @tap="logoutVisible = false">暂不退出</button></view>
+    <CustomerService v-model="serviceVisible"/>
+    <view v-if="logoutVisible || bindVisible" class="modal-mask" @tap="logoutVisible = false; bindVisible = false">
+      <view v-if="logoutVisible" class="center-modal logout-modal" @tap.stop><view class="modal-mark danger-mark"><uni-icons type="undo" size="27" color="#fff" /></view><text class="modal-title">确认退出登录？</text><text class="modal-desc modal-copy">退出后仍可浏览公开内容，错题、收藏和学习进度不会丢失；深度学习功能需要重新登录。</text><button class="logout-confirm" @tap="confirmSignOut">确认退出</button><button class="modal-cancel" @tap="logoutVisible = false">暂不退出</button></view>
       <view v-else class="center-modal bind-modal" @tap.stop><text class="modal-title">更换绑定手机号</text><text class="modal-desc">{{ bindStep === 1 ? '先验证当前手机号 138****6452' : bindStep === 2 ? '输入新的手机号' : `验证新手机号 ${bindPhone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}` }}</text><input v-if="bindStep === 2" v-model="bindPhone" class="modal-input" type="number" placeholder="请输入新手机号" maxlength="11" /><view v-if="bindStep !== 2" class="code-input-row"><input v-model="bindCode" class="modal-input" type="number" placeholder="请输入6位验证码" maxlength="6" /><button @tap="sendCode">{{ codeSeconds ? `${codeSeconds}s` : '获取验证码' }}</button></view><button class="modal-primary" @tap="nextBind">{{ bindStep === 3 ? '确认换绑并重新登录' : '下一步' }}</button><button class="modal-cancel" @tap="bindVisible = false">取消</button></view>
     </view>
     <view v-if="handoutConfirmVisible" class="modal-mask" @tap="handoutConfirmVisible = false"><view v-if="activeHandout" class="center-modal handout-modal" @tap.stop><view class="modal-mark handout-mark"><uni-icons type="download" size="27" color="#fff" /></view><text class="modal-title">{{ handoutState(activeHandout) === 'updated' ? '下载新版讲义' : '重复下载讲义' }}</text><text class="modal-desc modal-copy">即将下载《{{ activeHandout.title }}》，继续前需要完成验证码校验。</text><view class="handout-version-card"><view><text>上次下载</text><text>v{{ activeHandout.downloadedVersion }}</text></view><view><text>系统版本</text><text :class="{ updated: handoutState(activeHandout) === 'updated' }">v{{ activeHandout.systemVersion }}</text></view><view><text>文件大小</text><text>{{ activeHandout.size }}</text></view></view><button class="modal-primary" @tap="openHandoutVerification">继续验证</button><button class="modal-cancel" @tap="handoutConfirmVisible = false">取消</button></view></view>
-    <view v-if="handoutVerifyVisible" class="modal-mask" @tap="handoutVerifyVisible = false"><view class="center-modal handout-modal" @tap.stop><text class="modal-title no-mark">输入验证码</text><text class="modal-desc">请输入下方 4 位验证码，验证通过后立即下载讲义。</text><view class="handout-code-display"><text>{{ handoutVerificationCode }}</text><button @tap="refreshHandoutCode">换一张</button></view><input v-model="handoutInputCode" class="handout-code-input" type="number" maxlength="4" placeholder="请输入验证码" /><button class="modal-primary" @tap="verifyHandoutDownload">验证并下载</button><button class="modal-cancel" @tap="handoutVerifyVisible = false">取消</button></view></view>
+    <VerificationGate ref="verification"/>
     <view v-if="purchaseNoticeVisible" class="modal-mask" @tap="purchaseNoticeVisible = false"><view v-if="activePurchaseOrder" class="center-modal purchase-notice" @tap.stop><view class="modal-mark pending-mark"><uni-icons type="wallet" size="27" color="#fff" /></view><text class="modal-title">存在待支付订单</text><text class="modal-desc modal-copy">你已有一笔{{ activePurchaseOrder.rightsName }}订单，请先支付、取消或等待订单自动失效后再创建新订单。</text><view class="pending-order-summary"><text>{{ activePurchaseOrder.productName }}</text><view><text>¥{{ activePurchaseOrder.amount }}</text><text>剩余 {{ orderCountdown(activePurchaseOrder) }}</text></view></view><button class="modal-primary" @tap="openPendingOrder">查看待支付订单</button><button class="modal-cancel" @tap="purchaseNoticeVisible = false">取消</button></view></view>
     <view v-if="orderDialogVisible && orderDialogMode" class="modal-mask order-dialog-mask" @tap="paymentPhase !== 'processing' && closeOrderDialog()">
       <view class="order-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>
         <view class="order-dialog-top"><view class="order-dialog-icon"><uni-icons :type="orderDialogMode === 'cancel' ? 'closeempty' : orderDialogMode === 'pay' ? 'wallet' : 'medal'" size="28" color="#fff" /></view><view class="order-dialog-heading"><text>{{ orderDialogMode === 'pay' ? '订单支付' : orderDialogMode === 'cancel' ? '取消订单' : '创建权益订单' }}</text><text>{{ orderDialogMode === 'pay' ? '选择支付方式并完成付款' : orderDialogMode === 'cancel' ? '订单关闭后可重新选择权益' : '订单创建后30分钟内有效' }}</text></view><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
-        <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '上行宝SVIP' }}</text><text>{{ orderDialogOrder?.rightsName || 'SVIP权益' }} · 以订单对应考期为准</text></view><text>¥{{ orderDialogOrder?.amount || '799.00' }}</text></view>
+        <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '会员商品' }}</text><text>{{ orderDialogOrder?.rightsName || '会员权益' }} · 以订单对应考期为准</text></view><text>¥{{ orderDialogOrder?.amount || '—' }}</text></view>
         <view v-if="orderDialogMode === 'pay'" class="payment-methods">
           <text>选择支付方式</text>
           <view class="payment-method-list">
@@ -429,6 +425,7 @@ const applyAnnouncementDebug = (key: string) => {
     <DebugMenu v-if="mode === 'announcements'" page="公告" :options="[{ key: 'restore-unread', label: '前三条和第6条设为未读' }]" @select="applyAnnouncementDebug" />
   </view>
 </template>
+<style scoped>.about-logo{display:block;width:80px;height:80px;margin:0 auto;object-fit:contain;border-radius:16px}.about-intro{margin:20px 0;font-size:15px;line-height:1.85;color:#34445b;text-align:left;overflow-wrap:anywhere}.about-menu{width:100%}</style>
 
 <style scoped lang="scss">
 .center-page { max-width:430px; margin:0 auto; padding-top:calc(env(safe-area-inset-top) + 18rpx); padding-bottom:42rpx; background:#f5f7fb; }.top-bar { display:flex; align-items:center; justify-content:space-between; height:58rpx; }.top-bar button { width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; margin:0; padding:0; background:#edf1fb; border-radius:15rpx; }.top-bar button::after { display:none; }.top-bar>text { color:#1e3048; font-size:var(--sxb-text-title); font-weight:700; }.top-bar>view { width:58rpx; }.content-block,.about-block,.article-block,.empty-block { margin-top:20rpx; }.summary-band { display:grid; grid-template-columns:repeat(3,1fr); padding:19rpx 6rpx; background:linear-gradient(120deg,#edf3ff,#f3efff); border:1rpx solid #dce5fa; border-radius:12rpx; }.summary-band view { display:flex; align-items:center; flex-direction:column; gap:5rpx; border-right:1rpx solid #dfe5f2; }.summary-band view:last-child { border-right:0; }.summary-band text:first-child { color:#263953; font-size:var(--sxb-text-title); font-weight:700; }.summary-band text:last-child { color:#7f8da1; font-size:var(--sxb-text-meta); }.list-card { margin-top:14rpx; padding:0 17rpx; background:#fff; border:1rpx solid #e0e6f0; border-radius:12rpx; }.record-row { display:flex; align-items:center; gap:12rpx; min-height:78rpx; border-bottom:1rpx solid #edf0f5; }.record-row:last-child { border-bottom:0; }.row-icon { width:43rpx; height:43rpx; display:flex; align-items:center; justify-content:center; flex:none; border-radius:11rpx; }.record-row>view:last-child { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.record-row>view:last-child text:first-child { color:#2c3d55; font-size:var(--sxb-text-body); font-weight:700; }.record-row>view:last-child text:last-child { overflow:hidden; color:#8995a5; font-size:var(--sxb-text-meta); text-overflow:ellipsis; white-space:nowrap; }.page-note { display:flex; align-items:flex-start; gap:7rpx; padding:13rpx 14rpx; color:#5f6f87; background:#edf3ff; border-radius:9rpx; font-size:var(--sxb-text-meta); line-height:1.5; }.handout-row { display:flex; align-items:center; gap:11rpx; min-height:88rpx; border-bottom:1rpx solid #edf0f5; }.handout-row:last-child { border-bottom:0; }.pdf-icon { width:42rpx; height:47rpx; display:flex; align-items:center; justify-content:center; flex:none; color:#d45d63; background:#fff0ef; border-radius:8rpx; font-size:var(--sxb-text-meta); font-weight:700; }.handout-row>view:nth-child(2) { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.handout-row>view:nth-child(2) text:first-child { overflow:hidden; color:#2c3d55; font-size:var(--sxb-text-small); font-weight:700; text-overflow:ellipsis; white-space:nowrap; }.handout-row>view:nth-child(2) text:last-child { color:#8b96a5; font-size:var(--sxb-text-meta); }.handout-row button { width:auto; height:40rpx; line-height:40rpx; margin:0; padding:0 10rpx; color:#3569e8; background:#eaf0ff; border-radius:7rpx; font-size:var(--sxb-text-meta); }.handout-row button::after { display:none; }.rights-hero { display:flex; align-items:center; gap:14rpx; padding:22rpx; color:#fff; background:linear-gradient(105deg,#315fda,#6952ce); border-radius:13rpx; box-shadow:0 12rpx 26rpx rgba(68,79,187,.18); }.rights-hero>text { width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.16); border-radius:16rpx; font-size:var(--sxb-text-body); font-weight:700; }.rights-hero>view { display:flex; flex-direction:column; gap:5rpx; }.rights-hero>view text:first-child { font-size:var(--sxb-text-title); font-weight:700; }.rights-hero>view text:last-child { color:#dbe1ff; font-size:var(--sxb-text-meta); }.section-label { margin:24rpx 0 11rpx; color:#22354e; font-size:var(--sxb-text-body); font-weight:700; }.benefit-list { padding:6rpx 17rpx; background:#fff; border:1rpx solid #e0e6f0; border-radius:12rpx; }.benefit-list view { display:flex; align-items:center; gap:9rpx; min-height:58rpx; border-bottom:1rpx solid #edf0f5; color:#34475f; font-size:var(--sxb-text-small); }.benefit-list view:last-child { border-bottom:0; }.primary-button { width:100%; height:61rpx; line-height:61rpx; margin:18rpx 0 0; padding:0; color:#fff; background:linear-gradient(100deg,#3569e8,#6949df); border-radius:9rpx; font-size:var(--sxb-text-body); font-weight:700; }.primary-button::after { display:none; }.order-list { margin-top:0; }.order-item { padding:18rpx 0; border-bottom:1rpx solid #edf0f5; }.order-item:last-child { border-bottom:0; }.order-head,.order-foot { display:flex; align-items:center; justify-content:space-between; }.order-head text:first-child { color:#263953; font-size:var(--sxb-text-body); font-weight:700; }.order-head text:last-child { color:#1a9a7b; font-size:var(--sxb-text-meta); font-weight:700; }.order-no { display:block; margin-top:8rpx; color:#8a96a5; font-size:var(--sxb-text-meta); }.order-foot { margin-top:10rpx; color:#7b8797; font-size:var(--sxb-text-meta); }.order-foot text:last-child { color:#243650; font-size:var(--sxb-text-body); font-weight:700; }.fold-list { margin-top:0; }.fold-item { padding:17rpx 0; border-bottom:1rpx solid #edf0f5; }.fold-item:last-child { border-bottom:0; }.fold-head { display:flex; align-items:center; gap:10rpx; }.fold-head>view { display:flex; flex:1; min-width:0; flex-direction:column; gap:5rpx; }.fold-head>view text:first-child { color:#2b3d56; font-size:var(--sxb-text-body); line-height:1.45; font-weight:700; }.fold-head>view text:last-child { color:#929dab; font-size:var(--sxb-text-meta); }.fold-content { display:block; margin-top:13rpx; padding:13rpx; color:#5f7087; background:#f6f8fb; border-radius:8rpx; font-size:var(--sxb-text-small); line-height:1.65; }.settings-list { margin-top:0; }.settings-list>view { min-height:67rpx; display:flex; align-items:center; justify-content:space-between; gap:12rpx; border-bottom:1rpx solid #edf0f5; color:#2c3d55; font-size:var(--sxb-text-small); }.settings-list>view:last-child { border-bottom:0; }.settings-list>view>text:last-child { color:#8793a3; font-size:var(--sxb-text-meta); }.danger { color:#c85056; }.about-block { display:flex; align-items:center; flex-direction:column; }.brand-mark { width:72rpx; height:72rpx; display:flex; align-items:center; justify-content:center; color:#fff; background:linear-gradient(135deg,#3569e8,#7655df); border-radius:19rpx; font-size:var(--sxb-text-heading); font-weight:700; }.brand-name { margin-top:12rpx; color:#20334b; font-size:var(--sxb-text-title); font-weight:700; }.brand-version { margin-top:4rpx; color:#8b96a5; font-size:var(--sxb-text-meta); }.about-menu { width:100%; box-sizing:border-box; margin-top:24rpx; }.copyright { margin-top:23rpx; color:#a0a9b5; font-size:var(--sxb-text-meta); }.article-title { display:block; color:#20334b; font-size:var(--sxb-text-title); font-weight:700; }.article-date { display:block; margin-top:7rpx; color:#919ba8; font-size:var(--sxb-text-meta); }.article-text { display:block; margin-top:18rpx; color:#4c5e75; font-size:var(--sxb-text-body); line-height:1.9; }.empty-block { display:flex; align-items:center; flex-direction:column; padding:86rpx 28rpx; color:#7c899b; text-align:center; }.empty-icon { width:68rpx; height:68rpx; display:flex; align-items:center; justify-content:center; background:#e9efff; border-radius:18rpx; }.empty-block>text:nth-child(2) { margin-top:15rpx; color:#263953; font-size:var(--sxb-text-body); font-weight:700; }.empty-block>text:last-child { margin-top:8rpx; font-size:var(--sxb-text-small); line-height:1.55; }

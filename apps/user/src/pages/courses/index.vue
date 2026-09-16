@@ -16,7 +16,13 @@ const accessLevel = ref(getCourseAccessLevel())
 const hasFullAccess = computed(() => accessLevel.value === 'full')
 
 const selectedSubject = computed(() => knowledgeSubjects.find(subject => subject.id === selectedSubjectId.value) || knowledgeSubjects[0])
-const selectedCourseMap = computed(() => new Map(courseCatalog.filter(course => course.subjectId === selectedSubjectId.value).map(course => [course.sectionId, course])))
+const selectedCourseMap = computed(() => {
+  const groups = new Map<string, CourseLesson[]>()
+  for (const course of courseCatalog.filter(course => course.subjectId === selectedSubject.value?.id && !course.knowledgePointId)) {
+    groups.set(course.sectionId, [...(groups.get(course.sectionId) || []), course])
+  }
+  return groups
+})
 const continueCourse = computed(() => courseCatalog.find(course => course.progress > 0 && !course.completed) || courseCatalog[0])
 const showAccessPromo = computed(() => !state.isLoggedIn || !hasFullAccess.value)
 
@@ -35,24 +41,16 @@ const selectSubject = (id: string) => {
   expandedChapterId.value = knowledgeSubjects.find(subject => subject.id === id)?.chapters[0]?.id || ''
 }
 const toggleChapter = (id: string) => { expandedChapterId.value = expandedChapterId.value === id ? '' : id }
-const openPurchasePage = () => uni.navigateTo({ url: '/pages/profile-center/index?mode=rights' })
-const openTrialPurchase = () => {
-  if (!state.isLoggedIn) {
-    requireLogin('/pages/courses/index')
-    return
-  }
-  uni.showModal({ title: '1元体验', content: '登录后可用 1 元解锁 24 小时 VIP 体验。', confirmText: '去体验', success: result => { if (result.confirm) showToast('体验购买页即将开放') } })
-}
+const openPurchasePage = () => uni.navigateTo({ url: '/pages/products/index' })
 const openFullPurchase = () => {
   if (!state.isLoggedIn) {
-    requireLogin('/pages/courses/index')
+    requireLogin('/pages/products/index')
     return
   }
   openPurchasePage()
 }
 const showLocked = (course: CourseLesson) => {
-  const trialAccount = accessLevel.value === 'trial'
-  uni.showModal({ title: '当前权限不足', content: trialAccount ? `“${course.sectionName}”不在1元试听范围内，完整权限账号可学习该课程。` : '当前账号暂无精讲课权限，请先开通试听或完整权限。', confirmText: '知道了', showCancel: false })
+  uni.showModal({ title: '当前权限不足', content: `学习“${course.title}”需要当前考试的对应权益，可前往查看在售套餐。`, confirmText: '查看套餐', success: result => { if (result.confirm) openPurchasePage() } })
 }
 const openCourse = (course?: CourseLesson) => {
   if (!course) return
@@ -86,7 +84,7 @@ const applyDebug = (key: string) => {
 
     <view v-if="continueCourse" class="continue-card" @tap="openContinue"><view class="continue-mark"><uni-icons :type="typeIcon(continueCourse.type)" size="23" color="#fff" /></view><view class="continue-copy"><view class="continue-label"><text>继续学习</text><text>{{ continueCourse.typeName }}</text></view><text class="continue-title">第{{ continueCourse.sectionNo }}节 {{ continueCourse.sectionName }}</text><text class="continue-meta">{{ continueCourse.subjectName }} · {{ continueCourse.progress }}% · 上次学到 {{ continueCourse.currentMinute }} 分钟</text><view class="continue-progress"><view :style="{ width: `${continueCourse.progress}%` }"></view></view></view><uniIcons type="forward" size="20" color="#fff" /></view>
 
-    <view class="section-heading"><view><text class="section-title">选择科目</text><text class="section-subtitle">课程按考试科目和章节整理</text></view><text class="course-count">{{ courseCatalog.filter(course => course.subjectId === selectedSubjectId).length }} 节精讲课</text></view>
+    <view class="section-heading"><view><text class="section-title">选择科目</text><text class="section-subtitle">课程按考试科目和章节整理</text></view><text class="course-count">{{ courseCatalog.filter(course => course.subjectId === selectedSubject?.id && !course.knowledgePointId).length }} 门精讲课</text></view>
     <scroll-view class="subject-scroll" scroll-x :show-scrollbar="false" scroll-with-animation :scroll-into-view="`course-subject-${selectedSubjectId}`"><view class="subject-chips"><button v-for="subject in knowledgeSubjects" :id="`course-subject-${subject.id}`" :key="subject.id" class="subject-chip" :aria-pressed="selectedSubjectId === subject.id" :class="{ active: selectedSubjectId === subject.id }" @tap="selectSubject(subject.id)"><text>{{ subject.name }}</text></button></view></scroll-view>
 
     <view class="section-heading catalog-heading"><view><text class="section-title">课程目录</text><text class="section-subtitle">没有精讲课的节会保留目录，并明确标注状态</text></view></view>
@@ -94,12 +92,12 @@ const applyDebug = (key: string) => {
       <view v-for="chapter in selectedSubject?.chapters || []" :key="chapter.id" class="chapter-card">
         <button class="chapter-header" :aria-expanded="expandedChapterId === chapter.id" @tap="toggleChapter(chapter.id)"><view class="chapter-title"><text>第{{ chapter.no }}章</text><text>{{ chapter.name }}</text></view><view class="chapter-right"><text>{{ chapter.sections.length }} 节</text><view class="chapter-chevron" :class="{ open: expandedChapterId === chapter.id }"><uniIcons type="arrowdown" size="17" color="#65768c" /></view></view></button>
         <view v-if="expandedChapterId === chapter.id" class="section-list">
-          <view v-for="section in chapter.sections" :key="section.id" class="lesson-section" :role="selectedCourseMap.get(section.id) ? 'button' : undefined" :tabindex="selectedCourseMap.get(section.id) ? 0 : undefined" :class="{ 'has-course': selectedCourseMap.get(section.id) }" @keydown.enter="selectedCourseMap.get(section.id) && openCourse(selectedCourseMap.get(section.id))" @keydown.space.prevent="selectedCourseMap.get(section.id) && openCourse(selectedCourseMap.get(section.id))" @tap="selectedCourseMap.get(section.id) && openCourse(selectedCourseMap.get(section.id))">
+          <view v-for="section in chapter.sections" :key="section.id" class="lesson-section">
             <view class="lesson-heading"><view class="lesson-name"><text class="lesson-no">第{{ section.no }}节</text><text>{{ section.name }}</text></view><text v-if="!selectedCourseMap.get(section.id)" class="no-course">暂未配置精讲课</text></view>
-            <view v-if="selectedCourseMap.get(section.id)" class="lesson-info">
-              <view class="lesson-type"><uniIcons :type="typeIcon(selectedCourseMap.get(section.id)!.type)" size="20" :color="selectedCourseMap.get(section.id)!.type === 'video' ? '#3569e8' : selectedCourseMap.get(section.id)!.type === 'audio' ? '#e98a3a' : '#6949df'" /><text>{{ selectedCourseMap.get(section.id)!.typeName }}</text></view>
-              <view class="lesson-copy"><view class="lesson-meta"><text>共 {{ selectedCourseMap.get(section.id)!.totalMinutes }} 分钟</text><text>{{ selectedCourseMap.get(section.id)!.hasHandout ? '有讲义' : '暂无讲义' }}</text><text :class="{ trial: selectedCourseMap.get(section.id)!.canTrial }">{{ selectedCourseMap.get(section.id)!.canTrial ? '可试听' : hasFullAccess ? '完整权限' : '需要权限' }}</text></view><view class="lesson-progress"><view :style="{ width: `${selectedCourseMap.get(section.id)!.progress}%` }"></view></view></view>
-              <view class="lesson-action"><text>{{ formatProgress(selectedCourseMap.get(section.id)!) }}</text><uniIcons type="forward" size="19" color="#8b96a5" /></view>
+            <view v-for="course in selectedCourseMap.get(section.id) || []" :key="course.id" class="lesson-info" role="button" tabindex="0" @tap="openCourse(course)" @keydown.enter="openCourse(course)" @keydown.space.prevent="openCourse(course)">
+              <view class="lesson-type"><uniIcons :type="typeIcon(course.type)" size="20" :color="course.type === 'video' ? '#3569e8' : course.type === 'audio' ? '#e98a3a' : '#6949df'" /><text>{{ course.typeName }}</text></view>
+              <view class="lesson-copy"><text class="lesson-title">{{ course.title }}</text><view class="lesson-meta"><text v-if="course.type !== 'article'">共 {{ course.totalMinutes }} 分钟</text><text>{{ course.hasHandout ? '有讲义' : '暂无讲义' }}</text><text :class="{ trial: course.canTrial }">{{ course.canTrial ? '可试听' : hasFullAccess ? '完整权限' : '需要权限' }}</text></view><view class="lesson-progress"><view :style="{ width: `${course.progress}%` }"></view></view></view>
+              <view class="lesson-action"><text>{{ formatProgress(course) }}</text><uniIcons type="forward" size="19" color="#8b96a5" /></view>
             </view>
           </view>
         </view>

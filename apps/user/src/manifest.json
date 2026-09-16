@@ -5,6 +5,7 @@
   "versionName": "0.1.0",
   "versionCode": "10",
   "transformPx": false,
+  "uniStatistics": { "enable": false },
   "rpxCalcMaxDeviceWidth": 430,
   "rpxCalcBaseDeviceWidth": 375,
   "h5": { "title": "上行宝" },

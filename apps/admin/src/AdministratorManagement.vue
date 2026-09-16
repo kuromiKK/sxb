@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import RecordIdentifier from './RecordIdentifier.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Pencil, KeyRound, RefreshCw, ShieldCheck } from 'lucide-vue-next'
+import { Search, RotateCcw, Pencil, KeyRound, ShieldCheck } from 'lucide-vue-next'
 import { request, send } from './api'
 
 const props = defineProps<{ currentId?: string }>()
@@ -11,6 +12,7 @@ const rows = ref<Administrator[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
+const appliedSearch = ref('')
 const busy = ref(false)
 const error = ref('')
 const editing = ref(false)
@@ -25,11 +27,13 @@ async function load() {
   const version = ++revision
   busy.value = true; error.value = ''
   try {
-    const result = await request(`/admin/administrators?search=${encodeURIComponent(search.value)}&page=${page.value}`)
+    const result = await request(`/admin/administrators?search=${encodeURIComponent(appliedSearch.value)}&page=${page.value}`)
     if (version === revision) { rows.value = result.items; total.value = result.total }
-  } catch (e: any) { if (version === revision) error.value = e.message }
+  } catch (e: any) { if (version === revision) { error.value = e.message; rows.value = []; total.value = 0 } }
   finally { if (version === revision) busy.value = false }
 }
+function query() { appliedSearch.value = search.value.trim(); page.value = 1; void load() }
+function resetFilters() { search.value = ''; query() }
 function edit(row?: Administrator) {
   Object.assign(form, { id: '', phone: '', nickname: '', role: 'superadmin', enabled: true, password: '', confirmation: '' }, row || {})
   formError.value = ''; editing.value = true
@@ -74,17 +78,20 @@ async function resetPassword() {
   finally { saving.value = false }
 }
 onMounted(load)
+defineExpose({ load, open: edit })
 </script>
 
 <template>
   <section class="administrator-management">
-    <div class="table-toolbar">
-      <el-input v-model="search" clearable placeholder="搜索姓名或手机号" class="search-input" @keyup.enter="page=1;load()" @clear="page=1;load()"><template #prefix><Search :size="16" /></template></el-input>
-      <div class="row-actions"><el-tooltip content="搜索管理员"><el-button aria-label="搜索管理员" @click="page=1;load()"><Search :size="16" /></el-button></el-tooltip><el-tooltip content="刷新管理员"><el-button :loading="busy" aria-label="刷新管理员" @click="load"><RefreshCw :size="16" /></el-button></el-tooltip><el-button type="primary" @click="edit()"><Plus :size="16" />新增管理员</el-button></div>
-    </div>
+    <form class="admin-filters" @submit.prevent="query">
+      <label class="admin-filter-field"><span>姓名 / 手机号</span><el-input v-model="search" aria-label="姓名或手机号" clearable placeholder="搜索管理员姓名或手机号" /></label>
+      <div class="admin-filter-actions"><el-button type="primary" native-type="submit"><Search :size="16" aria-hidden="true"/>查询</el-button><el-button @click="resetFilters"><RotateCcw :size="16" aria-hidden="true"/>重置</el-button></div>
+    </form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <el-table v-loading="busy" :data="rows" row-key="id" empty-text="暂无匹配的管理员">
-      <el-table-column prop="nickname" label="管理员" min-width="150"><template #default="{row}">{{ row.nickname }}<el-tag v-if="row.id===currentId" size="small" effect="plain" class="current-admin">当前账号</el-tag></template></el-table-column>
+    <div class="table-toolbar"><span>全部管理员 <b>{{ total }}</b></span></div>
+    <el-table v-loading="busy" :data="rows" row-key="id">
+      <template #empty><el-empty description="当前条件下暂无管理员" :image-size="80"/></template>
+      <el-table-column prop="nickname" label="管理员" min-width="210"><template #default="{row}"><div class="administrator-name"><span class="name-text" :title="row.nickname">{{ row.nickname }}</span><el-tag v-if="row.id===currentId" size="small" effect="plain">当前账号</el-tag></div></template></el-table-column>
       <el-table-column prop="phone" label="手机号" width="150" />
       <el-table-column label="角色" width="150"><template #default><span class="admin-role"><ShieldCheck :size="15" />最高管理员</span></template></el-table-column>
       <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.enabled?'success':'info'">{{ row.enabled?'启用':'停用' }}</el-tag></template></el-table-column>
@@ -93,7 +100,8 @@ onMounted(load)
       <el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><div class="row-actions"><el-tooltip content="编辑管理员"><el-button link type="primary" aria-label="编辑管理员" @click="edit(row)"><Pencil :size="17" /></el-button></el-tooltip><el-tooltip content="重设密码"><el-button link type="primary" aria-label="重设密码" @click="openReset(row)"><KeyRound :size="17" /></el-button></el-tooltip></div></template></el-table-column>
     </el-table>
     <div class="pagination"><span>共 {{ total }} 位管理员</span><el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="prev,pager,next" @current-change="load" /></div>
-    <el-dialog v-model="editing" :title="form.id?'编辑管理员':'新增管理员'" width="500px" :close-on-click-modal="false" @closed="form.password='';form.confirmation=''">
+    <el-drawer v-model="editing" :title="form.id?'编辑管理员':'新增管理员'" size="min(560px, 100vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="form.password='';form.confirmation=''">
+      <RecordIdentifier v-if="form.id" :id="form.id" table="users"/>
       <el-form label-position="top" @submit.prevent="save">
         <el-form-item label="姓名" required><el-input v-model="form.nickname" maxlength="50" placeholder="管理员姓名" /></el-form-item>
         <el-form-item label="手机号" required><el-input v-model="form.phone" :disabled="Boolean(form.id)" maxlength="11" inputmode="tel" placeholder="管理员手机号" /></el-form-item>
@@ -102,8 +110,8 @@ onMounted(load)
         <template v-else><el-form-item label="密码" required><el-input v-model="form.password" type="password" show-password autocomplete="new-password" placeholder="10至128位，包含字母和数字" /></el-form-item><el-form-item label="确认密码" required><el-input v-model="form.confirmation" type="password" show-password autocomplete="new-password" placeholder="再次输入密码" /></el-form-item></template>
         <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon />
       </el-form><template #footer><el-button :disabled="saving" @click="editing=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存管理员</el-button></template>
-    </el-dialog>
-    <el-dialog v-model="resetting" title="重设管理员密码" width="500px" :close-on-click-modal="false" @closed="resetForm.password='';resetForm.confirmation=''">
+    </el-drawer>
+    <el-dialog v-model="resetting" title="重设管理员密码" width="min(500px, 92vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetForm.password='';resetForm.confirmation=''">
       <p class="dialog-context">{{ resetForm.nickname }}</p><el-form label-position="top"><el-form-item label="新密码" required><el-input v-model="resetForm.password" type="password" show-password autocomplete="new-password" placeholder="10至128位，包含字母和数字" /></el-form-item><el-form-item label="确认新密码" required><el-input v-model="resetForm.confirmation" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="重设原因" required><el-input v-model="resetForm.reason" type="textarea" :rows="2" maxlength="200" /></el-form-item><el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon /></el-form><template #footer><el-button :disabled="saving" @click="resetting=false">取消</el-button><el-button type="primary" :loading="saving" @click="resetPassword">重设密码</el-button></template>
     </el-dialog>
   </section>
@@ -111,5 +119,13 @@ onMounted(load)
 
 <style scoped>
 .admin-role { display: inline-flex; gap: 6px; align-items: center; }
-.current-admin { margin-left: 8px; }
+.administrator-management { min-width: 0; }
+.admin-filter-field { max-width: 400px; }
+.table-toolbar b { margin-left: 6px; }
+.administrator-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.administrator-name .name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.administrator-name .el-tag { flex-shrink: 0; }
+.row-actions { flex-wrap: nowrap; }
+.el-form :deep(.el-select) { width: 100%; }
+@media(max-width:600px) { .admin-filter-field { max-width: none; flex-basis: 100%; } }
 </style>

@@ -100,7 +100,7 @@ test('learning plans and editable exam taxonomy use real scoped records',async t
       assert(r.reminders.every((v:any)=>!v.url.includes('course-point-')))
       await db.query("UPDATE content SET status='published' WHERE id='ability-section-1-2'")
     })
-    await t.test('admin-only configuration, two levels, rename and disable propagation',async()=>{
+    await t.test('admin-only configuration, flat categories and disable propagation',async()=>{
       const config='/admin/exams/junior-social-worker/plan-config'
       const body={prepDays:100,sprintDays:14,defaultRestDays:2,defaultRound:'coverage'}
       assert.equal((await req(config,'PUT',body)).status,403)
@@ -108,7 +108,8 @@ test('learning plans and editable exam taxonomy use real scoped records',async t
       assert.equal((await req(route)).data.config.prepDays,100)
       const parent={name:'测试分类',parentId:null,sortOrder:30,enabled:true}
       assert.equal((await req('/admin/exam-management/categories/test-root','PUT',parent,admin)).status,200)
-      assert.equal((await req('/admin/exam-management/categories/test-child','PUT',{...parent,parentId:'test-root'},admin)).status,200)
+      // Category editing already uses a flat taxonomy; the knowledge hierarchy is separate.
+      assert.equal((await req('/admin/exam-management/categories/test-child','PUT',{...parent,parentId:'test-root'},admin)).status,400)
       assert.equal((await req('/admin/exam-management/categories/test-third','PUT',{...parent,parentId:'test-child'},admin)).status,400)
       assert.equal((await req('/admin/exam-management/categories/test-root','PUT',{...parent,enabled:false},admin)).status,200)
       assert(!(await req('/exam-tree')).data.some((c:any)=>c.id==='test-root'))

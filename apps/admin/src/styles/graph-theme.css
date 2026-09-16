@@ -1,0 +1,10 @@
+.knowledge-relation .kr-stage{background:var(--graph-grid,none),var(--graph-background,#fafbff);background-size:22px 22px,auto}
+.knowledge-relation .kr-canvas{height:var(--graph-height,760px)}
+.knowledge-relation.is-fullscreen .kr-canvas{height:100%}
+.knowledge-relation .kr-node-card,.knowledge-relation .mm-node{border-radius:var(--graph-radius,13px);box-shadow:var(--graph-shadow)}
+.knowledge-relation .kr-node-title,.knowledge-relation .mm-title{font-size:var(--graph-font,14px)}
+.knowledge-relation .kr-node-root,.knowledge-relation .mm-root{background:linear-gradient(135deg,var(--graph-root),color-mix(in srgb,var(--graph-root) 75%,#131c35));box-shadow:var(--graph-shadow)}
+.knowledge-relation[data-node-style='soft'] .kr-node-card{background:color-mix(in srgb,var(--node-tone) 9%,white)}
+.knowledge-relation[data-node-style='soft'] .mm-node:not(.mm-root){background:color-mix(in srgb,var(--branch-color) 9%,white)}
+.knowledge-relation[data-node-style='outline'] .kr-node-card,.knowledge-relation[data-node-style='outline'] .mm-node:not(.mm-root){background:#fff}
+.knowledge-relation[data-node-style='outline'] .kr-node-root,.knowledge-relation[data-node-style='outline'] .mm-root,.knowledge-relation[data-node-style='soft'] .kr-node-root,.knowledge-relation[data-node-style='soft'] .mm-root{background:var(--graph-root)}

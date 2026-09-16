@@ -1,14 +1,34 @@
 import { db, transaction } from './db.ts'
-export async function migrate() {
+import {migrateSiteSettings} from './site-settings.ts'
+import {migrateIntegrations} from './integrations.ts'
+import {migrateWorkspaceTools} from './workspace-tools.ts'
+import {migrateProviders} from './provider-config.ts'
+import { migrateKnowledgeSchema } from './knowledge-schema.ts'
+import { migrateRecordNumbers } from './record-numbers.ts'
+import { migrateQuestionGrades } from './question-grades.ts'
+import { migrateQuestionTypes } from './question-types.ts'
+import { migrateQuestionGrading } from './question-grading.ts'
+import { migrateEditorImages } from './editor-images.ts'
+import { migrateExamGuide } from './exam-guide.ts'
+import { migrateExamPeriods } from './exam-periods.ts'
+import { migrateProducts, migrateProductNames } from './products.ts'
+import { migrateRegisteredImages } from './registered-images.ts'
+import { migrateLearningData } from './learning-data.ts'
+import { migrateLearningRecords } from './learning-records.ts'
+import { migrateOrderManagement } from './order-management.ts'
+import { migrateCheatsheetManagement } from './cheatsheet-management.ts'
+export async function migrate() {await migrateCore();await migrateSiteSettings();await migrateIntegrations();await migrateProviders();await migrateWorkspaceTools()}
+async function migrateCore() {
   // Append versioned migrations here; never reset a database on startup.
   await db.query(`CREATE TABLE IF NOT EXISTS schema_versions (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())`)
+if ((await db.query('SELECT 1 FROM schema_versions WHERE version=10')).rows.length) {await migrateRecordNumbers();await migrateQuestionGrades();await migrateQuestionTypes();await migrateQuestionGrading();await migrateEditorImages();await migrateCheatsheetManagement();await migrateExamGuide();await migrateExamPeriods();await migrateProducts();await migrateOrderManagement();await migrateProductNames();await migrateRegisteredImages();await migrateLearningData();await migrateLearningRecords();return}
   const versions = await db.query('SELECT version FROM schema_versions WHERE version=1')
-  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); await migrateStudyContent(); await migrateMessages(); await migrateReferrals(); return }
+  if (versions.rows.length) { await migrateAIContext(); await migrateAnswerRequests(); await migrateAccountKinds(); await migrateManualEntitlements(); await migratePlanModel(); await migrateExamMeta(); await migrateStudyContent(); await migrateMessages(); await migrateReferrals(); await migrateAdminEnhancements(); await migrateExamProjectYears(); await migrateKnowledgeSchema(); await migrateRecordNumbers(); await migrateQuestionGrades(); await migrateQuestionTypes();await migrateQuestionGrading();await migrateEditorImages();await migrateCheatsheetManagement();await migrateExamGuide();await migrateExamPeriods();await migrateProducts();await migrateOrderManagement();await migrateProductNames();await migrateRegisteredImages();await migrateLearningData();await migrateLearningRecords(); return }
   const statements = [
-    `CREATE TABLE users (id text PRIMARY KEY, phone text UNIQUE NOT NULL, nickname text NOT NULL, role text NOT NULL DEFAULT 'student' CHECK(role IN ('student','superadmin','editor','support','operator')), password_hash text, invite_code text UNIQUE NOT NULL, inviter_id text REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), is_test_data boolean NOT NULL DEFAULT true)`,
+    `CREATE TABLE users (id text PRIMARY KEY, phone text UNIQUE NOT NULL, nickname text NOT NULL, role text NOT NULL DEFAULT 'student' CHECK(role IN ('student','superadmin','editor','support','operator')), password_hash text, invite_code text UNIQUE NOT NULL, inviter_id text REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now(), is_test_data boolean NOT NULL DEFAULT true, is_developer boolean NOT NULL DEFAULT false)`,
     `CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL, created_at timestamptz DEFAULT now())`,
     `CREATE TABLE login_codes (phone text PRIMARY KEY, code_hash text NOT NULL, expires_at timestamptz NOT NULL, sent_at timestamptz NOT NULL DEFAULT now(), attempts integer NOT NULL DEFAULT 0)`,
-    `CREATE TABLE exams (id text PRIMARY KEY, name text NOT NULL, enabled boolean NOT NULL DEFAULT true, is_test_data boolean NOT NULL DEFAULT true)`,
+    `CREATE TABLE exams (id text PRIMARY KEY, name text NOT NULL, short_title text, enabled boolean NOT NULL DEFAULT true, is_test_data boolean NOT NULL DEFAULT true)`,
     `CREATE TABLE exam_cycles (id text PRIMARY KEY, exam_id text NOT NULL REFERENCES exams(id), year integer NOT NULL, ends_at timestamptz NOT NULL, is_test_data boolean NOT NULL DEFAULT true, UNIQUE(exam_id,year))`,
     `CREATE TABLE content (id text PRIMARY KEY, exam_id text REFERENCES exams(id), kind text NOT NULL, parent_id text REFERENCES content(id), title text NOT NULL, status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','review','published','offline')), payload jsonb NOT NULL DEFAULT '{}', source text NOT NULL DEFAULT 'test', is_test_data boolean NOT NULL DEFAULT true, version integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`,
     `CREATE INDEX content_catalog ON content(exam_id,kind,status)`,
@@ -35,9 +55,25 @@ export async function migrate() {
   await migrateAccountKinds()
   await migrateManualEntitlements()
   await migratePlanModel()
+  await migrateExamMeta()
   await migrateStudyContent()
   await migrateMessages()
   await migrateReferrals()
+  await migrateAdminEnhancements()
+  await migrateExamProjectYears()
+  await migrateKnowledgeSchema()
+  await migrateRecordNumbers()
+  await migrateQuestionGrades()
+  await migrateQuestionTypes()
+  await migrateQuestionGrading();await migrateEditorImages();await migrateCheatsheetManagement();await migrateExamGuide();await migrateExamPeriods();await migrateProducts();await migrateOrderManagement();await migrateProductNames();await migrateRegisteredImages();await migrateLearningData();await migrateLearningRecords()
+}
+async function migrateExamProjectYears(){ await db.query(`CREATE TABLE IF NOT EXISTS exam_year_entries(id text PRIMARY KEY, exam_id text NOT NULL REFERENCES exams(id) ON DELETE CASCADE, year integer NOT NULL, cutoff_date date, UNIQUE(exam_id,year))`); await db.query('ALTER TABLE exams ADD COLUMN IF NOT EXISTS intro text'); await db.query('ALTER TABLE exams ADD COLUMN IF NOT EXISTS cover_url text') }
+
+async function migrateAdminEnhancements() {
+  await transaction(async c => {
+    await c.query('ALTER TABLE exam_categories ADD COLUMN IF NOT EXISTS intro text NOT NULL DEFAULT \'\''); await c.query('ALTER TABLE exam_categories ADD COLUMN IF NOT EXISTS cover_url text NOT NULL DEFAULT \'\''); await c.query('ALTER TABLE exams ADD COLUMN IF NOT EXISTS short_title text');
+    await c.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_developer boolean NOT NULL DEFAULT false');
+  })
 }
 
 async function migrateReferrals() {
@@ -80,13 +116,13 @@ async function migrateMessages() {
 async function migrateStudyContent() {
   await transaction(async c => {
     await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
-    if ((await c.query('SELECT version FROM schema_versions WHERE version=7')).rows.length) return
-    await c.query(`CREATE TABLE permission_policies (exam_id text NOT NULL REFERENCES exams(id), level text NOT NULL CHECK(level IN ('free','vip','svip')), permissions jsonb NOT NULL DEFAULT '{}', version integer NOT NULL DEFAULT 1, actor_id text REFERENCES users(id), updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(exam_id,level))`)
-    await c.query(`CREATE TABLE media_assets (id text PRIMARY KEY, exam_id text NOT NULL REFERENCES exams(id), content_id text NOT NULL, owner_id text NOT NULL REFERENCES users(id), kind text NOT NULL CHECK(kind IN ('image','video','audio','handout')), source text NOT NULL CHECK(source IN ('upload','external')), filename text NOT NULL, mime text NOT NULL, size_bytes bigint NOT NULL DEFAULT 0, disk_name text, external_url text, created_at timestamptz NOT NULL DEFAULT now())`)
-    await c.query(`CREATE INDEX media_content ON media_assets(content_id)`)
-    await c.query(`CREATE TABLE media_tickets (token_hash text PRIMARY KEY, asset_id text NOT NULL REFERENCES media_assets(id), content_id text NOT NULL, session_hash text NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE, expires_at timestamptz NOT NULL)`)
-    await c.query(`CREATE TABLE content_notices_seen (user_id text NOT NULL REFERENCES users(id), content_id text NOT NULL REFERENCES content(id), PRIMARY KEY(user_id,content_id), seen_at timestamptz NOT NULL DEFAULT now())`)
-    await c.query('INSERT INTO schema_versions(version) VALUES(7)')
+    if ((await c.query("SELECT 1 WHERE to_regclass('media_assets') IS NOT NULL AND to_regclass('permission_policies') IS NOT NULL AND to_regclass('content_notices_seen') IS NOT NULL AND to_regclass('media_tickets') IS NOT NULL")).rows.length) return
+    await c.query(`CREATE TABLE IF NOT EXISTS permission_policies (exam_id text NOT NULL REFERENCES exams(id), level text NOT NULL CHECK(level IN ('free','vip','svip')), permissions jsonb NOT NULL DEFAULT '{}', version integer NOT NULL DEFAULT 1, actor_id text REFERENCES users(id), updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(exam_id,level))`)
+    await c.query(`CREATE TABLE IF NOT EXISTS media_assets (id text PRIMARY KEY, exam_id text NOT NULL REFERENCES exams(id), content_id text NOT NULL, owner_id text NOT NULL REFERENCES users(id), kind text NOT NULL CHECK(kind IN ('image','video','audio','handout')), source text NOT NULL CHECK(source IN ('upload','external')), filename text NOT NULL, mime text NOT NULL, size_bytes bigint NOT NULL DEFAULT 0, disk_name text, external_url text, created_at timestamptz NOT NULL DEFAULT now())`)
+    await c.query(`CREATE INDEX IF NOT EXISTS media_content ON media_assets(content_id)`)
+    await c.query(`CREATE TABLE IF NOT EXISTS media_tickets (token_hash text PRIMARY KEY, asset_id text NOT NULL REFERENCES media_assets(id), content_id text NOT NULL, session_hash text NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE, expires_at timestamptz NOT NULL)`)
+    await c.query(`CREATE TABLE IF NOT EXISTS content_notices_seen (user_id text NOT NULL REFERENCES users(id), content_id text NOT NULL REFERENCES content(id), PRIMARY KEY(user_id,content_id), seen_at timestamptz NOT NULL DEFAULT now())`)
+    await c.query('INSERT INTO schema_versions(version) VALUES(7) ON CONFLICT DO NOTHING')
   })
 }
 
@@ -107,6 +143,14 @@ async function migratePlanModel() {
       updated_at timestamptz NOT NULL DEFAULT now(), actor_id text REFERENCES users(id)
     )`)
     await c.query('INSERT INTO schema_versions(version) VALUES(6)')
+  })
+}
+
+async function migrateExamMeta() {
+  await transaction(async c => {
+    await c.query('LOCK TABLE schema_versions IN EXCLUSIVE MODE')
+    await c.query('ALTER TABLE exam_categories ADD COLUMN IF NOT EXISTS intro text NOT NULL DEFAULT \'\'')
+    await c.query('ALTER TABLE exam_categories ADD COLUMN IF NOT EXISTS cover_url text NOT NULL DEFAULT \'\'')
   })
 }
 

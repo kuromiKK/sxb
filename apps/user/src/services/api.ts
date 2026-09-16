@@ -2,7 +2,7 @@ import { reactive } from 'vue'
 import { knowledgeSubjects, practiceQuestions, courseCatalog, exam } from '@/mock/data'
 
 const TOKEN_KEY = 'sxb-api-token'
-export const account = reactive({ level: 'free', trial: false, expiresAt: '', examId: '', loading: false, permissions:{} as Record<string,boolean>, permissionLabels:[] as string[] })
+export const account = reactive({ level: 'free', trial: false, trialDetails:null as {title:string;configuredHours:number|null;actualHours:number|null}|null, expiresAt: '', examId: '', loading: false, permissions:{} as Record<string,boolean>, permissionLabels:[] as string[] })
 export const learningPlan = reactive<{ data: any; loading: boolean }>({ data: null, loading: false })
 export async function refreshLearningPlan() {
   if (!token()) { learningPlan.data = null; return }
@@ -18,12 +18,12 @@ export async function refreshLearningPlan() {
 }
 export const token = () => String(uni.getStorageSync(TOKEN_KEY) || '')
 export const selectedExamId = () => String(uni.getStorageSync('sxb-current-exam')?.id || 'junior-social-worker')
-export function api<T = any>(path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', data?: any): Promise<T> {
+export function api<T = any>(path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', data?: any, extraHeaders:Record<string,string>={}): Promise<T> {
   const requestToken = token()
   return new Promise((resolve, reject) => {
     uni.request({
       url: `${import.meta.env.VITE_API_BASE || '/api'}${path}`, method, data,
-      header: { 'Content-Type': 'application/json', ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}) },
+      header: { 'Content-Type': 'application/json', ...extraHeaders, ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}) },
       success: result => {
         if (result.statusCode >= 200 && result.statusCode < 300) return resolve(result.data as T)
         if (result.statusCode === 401 && requestToken === token()) clearSession()
@@ -37,7 +37,7 @@ export function clearSession() {
   uni.removeStorageSync(TOKEN_KEY)
   uni.removeStorageSync('sxb-login')
   uni.removeStorageSync('sxb-demo-rights')
-  Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: '', permissions:{}, permissionLabels:[] })
+  Object.assign(account, { level: 'free', trial: false, trialDetails:null, expiresAt: '', examId: '', permissions:{}, permissionLabels:[] })
   clearPersonalCache()
 }
 export function clearPersonalCache() {
@@ -51,7 +51,7 @@ export function acceptSession(result: { token: string; user: any }) {
   uni.setStorageSync('sxb-login', { ...result.user, loggedAt: Date.now() })
 }
 export async function refreshRights() {
-  if (!token()) return Object.assign(account, { level: 'free', trial: false, expiresAt: '', examId: selectedExamId(), permissions:{}, permissionLabels:[] })
+  if (!token()) return Object.assign(account, { level: 'free', trial: false, trialDetails:null, expiresAt: '', examId: selectedExamId(), permissions:{}, permissionLabels:[] })
   const examId = selectedExamId()
   const requestToken = token()
   const next = await api(`/rights/${examId}`)
@@ -87,13 +87,19 @@ export async function refreshPersonalData() {
   uni.setStorageSync(`sxb-answered-${examId}`, Object.fromEntries(stats.latest.map((r: any) => [r.question_id, r.correct ? 'correct' : 'wrong'])))
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   uni.setStorageSync(`sxb-today-questions-${examId}-${today}`, stats.todayIds || [])
-  uni.setStorageSync('sxb-wrong-questions', stats.latest.filter((r: any) => !r.correct&&!r.wrong_hidden).map((r: any) => r.question_id))
+  uni.setStorageSync('sxb-wrong-questions', stats.latest.filter((r: any) => r.in_wrong_book).map((r: any) => r.question_id))
   const answered=new Map<string,boolean>(stats.latest.map((r:any)=>[r.question_id,Boolean(r.correct)]))
   for(const subject of knowledgeSubjects)for(const chapter of subject.chapters)for(const section of chapter.sections)for(const point of section.points){
-    const questions=practiceQuestions.filter(q=>q.knowledgePointId===point.id)
+    const questions=practiceQuestions.filter(q=>(q.knowledgePointIds||[q.knowledgePointId]).includes(point.id))
     point.questionDone=questions.filter(q=>answered.has(q.id)).length
     point.mastery=questions.length?Math.round(questions.filter(q=>answered.get(q.id)).length/questions.length*100):0
   }
-  exam.mastery=practiceQuestions.length?Math.round([...answered.values()].filter(Boolean).length/practiceQuestions.length*100):0
+  for(const subject of knowledgeSubjects){
+    const questions=practiceQuestions.filter(q=>(q.linkedSubjectIds||[q.subjectId]).includes(subject.id))
+    subject.questionTotal=questions.length
+    subject.questionDone=questions.filter(q=>answered.has(q.id)).length
+    subject.mastery=questions.length?Math.round(questions.filter(q=>answered.get(q.id)).length/questions.length*100):0
+  }
+  exam.mastery=practiceQuestions.length?Math.round(practiceQuestions.filter(q=>answered.get(q.id)).length/practiceQuestions.length*100):0
   await refreshLearningPlan()
 }

@@ -1,3 +1,4 @@
+import { defaultGradingPrompt } from '../../shared/grading-prompt.ts'
 import 'dotenv/config'
 import { pathToFileURL } from 'node:url'
 import { randomInt } from 'node:crypto'
@@ -24,8 +25,9 @@ export async function seed() {
   }
   if (process.env.APP_MODE === 'production') return
   for (const [examId, name] of [['junior-social-worker','初级社会工作师'],['mid-social-worker','中级社会工作师']]) {
-    await db.query('INSERT INTO exams(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING', [examId,name])
+    await db.query('INSERT INTO knowledge_nodes(id,title) VALUES($1,$2) ON CONFLICT DO NOTHING', [examId,name])
     for (let year = 2026; year <= 2029; year++) await db.query(`INSERT INTO exam_cycles(id,exam_id,year,ends_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [`${examId}-${year}`,examId,year,`${year}-05-31T23:59:59+08:00`])
+    await db.query(`INSERT INTO exam_year_entries(id,exam_id,year,cutoff_date) SELECT 'period-guide-'||id,exam_id,year,(ends_at AT TIME ZONE 'Asia/Shanghai')::date FROM exam_cycles WHERE exam_id=$1 ON CONFLICT(exam_id,year) DO NOTHING`,[examId])
   }
   const categories = [
     ['social-work', null, '社会工作', 10],
@@ -34,7 +36,7 @@ export async function seed() {
   for (const [categoryId, parentId, name, sort] of categories) await db.query('INSERT INTO exam_categories(id,parent_id,name,sort_order) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [categoryId, parentId, name, sort])
   await db.query("UPDATE exams SET category_id='social-worker-exam' WHERE id IN ('junior-social-worker','mid-social-worker') AND category_id IS NULL")
   await db.query("INSERT INTO exam_plan_configs(exam_id,prep_days,sprint_days,default_rest_days) VALUES('junior-social-worker',90,14,1),('mid-social-worker',120,14,1) ON CONFLICT(exam_id) DO NOTHING")
-  const put = async (itemId: string, kind: string, title: string, payload: any, parent: string | null = null, examId: string | null = 'junior-social-worker') => db.query(`INSERT INTO content(id,exam_id,kind,parent_id,title,status,payload,source) VALUES($1,$2,$3,$4,$5,'published',$6,'demo_test') ON CONFLICT DO NOTHING`, [itemId,examId,kind,parent,title,JSON.stringify({ ...payload,isTestData: true })])
+  const put = async (itemId: string, kind: string, title: string, payload: any, parent: string | null = null, examId: string | null = 'junior-social-worker') => db.query(`INSERT INTO content(id,exam_id,kind,parent_id,title,status,payload,source) SELECT $1,$2,$3,$4,$5,'published',$6,'demo_test' WHERE NOT EXISTS(SELECT 1 FROM content WHERE id=$1)`, [itemId,examId,kind,parent,title,JSON.stringify({ ...payload,isTestData: true })])
   for (const subject of knowledgeSubjects) {
     await put(subject.id, 'subject', subject.name, { ...subject, chapters: undefined })
     for (const chapter of subject.chapters) {
@@ -47,12 +49,10 @@ export async function seed() {
   }
   for (const course of courseCatalog) {
     await put(course.id, 'course', course.sectionName, { ...course, requiredLevel: 'vip' }, course.sectionId)
-    await db.query('INSERT INTO course_links(course_id,target_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [course.id,course.sectionId])
     if (course.hasHandout) await put(`handout-${course.id}`, 'handout', course.handoutName, { courseId: course.id, version: 1, downloadUrl: '', requiredLevel: 'vip' }, course.id)
   }
   const pointCourse = { ...courseCatalog[0], id: 'course-point-kp-1-1-1', knowledgePointId: 'kp-1-1-1', sectionName: '社会层面的目标 · 知识点精讲', type: 'article', typeName: '图文', intro: '【测试内容】围绕社会层面的目标，结合解决社会问题、促进社会公平等情境进行专项讲解。', progress: 0, currentMinute: 0, requiredLevel: 'vip' }
   await put(pointCourse.id,'course',pointCourse.sectionName,pointCourse,'kp-1-1-1')
-  await db.query('INSERT INTO course_links(course_id,target_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [pointCourse.id,'kp-1-1-1'])
   for (const question of practiceQuestions) await put(question.id, 'question', question.stem, question, question.knowledgePointId)
   const mid='mid-social-worker'
   await put('mid-subject-test','subject','【测试内容】社会工作综合能力（中级）',{color:'#3569e8',icon:'map'},null,mid)
@@ -66,7 +66,7 @@ export async function seed() {
     for (let n=1;n<=6;n++) await put(`${kind}-${n}`,kind,`【测试内容】${name} ${n}`,{ content: kind === 'faq' ? '可在学习服务中查看课程、讲义、学习计划和订单。正式客服与服务协议待配置。' : '本机业务测试正在进行，订单为模拟支付，不产生真实扣款。',publisher:'上行宝'},null,null)
   }
   for (const [feature, name] of Object.entries(featureNames)) {
-    await db.query('INSERT INTO ai_features(id,name,config) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [feature,name,JSON.stringify({ provider:'APIKEY.FUN',baseUrl:'https://api.apikey.fun/v1',protocol:'responses',mode:'mock',...pricePresets[2],maxTokens:2048,timeoutSeconds:45,dailyLimit:20,prompt:'你是社会工作考试学习助手。仅根据提供的资料回答；依据不足请明确说明。不得编造考试政策、分数或引用。' })])
+    await db.query('INSERT INTO ai_features(id,name,config) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [feature,name,JSON.stringify({ provider:'APIKEY.FUN',baseUrl:'https://api.apikey.fun/v1',protocol:'responses',mode:'mock',...pricePresets[2],maxTokens:2048,timeoutSeconds:45,dailyLimit:20,prompt:feature==='grading'?defaultGradingPrompt:'你是社会工作考试学习助手。仅根据提供的资料回答；依据不足请明确说明。不得编造考试政策、分数或引用。' })])
   }
   if(process.env.APP_MODE!=='production') await seedTestStudents()
 }

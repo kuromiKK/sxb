@@ -32,7 +32,9 @@ test('administrator and student identities are isolated', async t => {
       assert.equal(a.status, 200); admin = a.data.token; adminId = a.data.user.id
       const code = await req('/auth/code', 'POST', { phone: process.env.ADMIN_PHONE })
       assert.match(code.data.testCode, /^\d{4}$/)
-      const s = await req('/auth/phone', 'POST', { phone: process.env.ADMIN_PHONE, code: code.data.testCode })
+      const challenge = await req('/auth/phone', 'POST', { phone: process.env.ADMIN_PHONE, code: code.data.testCode })
+      assert.equal(challenge.data.consentRequired,true)
+      const s=await req('/auth/protocol-consent','POST',{challenge:challenge.data.challenge,confirmed:true,versions:challenge.data.protocols.map((p:any)=>({kind:p.kind,version:p.version}))})
       assert.equal(s.status, 200); student = s.data.token; studentId = s.data.user.id
       assert.notEqual(studentId, adminId); assert.equal(s.data.user.role, 'student')
       assert.equal((await req('/admin/administrators', 'GET', undefined, student)).status, 403)
@@ -41,7 +43,8 @@ test('administrator and student identities are isolated', async t => {
     })
     await t.test('any valid unseeded phone may sign in and become an admin separately', async () => {
       const code = await req('/auth/code', 'POST', { phone: secondPhone })
-      const s = await req('/auth/phone', 'POST', { phone: secondPhone, code: code.data.testCode })
+      const challenge = await req('/auth/phone', 'POST', { phone: secondPhone, code: code.data.testCode })
+      const s=await req('/auth/protocol-consent','POST',{challenge:challenge.data.challenge,confirmed:true,versions:challenge.data.protocols.map((p:any)=>({kind:p.kind,version:p.version}))})
       assert.equal(s.status, 200)
       const create = await req('/admin/administrators', 'POST', { phone: secondPhone, nickname: '测试管理员', password: 'Test-Password-1234' }, admin)
       assert.equal(create.status, 201); secondId = create.data.id; assert.notEqual(secondId, s.data.user.id)

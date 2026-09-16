@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { knowledgeSubjects } from '@/mock/data'
 import { backOrFallback } from '@/utils/navigation'
 import { api, token, selectedExamId, showApiError } from '@/services/api'
 
+import { createLearningVisit } from '@/utils/learning-visit'
+const visit=createLearningVisit()
+onUnload(()=>visit.close())
+onHide(()=>visit.leave())
+onShow(()=>{if(record.value)recordRecite()})
 type ContentPart = { id: string; text: string; blank: boolean }
 const pointId = ref('')
 const revealed = ref<Set<string>>(new Set())
@@ -70,7 +75,7 @@ onLoad((options) => {
   uni.setStorageSync(recentPointKey, point.value.id)
   recordRecite()
 })
-function recordRecite(){if(token()&&record.value)void api('/learning-events','POST',{examId:selectedExamId(),kind:'recite',sourceId:point.value.id}).catch(showApiError)}
+function recordRecite(){if(token()&&record.value)void visit.begin(point.value.id)}
 </script>
 
 <template>

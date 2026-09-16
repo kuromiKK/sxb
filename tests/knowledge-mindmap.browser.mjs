@@ -1,0 +1,78 @@
+import 'dotenv/config'
+import assert from 'node:assert/strict'
+import {mkdir} from 'node:fs/promises'
+import {chromium,expect} from '@playwright/test'
+const browser=await chromium.launch({channel:'chrome',headless:true})
+const output='.local/qa/knowledge-mindmap'
+await mkdir(output,{recursive:true})
+try{
+  const page=await browser.newPage({viewport:{width:1733,height:1272},reducedMotion:process.env.GRAPH_TEST_MOTION==='on'?'no-preference':'reduce'})
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  await page.goto('http://127.0.0.1:5180/#knowledge-graph')
+  await page.getByPlaceholder('请输入手机号').fill(process.env.ADMIN_PHONE)
+  await page.getByPlaceholder('请输入密码').fill(process.env.ADMIN_PASSWORD)
+  await page.getByRole('button',{name:'登录',exact:true}).click()
+  const response=page.waitForResponse(r=>r.url().includes('/admin/knowledge-structure/'))
+  await page.locator('.grid button').filter({hasText:'初级社会工作师'}).click()
+  const data=await(await response).json()
+  await page.getByRole('tab',{name:'思维导图',exact:true}).click()
+  const panel=page.locator('.knowledge-mindmap'),canvas=panel.locator('.mm-canvas')
+  const ready=async()=>{await expect(canvas).toHaveAttribute('aria-busy','false');await expect(panel.locator('.mm-root')).toHaveCount(1)}
+  await ready();await expect(panel.locator('.mm-node')).toHaveCount(data.subjects.length+1)
+  assert((await canvas.boundingBox()).height>=700)
+  const rootBox=await panel.locator('.mm-root').boundingBox()
+  const subjectBoxes=await panel.locator('.mm-node[data-node-type="subject"]').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().x))
+  assert(subjectBoxes.some(x=>x<rootBox.x)&&subjectBoxes.some(x=>x>rootBox.x),'Mind map subjects must branch on both sides')
+  await page.screenshot({path:output+'/overview.png',fullPage:true})
+  const subject=data.subjects[0]
+  await panel.getByRole('button',{name:'展开科目：'+subject.title,exact:true}).click()
+  await expect(panel.locator('.mm-node[data-node-type="chapter"]')).toHaveCount(subject.chapters.length);await ready()
+  await panel.getByRole('button',{name:'适配完整思维导图',exact:true}).click()
+  await page.screenshot({path:output+'/subject.png',fullPage:true})
+  const chapter=subject.chapters.find(c=>c.sections.some(s=>s.knowledge.length&&s.courses.length))
+  const section=chapter.sections.find(s=>s.knowledge.length&&s.courses.length)
+  const knowledge=section.knowledge[0],course=section.courses[0]
+  async function locate(node){
+    const input=panel.getByRole('combobox',{name:'搜索脑图节点',exact:true})
+    await input.fill(node.title)
+    const kind={subject:'科目',chapter:'章',section:'节',knowledge:'知识点',course:'课程'}[node.type]
+    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({has:page.locator('.mm-option-type',{hasText:new RegExp('^'+kind+'$')})}).filter({hasText:node.title}).first().click()
+    await expect(panel.locator('.mm-selected')).toHaveAttribute('data-node-id',node.id);await ready()
+  }
+  await locate(knowledge)
+  for(const id of [subject.id,chapter.id,section.id,knowledge.id,course.id])await expect(panel.locator(`.mm-node[data-node-id="${id}"]`)).toHaveCount(1)
+  await expect(panel.locator('.mm-root .mm-title')).toHaveText('初级社会工作师')
+  const node=panel.getByRole('button',{name:'知识点：'+knowledge.title,exact:true})
+  await node.focus();await expect(node.locator('.mm-tooltip')).toBeVisible();await node.press('Enter')
+  await expect(page.locator('.el-drawer:visible')).toBeVisible()
+  await page.locator('.el-drawer:visible').getByRole('button',{name:'取消',exact:true}).click()
+  await locate(section)
+  await panel.getByRole('button',{name:'收起节：'+section.title,exact:true}).click()
+  await expect(panel.locator(`.mm-node[data-node-id="${knowledge.id}"]`)).toHaveCount(0)
+  await panel.getByRole('button',{name:'展开节：'+section.title,exact:true}).click()
+  await expect(panel.locator(`.mm-node[data-node-id="${knowledge.id}"]`)).toHaveCount(1)
+  await locate(course)
+  await panel.getByRole('button',{name:'全屏脑图',exact:true}).click();await expect(panel).toHaveClass(/is-fullscreen/);await ready()
+  await locate(course)
+  await panel.getByRole('button',{name:'课程：'+course.title,exact:true}).click()
+  await expect(panel).not.toHaveClass(/is-fullscreen/);await expect(page.locator('.el-drawer:visible')).toBeVisible()
+  await page.locator('.el-drawer:visible').getByRole('button',{name:'取消',exact:true}).click()
+  await locate(section);await page.screenshot({path:output+'/section.png',fullPage:true})
+  await panel.getByRole('button',{name:'收起分支',exact:true}).click()
+  await expect(panel.locator('.mm-node')).toHaveCount(data.subjects.length+1);await ready()
+  const width=(await panel.locator('.mm-root').boundingBox()).width
+  await panel.getByRole('button',{name:'放大思维导图',exact:true}).click()
+  await expect.poll(async()=>(await panel.locator('.mm-root').boundingBox()).width).toBeGreaterThan(width)
+  await panel.getByRole('button',{name:'适配完整思维导图',exact:true}).click()
+  await page.setViewportSize({width:1280,height:900});await ready()
+  await page.screenshot({path:output+'/laptop.png',fullPage:true})
+  await page.getByRole('tab',{name:'关系图谱',exact:true}).click()
+  await expect(page.locator('.kr-node-root')).toHaveCount(1)
+  await page.getByRole('tab',{name:'列表管理',exact:true}).click();await expect(page.locator('.knowledge-list-manager')).toBeVisible()
+  await page.getByRole('tab',{name:'思维导图',exact:true}).click();await ready()
+  await page.setViewportSize({width:390,height:844});await ready()
+  assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+2))
+  await page.screenshot({path:output+'/mobile.png',fullPage:true})
+  assert.deepEqual(errors,[])
+  console.log(JSON.stringify({status:'PASS',g6Mindmap:true,twoSidedBranches:true,expandCollapse:true,searchOpensAncestors:true,courseAndKnowledgeDrawers:true,fullscreen:true,zoom:true,contentWrites:0}))
+}finally{await browser.close()}

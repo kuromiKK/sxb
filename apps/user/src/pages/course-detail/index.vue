@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { backOrFallback } from '@/utils/navigation'
@@ -10,22 +10,29 @@ import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
 import { applyCourseDebugAccount, canAccessCourse, courseDebugOptions, getCourseAccessLevel } from '@/utils/course-access'
 import { api, writeRecord, showApiError, refreshRights } from '@/services/api'
+import { refreshCatalog } from '@/services/catalog'
+import VerificationGate from '@/components/VerificationGate.vue'
+import {verifiedDownload,openDownload} from '@/utils/verified-download'
+const verification=ref<InstanceType<typeof VerificationGate>>()
 
+import { createLearningVisit } from '@/utils/learning-visit'
+const visit=createLearningVisit()
+onHide(()=>visit.leave())
+onShow(()=>{if(pageReady.value)void visit.begin(courseId.value)})
+onUnload(()=>visit.close())
 const { state, login, logout, requireLogin } = useAppStore()
 const courseId = ref(courseCatalog[0]?.id || '')
 const note = ref('')
 const noteSaved = ref(false)
 const isPlaying = ref(false)
 const completed = ref(false)
-const codeModalVisible = ref(false)
-const verificationCode = ref('')
-const inputCode = ref('')
 const downloaded = ref(false)
 const favorite = ref(false)
 const pageReady = ref(false)
 const articleExpanded = ref(false)
 
-const course = computed<CourseLesson>(() => courseCatalog.find(item => item.id === courseId.value) || courseCatalog[0] || {id:courseId.value,progress:0,currentMinute:0} as CourseLesson)
+const detailData=ref<Partial<CourseLesson>>({})
+const course = computed<CourseLesson>(() => ({...(courseCatalog.find(item => item.id === courseId.value) || {id:courseId.value,progress:0,currentMinute:0} as CourseLesson),...detailData.value}))
 const record = computed(() => {
   for (const subject of knowledgeSubjects) {
     const chapter = subject.chapters.find(item => item.id === course.value.chapterId)
@@ -36,14 +43,17 @@ const record = computed(() => {
   }
   return undefined
 })
-const knowledgePoints = computed(() => record.value?.section.points || [])
+const knowledgePoints = computed(() => (record.value?.section.points || []).filter(point => !course.value.knowledgePointId || point.id === course.value.knowledgePointId))
 const articleSections = computed<Array<{title:string;paragraphs:string[]}>>(() => (course.value as any).articleSections || [{title:course.value.sectionName,paragraphs:[course.value.intro || '课程内容待发布']}])
 const mediaUrl = computed(() => String((course.value as any).mediaUrl || ''))
+const courseBlocks = computed<any[]>(() => (course.value as any).blocks || [])
+const coursePoster = computed(() => String((course.value as any).posterUrl || ''))
 const mediaProgress = async (event:any) => {
   const seconds=Number(event.detail.currentTime)||0
-  const duration=Number(event.detail.duration)||1
+  const duration=Number(event.detail.duration)||0
+  visit.progress(seconds,duration)
   currentMinute.value=Math.floor(seconds/60)
-  courseProgress.value=Math.min(100,Math.round(seconds/duration*100))
+  if(duration>0)courseProgress.value=Math.min(100,Math.round(seconds/duration*100))
 }
 const accessLevel = ref(getCourseAccessLevel())
 const canAccess = computed(() => accessLevel.value === 'full' || (accessLevel.value === 'trial' && course.value.canTrial))
@@ -72,9 +82,10 @@ onLoad(async (options) => {
     return
   }
   try {
+    await refreshCatalog()
     await refreshRights()
     const detail = await api(`/courses/${courseId.value}`)
-    Object.assign(course.value, detail)
+    detailData.value=detail
   } catch (error) { showApiError(error); return }
   accessLevel.value = getCourseAccessLevel()
   if (!canAccess.value) {
@@ -93,6 +104,7 @@ onLoad(async (options) => {
   const favorites = getFavoriteIds()
   favorite.value = favorites.includes(courseId.value)
   pageReady.value = true
+  void visit.begin(courseId.value)
 })
 
 const typeIcon = (type: CourseLesson['type']) => type === 'video' ? 'videocam' : type === 'audio' ? 'sound' : 'compose'
@@ -128,27 +140,14 @@ const finishCourse = async () => {
   uni.showToast({ title: '已完成本节课程', icon: 'success' })
 }
 const openKnowledge = (pointId: string) => uni.navigateTo({ url: `/pages/knowledge-detail/index?id=${encodeURIComponent(pointId)}` })
-const openCodeModal = () => {
+const openCodeModal = async () => {
   if (!course.value.hasHandout) return
-  verificationCode.value = String(Math.floor(1000 + Math.random() * 9000))
-  inputCode.value = ''
-  codeModalVisible.value = true
-}
-const verifyDownload = async () => {
-  if (inputCode.value.trim() !== verificationCode.value) return showToast('验证码不正确，请重新输入')
-  codeModalVisible.value = false
   try {
-    const result=await api(`/handouts/handout-${course.value.id}/download`)
-    // #ifdef H5
-    window.location.assign(result.url)
-    // #endif
-    // #ifndef H5
-    uni.downloadFile({url:result.url,success:r=>{if(r.statusCode===200)uni.openDocument({filePath:r.tempFilePath,showMenu:true});else showToast('下载失败')},fail:()=>showToast('下载失败')})
-    // #endif
+    const result=await verifiedDownload(verification.value!,(course.value as any).handoutDownloadPath||`/handouts/handout-${course.value.id}/download`)
+    openDownload(result.url)
     downloaded.value=true
   } catch(error){showApiError(error)}
 }
-const refreshCode = () => { verificationCode.value = String(Math.floor(1000 + Math.random() * 9000)); inputCode.value = '' }
 const goCourse = async (target?: CourseLesson, completeCurrent = false) => {
   if (!target) return
   if (!canAccessCourse(target.canTrial)) {
@@ -181,7 +180,8 @@ const applyDebug = (key: string) => {
     <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">精讲课</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
     <view class="crumb"><text>{{ course.subjectName }}</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.chapterNo }}章</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.sectionNo }}节</text></view>
 
-    <video v-if="mediaUrl" :src="mediaUrl" controls style="width:100%;height:220px" @timeupdate="mediaProgress" @ended="finishCourse" />
+    <video v-if="mediaUrl&&course.type==='video'" :src="mediaUrl" :poster="coursePoster" controls style="width:100%;height:220px" @timeupdate="mediaProgress" @pause="visit.flush()" @ended="visit.flush();finishCourse()" />
+    <audio v-else-if="mediaUrl&&course.type==='audio'" :src="mediaUrl" :name="course.sectionName" controls @timeupdate="mediaProgress" @pause="visit.flush()" @ended="visit.flush();finishCourse()" />
     <view v-else-if="course.type !== 'article'" class="media-panel" :class="`media-${course.type}`">
       <view class="media-visual"><view class="media-orbit"></view><view class="media-main-icon"><uni-icons :type="typeIcon(course.type)" size="35" color="#fff" /></view><text>{{ course.type === 'video' ? '视频精讲' : '音频精讲' }}</text></view><view class="media-controls"><text>00:{{ String(currentMinute).padStart(2, '0') }}</text><slider :value="courseProgress" min="0" max="100" activeColor="#f2b04f" backgroundColor="rgba(255,255,255,.24)" block-size="13" @change="seek" /><text>{{ course.totalMinutes }}:00</text><button class="media-play" @tap="togglePlay"><uniIcons :type="isPlaying ? 'pause' : 'play-filled'" size="16" color="#fff" /></button></view>
     </view>
@@ -192,11 +192,12 @@ const applyDebug = (key: string) => {
       <view class="article-course-head">
         <view class="article-label-line"><text>图文精讲</text></view>
         <view class="article-course-title-row"><text>第{{ course.sectionNo }}节 {{ course.sectionName }}</text><text class="course-status" :class="{ done: completed || courseProgress === 100 }">{{ completed || courseProgress === 100 ? '已完成' : courseProgress ? `已学 ${courseProgress}%` : '未开始' }}</text></view>
-        <view class="article-facts"><view><uniIcons type="clock" size="15" color="#7b8797" /><text>约 {{ course.totalMinutes }} 分钟</text></view><view><uniIcons :type="course.hasHandout ? 'paperclip' : 'closeempty'" size="15" :color="course.hasHandout ? '#3569e8' : '#9aa5b4'" /><text>{{ course.hasHandout ? '含配套讲义' : '暂无讲义' }}</text></view><view v-if="course.canTrial"><uniIcons type="flag" size="15" color="#e98a3a" /><text>可试听</text></view></view>
+        <view class="article-facts"><view><uniIcons :type="course.hasHandout ? 'paperclip' : 'closeempty'" size="15" :color="course.hasHandout ? '#3569e8' : '#9aa5b4'" /><text>{{ course.hasHandout ? '含配套讲义' : '暂无讲义' }}</text></view><view v-if="course.canTrial"><uniIcons type="flag" size="15" color="#e98a3a" /><text>可试听</text></view></view>
       </view>
       <view class="article-visual"><view class="visual-axis"><view><text>原则</text><text>明确方向</text></view><uni-icons type="arrowright" size="18" color="#8d85cf" /><view><text>方法</text><text>落实行动</text></view><uni-icons type="arrowright" size="18" color="#8d85cf" /><view><text>成效</text><text>回应需要</text></view></view><text>从基本原则出发，连接政策要求与专业实践</text></view>
       <view class="article-body" :class="{ expanded: articleExpanded }">
-        <view v-for="section in articleSections" :key="section.title" class="article-section"><text class="article-section-title">{{ section.title }}</text><text v-for="paragraph in section.paragraphs" :key="paragraph" class="article-paragraph">{{ paragraph }}</text></view>
+        <template v-if="courseBlocks.length"><view v-for="(block,index) in courseBlocks" :key="index" class="article-section"><rich-text v-if="block.kind==='text'" :nodes="block.html"/><image v-else-if="block.kind==='image'&&block.url" :src="block.url" mode="widthFix" style="max-width:100%"/></view></template>
+        <template v-else><view v-for="section in articleSections" :key="section.title" class="article-section"><text class="article-section-title">{{ section.title }}</text><text v-for="paragraph in section.paragraphs" :key="paragraph" class="article-paragraph">{{ paragraph }}</text></view></template>
         <view class="article-key"><uni-icons type="info" size="18" color="#d47a25" /><text>阅读时重点关注原则如何转化为具体服务行动，并留意题干中的政策方向、服务目标和实践边界。</text></view>
       </view>
       <view v-if="!articleExpanded" class="article-fade"></view>
@@ -213,7 +214,7 @@ const applyDebug = (key: string) => {
     <button class="finish-button" :class="{ done: completed || courseProgress === 100 }" @tap="finishCourse"><uniIcons :type="completed || courseProgress === 100 ? 'checkmarkempty' : 'flag'" size="17" color="#fff" />{{ completed || courseProgress === 100 ? '已完成本节课程' : '标记为已完成' }}</button>
     <view class="course-nav"><button class="previous-course" :disabled="!previousCourse" @tap="goCourse(previousCourse)"><uniIcons type="back" size="18" :color="previousCourse ? '#3569e8' : '#b8c0cd'" />上一节</button><button class="next-course" :disabled="!nextCourse" @tap="goCourse(nextCourse, true)">下一节<uniIcons type="forward" size="18" :color="nextCourse ? '#fff' : '#b8c0cd'" /></button></view>
 
-    <view v-if="codeModalVisible" class="modal-mask" @tap.self="codeModalVisible = false"><view class="code-modal"><view class="modal-title-row"><text>验证后下载讲义</text><button @tap="codeModalVisible = false"><uniIcons type="closeempty" size="19" color="#8995a5" /></button></view><text class="modal-desc">请输入下方验证码，验证通过后开始下载 PDF 讲义。</text><view class="code-display"><text>{{ verificationCode }}</text><button @tap="refreshCode">换一张</button></view><input v-model="inputCode" type="number" maxlength="4" placeholder="请输入验证码" placeholder-class="code-placeholder" /><button class="verify-button" @tap="verifyDownload">验证并下载</button></view></view>
+    <VerificationGate ref="verification"/>
     <DebugMenu page="精讲课账号状态" :options="courseDebugOptions" @select="applyDebug" />
   </view>
 </template>

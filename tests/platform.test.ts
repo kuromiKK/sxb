@@ -32,13 +32,15 @@ test('persistent platform business rules', async t => {
   let admin='',student='',other='',uid=''
   const exam='junior-social-worker'
   try {
-    await t.test('exam deadlines, downgrade and 24-hour boundary',()=>{
+    await t.test('exam deadlines expire both paid levels and cap trials at the cycle boundary',()=>{
       const endsAt='2027-05-31T15:59:59Z',nextEndsAt='2028-05-31T15:59:59Z'
       assert.equal(member.effectiveLevel({level:'svip',endsAt,nextEndsAt},Date.parse(endsAt)-1),'svip')
-      assert.equal(member.effectiveLevel({level:'svip',endsAt,nextEndsAt},Date.parse(endsAt)),'vip')
+      assert.equal(member.effectiveLevel({level:'svip',endsAt,nextEndsAt},Date.parse(endsAt)),'free')
       assert.equal(member.effectiveLevel({level:'svip',endsAt,nextEndsAt},Date.parse(nextEndsAt)),'free')
       assert.equal(member.effectiveLevel({level:'vip',endsAt,nextEndsAt},Date.parse(endsAt)),'free')
       assert.equal(member.effectiveLevel({level:'trial',endsAt,nextEndsAt,trialEndsAt:endsAt},Date.parse(endsAt)),'free')
+      assert.equal(member.effectiveLevel({level:'trial',endsAt,trialEndsAt:nextEndsAt},Date.parse(endsAt)),'free')
+      assert.equal(member.effectiveLevel({level:'svip',startsAt:endsAt,endsAt:nextEndsAt},Date.parse(endsAt)-1),'free')
       assert.equal(member.prices.upgrade,20000)
     })
     await t.test('password hashing, encryption and AI cached-token pricing',()=>{
@@ -53,7 +55,8 @@ test('persistent platform business rules', async t => {
       const a=await req('/auth/admin','POST',{phone:process.env.ADMIN_PHONE,password:process.env.ADMIN_PASSWORD});assert.equal(a.status,200);admin=a.data.token
       for(const phone of ['13900000101','13900000102']){
         const code=await req('/auth/code','POST',{phone});assert.match(code.data.testCode,/^\d{4}$/)
-        const login=await req('/auth/phone','POST',{phone,code:code.data.testCode});assert.equal(login.status,200)
+        const challenge=await req('/auth/phone','POST',{phone,code:code.data.testCode});assert.equal(challenge.status,200)
+        const login=await req('/auth/protocol-consent','POST',{challenge:challenge.data.challenge,confirmed:true,versions:challenge.data.protocols.map((p:any)=>({kind:p.kind,version:p.version}))});assert.equal(login.status,200)
         if(!student){student=login.data.token;uid=login.data.user.id}else other=login.data.token
         assert.equal((await req('/auth/phone','POST',{phone,code:code.data.testCode})).status,400)
       }
@@ -66,7 +69,9 @@ test('persistent platform business rules', async t => {
       assert(r.data.courseCatalog.some((c:any)=>c.knowledgePointId==='kp-1-1-1'))
     })
     await t.test('order payment is idempotent; membership is isolated per exam',async()=>{
-      const create=await req('/orders','POST',{examId:exam,product:'vip'},student);assert.equal(create.status,200)
+      const cycle=(await db.query('SELECT id FROM exam_cycles WHERE exam_id=$1 AND starts_at<=now() AND ends_at>now()',[exam])).rows[0]
+      for(const type of ['vip','trial'])assert.equal((await req('/admin/products/platform-'+type,'PUT',{version:0,config:{title:type,type:type==='trial'?'trial':'entitlement',examId:exam,cycleId:cycle.id,level:'vip',priceCents:type==='trial'?100:59900,status:'published',trialHours:24,minimumHours:10,shortNotice:'体验至考期结束，请确认'}},admin)).status,200)
+      const create=await req('/orders','POST',{productId:'platform-vip'},student);assert.equal(create.status,200)
       assert.equal(create.data.order.amount_cents,59900)
       const orderId=create.data.order.id
       assert.equal((await req(`/orders/${orderId}/test-payment`,'POST',{outcome:'success'},other)).status,404)
@@ -76,14 +81,13 @@ test('persistent platform business rules', async t => {
       assert.equal((await req('/rights/mid-social-worker','GET',undefined,student)).data.level,'free')
       assert.equal((await req('/reports/'+exam+'/2026-07','GET',undefined,student)).status,403)
     })
-    await t.test('support adjustment minimum and audit; SVIP upgrade',async()=>{
-      const o=(await req('/orders','POST',{examId:exam,product:'upgrade'},student)).data.order
-      assert.equal(o.amount_cents,20000)
-      assert.equal((await req('/admin/orders/'+o.id,'PATCH',{amountCents:9999,reason:'test adjustment'},admin)).status,400)
-      assert.equal((await req('/admin/orders/'+o.id,'PATCH',{amountCents:15000,reason:'test adjustment'},admin)).status,200)
-      assert.equal((await req(`/orders/${o.id}/test-payment`,'POST',{outcome:'success'},student)).status,200)
+    await t.test('legacy hardcoded upgrade is unavailable; audited manual rights remain supported',async()=>{
+      assert.equal((await req('/orders','POST',{examId:exam,product:'upgrade'},student)).status,400)
+      assert.equal((await req('/orders','POST',{productId:'platform-vip'},student)).status,400)
+      const cycle=(await db.query('SELECT id FROM exam_cycles WHERE exam_id=$1 AND starts_at<=now() AND ends_at>now()',[exam])).rows[0]
+      assert.equal((await req('/admin/users/'+uid+'/entitlements/'+exam,'PUT',{action:'set',level:'svip',cycleId:cycle.id,version:0,reason:'平台回归验证SVIP权限'},admin)).status,200)
       assert.equal((await req('/rights/'+exam,'GET',undefined,student)).data.level,'svip')
-      assert((await db.query("SELECT id FROM audit_logs WHERE action='order.adjust' AND target_id=$1",[o.id])).rows.length)
+      assert((await db.query("SELECT id FROM audit_logs WHERE action='entitlement.adjust' AND target_id=$1",[uid])).rows.length)
     })
     await t.test('learning records persist and remain private',async()=>{
       assert.equal((await req('/records/'+exam,'PUT',{kind:'note',sourceId:'kp-1-1-1',payload:{text:'test note'}},student)).status,200)
@@ -130,7 +134,7 @@ test('persistent platform business rules', async t => {
     })
     await t.test('AI local test logs zero cost without revealing credentials',async()=>{
       const features=(await req('/admin/ai','GET',undefined,admin)).data.features
-      assert.equal(features.length,10);assert(!JSON.stringify(features).includes('encrypted_key'))
+      assert.equal(features.length,11);assert(!JSON.stringify(features).includes('encrypted_key'))
       const r=await req('/admin/ai/chat/test','POST',{},admin);assert.equal(r.status,200);assert.equal(r.data.status,'success');assert.equal(r.data.mode,'mock')
       assert.equal((await db.query("SELECT cost_yuan,is_test FROM ai_calls WHERE feature_id='chat'")).rows[0].cost_yuan,'0.00000000')
     })
@@ -139,7 +143,7 @@ test('persistent platform business rules', async t => {
       assert.equal((await req('/me','GET',undefined,student)).status,401)
     })
     await t.test('VIP trial lasts 24 hours and cannot be used for discounted upgrade',async()=>{
-      const o=(await req('/orders','POST',{examId:exam,product:'trial'},other)).data.order
+      const o=(await req('/orders','POST',{productId:'platform-trial'},other)).data.order
       assert.equal(o.amount_cents,100)
       assert.equal((await req(`/orders/${o.id}/test-payment`,'POST',{outcome:'failure'},other)).data.paymentFailed,true)
       assert.equal((await req(`/orders/${o.id}/test-payment`,'POST',{outcome:'success'},other)).status,200)
@@ -148,7 +152,7 @@ test('persistent platform business rules', async t => {
       assert.equal((await req('/orders','POST',{examId:exam,product:'upgrade'},other)).status,400)
       await db.query("UPDATE memberships SET trial_ends_at=now()-interval '1 second' WHERE order_id=$1",[o.id])
       assert.equal((await req('/rights/'+exam,'GET',undefined,other)).data.level,'free')
-      assert.equal((await req('/orders','POST',{examId:exam,product:'trial'},other)).status,400)
+      assert.equal((await req('/orders','POST',{productId:'platform-trial'},other)).status,400)
     })
     await t.test('inviter binding is permanent and cannot create a cycle',async()=>{
       const code=(await db.query('SELECT invite_code FROM users WHERE id=$1',[uid])).rows[0].invite_code

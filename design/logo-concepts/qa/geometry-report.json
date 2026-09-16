@@ -1,0 +1,62 @@
+[
+  {
+    "id": "01-shangxu",
+    "viewBox": [
+      0,
+      0,
+      256,
+      256
+    ],
+    "bounds": [
+      48,
+      48,
+      207,
+      215
+    ],
+    "inkCenter": [
+      130.18,
+      150.09
+    ],
+    "edgesClear": true
+  },
+  {
+    "id": "02-xingdai",
+    "viewBox": [
+      0,
+      0,
+      256,
+      256
+    ],
+    "bounds": [
+      44,
+      40,
+      211,
+      215
+    ],
+    "inkCenter": [
+      127.03,
+      130.33
+    ],
+    "edgesClear": true
+  },
+  {
+    "id": "03-zhizhan",
+    "viewBox": [
+      0,
+      0,
+      256,
+      256
+    ],
+    "bounds": [
+      44,
+      40,
+      212,
+      213
+    ],
+    "inkCenter": [
+      131.29,
+      129.77
+    ],
+    "edgesClear": true
+  }
+]

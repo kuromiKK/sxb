@@ -1,3 +1,4 @@
+import { supportsAutomaticGrading } from '../../shared/question-types.ts'
 import { z } from 'zod'
 import { db } from './db.ts'
 import { catalog } from './content.ts'
@@ -29,7 +30,7 @@ export async function saveLearningPlan(userId: string, examId: string, input: un
   if (b.subjectIds.some(s => !subjects.some(row => row.id === s)) || b.chapterIds.some(c => !chapters.some(row => row.id === c))) fail(400,'请选择当前考试已发布的科目和章')
   const subjectIds = [...new Set(chapters.filter((c:any) => b.chapterIds.includes(c.id)).map((c:any) => c.subjectId))]
   if (subjectIds.some(s => !b.subjectIds.includes(s))) fail(400,'所选章与科目不一致')
-  const questionIds = ctx.content.practiceQuestions.filter(q => b.chapterIds.includes(q.chapterId) && q.type !== 'subjective').map(q => q.id)
+  const questionIds = ctx.content.practiceQuestions.filter(q => (q.linkedChapterIds||[q.chapterId]).some((id:string)=>b.chapterIds.includes(id)) && supportsAutomaticGrading(q)).map(q => q.id)
   if (b.questionIds && (b.questionIds.length !== questionIds.length || new Set(b.questionIds).size !== questionIds.length || b.questionIds.some(q => !questionIds.includes(q)))) fail(400,'题库已变化，请刷新计划范围后重试')
   const payload = {...b, subjectIds, chapterIds:[...new Set(b.chapterIds)], restWeekdays:[...new Set(b.restWeekdays)], total:questionIds.length,questionIds,examId,target:b.dailyTarget,updatedAt:Date.now()}
   await db.query(`INSERT INTO user_records(id,user_id,exam_id,kind,source_id,payload) VALUES($1,$2,$3,'plan','current',$4) ON CONFLICT(user_id,exam_id,kind,source_id) DO UPDATE SET payload=$4,updated_at=now()`,[id(),userId,examId,JSON.stringify(payload)])
@@ -44,7 +45,7 @@ export async function getLearningPlan(userId: string, examId: string) {
   const saved = (await db.query("SELECT payload FROM user_records WHERE user_id=$1 AND exam_id=$2 AND kind='plan' AND source_id='current'",[userId,examId])).rows[0]?.payload
   const allChapters = content.knowledgeSubjects.flatMap(s => s.chapters.map((c:any) => c.id))
   const chapterIds = (saved?.chapterIds || allChapters).filter((c:string) => allChapters.includes(c))
-  const questions = content.practiceQuestions.filter(q => chapterIds.includes(q.chapterId) && q.type !== 'subjective')
+  const questions = content.practiceQuestions.filter(q => (q.linkedChapterIds||[q.chapterId]).some((id:string)=>chapterIds.includes(id)) && supportsAutomaticGrading(q))
   const questionIds = questions.map(q => q.id)
   const scope = new Set(questionIds)
   const restWeekdays = saved?.restWeekdays || [0,6,5].slice(0,config.defaultRestDays)

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">上行宝 · 知展 · 图形标</title>
+  <desc id="description">原创路径图形。两片错位展开的曲面像翻开的知识页，也像逐渐舒展的双翼。中间保留向上敞开的通道，表达从理解知识到独立运用的过程。</desc>
+  <g id="symbol" fill="#3569E8">
+    <path id="first-knowledge-page" d="M118 214C69 193 44 150 44 72C85 75 118 106 118 159Z"/>
+    <path id="unfolding-knowledge-page" d="M138 214V146C138 96 168 57 212 40C217 121 192 180 138 214Z"/>
+  </g>
+</svg>

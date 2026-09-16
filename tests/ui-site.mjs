@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import {finishLoginConsent} from './helpers/login-consent.mjs'
 import { chromium, expect } from '@playwright/test'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -22,10 +23,9 @@ try {
     const { testCode } = await (await response).json()
     await expect(page.locator('.login-tip')).toContainText(testCode)
     await page.locator('.field input').nth(1).fill(testCode)
-    await page.locator('.agreement').click()
     const result = page.waitForResponse(r => r.url().endsWith('/api/auth/phone') && r.status() === 200)
     await page.locator('.login-button').click()
-    const session = await (await result).json()
+    const session = await finishLoginConsent(page,await (await result).json())
     assert.equal(session.user.role, 'student')
     await page.locator('.home').waitFor()
     return session

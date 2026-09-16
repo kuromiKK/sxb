@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 280" role="img" aria-labelledby="title desc" font-family="Noto Sans SC, Microsoft YaHei, sans-serif">
+<title id="title">上行宝 · 上序 · 一次性水杯应用示意</title>
+<desc id="desc">双色纸杯的矢量设计预览。文字为示意内容，非印刷生产文件。</desc>
+<rect width="400" height="280" fill="#eef1f6"/>
+
+    <ellipse cx="202" cy="246" rx="107" ry="11" fill="#1829440d"/>
+    <g transform="translate(16 5) rotate(-9 115 140)">
+      <path d="M67 69L82 221Q119 237 156 221L172 69Z" fill="#fff" stroke="#d8dfeb"/>
+      <path d="M72 97L78 146Q120 156 166 146L171 97Z" fill="#3569E8"/>
+      <g transform="translate(88 110) scale(0.09765625)" fill="#fff"><path d="M108 164V54Q108 48 114 48H142V98H202L182 130H142V164Z"/><path d="M48 184H208L188 216H48Z"/></g><text x="116" y="128.0" font-size="12.25" fill="#fff" font-weight="700" >上行宝</text>
+      <text x="91" y="187" font-size="8" fill="#3569E8" font-weight="400" >每一步，都向上。</text>
+      <ellipse cx="119.5" cy="69" rx="53" ry="11" fill="#fdfdfc" stroke="#cbd3df" stroke-width="3"/>
+      <ellipse cx="119.5" cy="68" rx="46" ry="6" fill="#e9edf3"/>
+    </g>
+    <g transform="translate(81 -6) rotate(8 161 145)">
+      <path d="M105 65L122 224Q164 241 205 224L222 65Z" fill="#3569E8" stroke="#2c5ed7"/>
+      <path d="M207 77L193 227Q200 227 205 224L221 76Z" fill="#18294412"/>
+      <g transform="translate(133 99) scale(0.2421875)" fill="#fff"><path d="M108 164V54Q108 48 114 48H142V98H202L182 130H142V164Z"/><path d="M48 184H208L188 216H48Z"/></g>
+      <text x="141" y="181" font-size="15" fill="#fff" font-weight="700" >上行宝</text>
+      <text x="136" y="201" font-size="8" fill="#e3ebff" font-weight="400" >每一步，都向上。</text>
+      <ellipse cx="163.5" cy="65" rx="59" ry="12" fill="#fff" stroke="#d8dfeb" stroke-width="3"/>
+      <ellipse cx="163.5" cy="64" rx="51" ry="7" fill="#e9edf3"/>
+    </g>
+</svg>

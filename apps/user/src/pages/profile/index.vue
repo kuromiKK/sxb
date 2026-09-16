@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import CustomerService from '@/components/CustomerService.vue'
+import {siteSettings} from '@/services/site-settings'
 import { onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
@@ -21,16 +23,23 @@ const unreadNotice = ref(true)
 const pendingOrder = ref(true)
 type RightsLevel = 'none' | 'basic' | 'trial' | 'pro' | 'flagship'
 const rightsLevel = ref<RightsLevel>((uni.getStorageSync('sxb-demo-rights') || 'none') as RightsLevel)
-const qrPattern = Array.from({ length: 64 }, (_, index) => [0, 1, 3, 5, 6, 8, 10, 11, 14, 16, 18, 19, 22, 24, 27, 29, 31, 34, 36, 37, 40, 42, 44, 46, 49, 51, 53, 55, 57, 60, 62, 63].includes(index))
 const wrongBadge = computed(() => wrongCount.value > 99 ? '99+' : String(wrongCount.value))
 const rightsOptions: Array<{ key: RightsLevel; name: string; description: string }> = [
-  { key: 'none', name: '免费版', description: '仅可浏览公开学习内容' },
-  { key: 'basic', name: '免费版', description: '题库与基础学习功能' },
-  { key: 'trial', name: 'VIP 24小时体验', description: '限时学习可试听精讲课' },
+  { key: 'none', name: '普通会员', description: '仅可浏览公开学习内容' },
+  { key: 'basic', name: '普通会员', description: '题库与基础学习功能' },
+  { key: 'trial', name: '限时体验', description: '权益以当前考试的实际授权为准' },
   { key: 'pro', name: 'VIP', description: '全科题库、课程与知识图谱' },
   { key: 'flagship', name: 'SVIP', description: '解锁全部学习服务' },
 ]
-const currentRights = computed(() => rightsOptions.find(item => item.key === rightsLevel.value) || rightsOptions[0])
+const currentRights = computed(() => {
+  if(account.trial){
+    const detail=account.trialDetails
+    const duration=detail?.actualHours
+    return {name:detail?.title||`${account.level.toUpperCase()} 限时体验`,description:duration?`本次体验 ${Math.floor(duration*100)/100} 小时`:'限时体验权益'}
+  }
+  return rightsOptions.find(item => item.key === rightsLevel.value) || rightsOptions[0]
+})
+const rightsExpiry=computed(()=>account.expiresAt?new Date(account.expiresAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',...(account.trial?{hour:'2-digit',minute:'2-digit',hour12:false}:{})}):'待配置')
 
 const totalAnswers=ref(0)
 const learningDays=ref(0)
@@ -40,7 +49,7 @@ const correctRate = ref(0)
 const loadProfileData = async () => {
   await refreshRights()
   await refreshPersonalData()
-  rightsLevel.value=account.level==='svip'?'flagship':account.level==='vip'?(account.trial?'trial':'pro'):'none'
+  rightsLevel.value=account.trial?'trial':account.level==='svip'?'flagship':account.level==='vip'?'pro':'none'
   const stats=await api(`/stats/${selectedExamId()}`)
   totalAnswers.value=stats.daily.reduce((sum:number,r:any)=>sum+r.attempts,0)
   state.todayDone=stats.todayIds.length
@@ -96,7 +105,7 @@ const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value))
 
     <view class="rights-band" @tap="openCenter('rights')">
       <view class="rights-icon"><uni-icons :type="rightsLevel === 'none' ? 'locked' : 'medal'" size="22" color="currentColor" /></view>
-      <view class="rights-copy"><text>{{ currentRights.name }}</text><text>{{ rightsLevel === 'none' ? currentRights.description : `有效至 ${account.expiresAt ? new Date(account.expiresAt).toLocaleDateString() : '待配置'} · ${currentRights.description}` }}</text></view>
+      <view class="rights-copy"><text>{{ currentRights.name }}</text><text>{{ rightsLevel === 'none' ? currentRights.description : `有效至 ${rightsExpiry} · ${currentRights.description}` }}</text></view>
       <uni-icons type="right" size="18" color="currentColor" />
     </view>
     </view>
@@ -117,7 +126,7 @@ const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value))
 
     <view class="section-card"><view class="section-head"><text>学习服务</text></view><view class="menu-group">
       <view class="menu-row" @tap="open('/pages/learning-plan/index?returnUrl=%2Fpages%2Fprofile%2Findex')"><view class="menu-icon"><uni-icons type="calendar" size="20" color="#5f748b" /></view><view class="menu-copy"><text>学习计划</text><text>每日目标 {{ state.todayTarget }} 题</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
-      <view class="menu-row" @tap="open('/pages/exam-notices/index')"><view class="menu-icon"><uni-icons type="notification" size="20" color="#5f748b" /></view><view class="menu-copy"><text>考试须知</text><text>报名、赴考与考场重要信息</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
+      <view class="menu-row" @tap="open('/pages/exam-notice-detail/index')"><view class="menu-icon"><uni-icons type="notification" size="20" color="#5f748b" /></view><view class="menu-copy"><text>了解考试</text><text>本考期报考指南与学习指导</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="openCenter('handouts')"><view class="menu-icon"><uni-icons type="paperclip" size="20" color="#5f748b" /></view><view class="menu-copy"><text>我的讲义</text><text>课程讲义与下载记录</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="openCenter('orders')"><view class="menu-icon"><uni-icons type="wallet" size="20" color="#5f748b" /></view><view class="menu-copy"><text>我的订单</text><text>购买与支付记录</text></view><view v-if="pendingOrder" class="unread-dot"></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
     </view></view>
@@ -125,23 +134,15 @@ const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value))
     <view class="section-card"><view class="section-head"><text>消息中心</text></view><view class="menu-group compact">
       <view class="menu-row" @tap="openCenter('announcements')"><view class="menu-icon"><uni-icons type="notification" size="20" color="#5f748b" /></view><view class="menu-copy"><text>消息中心</text><text>学习提醒、订单通知与考试公告</text></view><view v-if="unreadNotice" class="unread-dot"></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="openCenter('faq')"><view class="menu-icon"><uni-icons type="help" size="20" color="#5f748b" /></view><view class="menu-copy"><text>常见问题</text><text>账号、学习和购买问题</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
-      <view class="menu-row" @tap="serviceVisible = true"><view class="menu-icon"><uni-icons type="chat" size="20" color="#5f748b" /></view><view class="menu-copy"><text>联系客服</text><text>企业微信人工客服</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
+      <view class="menu-row" @tap="serviceVisible = true"><view class="menu-icon"><uni-icons type="chat" size="20" color="#5f748b" /></view><view class="menu-copy"><text>联系客服</text><text>{{siteSettings.customer.name}}</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
       <view class="menu-row" @tap="referralVisible = true"><view class="menu-icon"><uni-icons type="gift" size="20" color="#5f748b" /></view><view class="menu-copy"><text>使用推荐码</text><text>绑定推荐关系，领取专属权益</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
-      <view class="menu-row" @tap="openCenter('about')"><view class="menu-icon"><uni-icons type="info" size="20" color="#5f748b" /></view><view class="menu-copy"><text>关于上行宝</text><text>协议、隐私与版本信息</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
+      <view class="menu-row" @tap="openCenter('about')"><view class="menu-icon"><uni-icons type="info" size="20" color="#5f748b" /></view><view class="menu-copy"><text>关于{{siteSettings.basic.name}}</text><text>协议、隐私与版本信息</text></view><uni-icons type="right" size="18" color="#a2adbb" /></view>
     </view></view>
 
     <AppTabBar active="profile" />
     <DebugMenu page="我的页面" :options="[{ key: 'rights-none', label: '无权益' }, { key: 'rights-basic', label: '基础版权益' }, { key: 'rights-trial', label: '1元试听权益' }, { key: 'rights-pro', label: '专业版权益' }, { key: 'rights-flagship', label: '旗舰版权益' }]" @select="applyDebug" />
 
-    <view v-if="serviceVisible" class="modal-mask" @tap="serviceVisible = false">
-      <view class="service-modal" @tap.stop>
-        <view class="qr-code"><view v-for="(filled, index) in qrPattern" :key="index" :class="{ filled }"></view></view>
-        <text class="service-title">扫一扫联系客服</text>
-        <text class="service-time">使用微信扫一扫，添加上行宝企业微信客服</text>
-        <text class="service-number">工作日 09:00-18:00 · SXB-KF01</text>
-        <button class="cancel-button" @tap="serviceVisible = false">关闭</button>
-      </view>
-    </view>
+    <CustomerService v-model="serviceVisible"/>
     <view v-if="referralVisible" class="modal-mask" @tap="referralVisible = false"><view class="service-modal" @tap.stop><text class="service-title">使用推荐码</text><text class="service-time">每位用户只能使用一次推荐码</text><input v-model="referralCode" maxlength="10" class="referral-input" placeholder="请输入10位推荐码" @input="referralCode=referralCode.toUpperCase()"/><button class="copy-button" :loading="referralBusy" @tap="useReferral">立即使用</button><button class="cancel-button" @tap="referralVisible=false">取消</button></view></view>
   </view>
 </template>

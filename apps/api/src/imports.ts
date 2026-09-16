@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import { db, transaction } from './db.ts'
 import { fail, id, audit } from './security.ts'
 import { validateQuestion } from './content.ts'
+import { validateConfiguredQuestion } from './question-types.ts'
 
 const headers = ['题目ID','题型','题目内容','选项A','选项B','选项C','选项D','选项E','正确答案','解析','知识点ID','年份','是否真题','参考答案','评分标准','满分']
 export async function template() {
@@ -49,7 +50,11 @@ export async function commitImport(actor:string,batchId:string,isTest:boolean) {
     if(batch.status!=='preview') fail(409,'此批次已经导入')
     if(batch.errors.length) fail(400,'请修复全部错误后重新上传')
     for(const row of batch.rows) {
+      if(row.payload.type==='configured')await validateConfiguredQuestion(row.payload,batch.exam_id,c)
+      const pointIds=row.payload.knowledgePointIds||[row.payload.knowledgePointId]
+      if((await c.query("SELECT id FROM knowledge_nodes WHERE id=ANY($1::text[]) AND exam_id=$2 AND kind='knowledge' FOR SHARE",[pointIds,batch.exam_id])).rows.length!==pointIds.length)fail(400,'知识点不存在或归属已变化，请重新预览')
       await c.query(`INSERT INTO content(id,exam_id,kind,parent_id,title,payload,status,source,is_test_data) VALUES($1,$2,'question',$3,$4,$5,'draft',$6,$7)`,[row.id,batch.exam_id,row.payload.knowledgePointId,row.payload.stem,JSON.stringify(row.payload),batch.filename,isTest])
+      if(row.grade!=null)await c.query('UPDATE questions SET grade=$2 WHERE id=$1',[row.id,row.grade])
     }
     await c.query(`UPDATE import_batches SET status='committed' WHERE id=$1`,[batchId])
     return batch.rows.length

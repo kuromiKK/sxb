@@ -1,0 +1,200 @@
+[
+  {
+    "file": "01-shangxu/app-icon-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 882960,
+    "whitePixels": 165188,
+    "transparentPixels": 0
+  },
+  {
+    "file": "01-shangxu/app-icon-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 344857,
+    "whitePixels": 64475,
+    "transparentPixels": 0
+  },
+  {
+    "file": "01-shangxu/app-icon-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 3414,
+    "whitePixels": 608,
+    "transparentPixels": 0
+  },
+  {
+    "file": "01-shangxu/app-icon-rounded-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 836485,
+    "whitePixels": 165188,
+    "transparentPixels": 46475
+  },
+  {
+    "file": "01-shangxu/app-icon-rounded-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 326480,
+    "whitePixels": 64475,
+    "transparentPixels": 18377
+  },
+  {
+    "file": "01-shangxu/app-icon-rounded-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 3164,
+    "whitePixels": 608,
+    "transparentPixels": 250
+  },
+  {
+    "file": "02-xingdai/app-icon-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 731397,
+    "whitePixels": 314475,
+    "transparentPixels": 0
+  },
+  {
+    "file": "02-xingdai/app-icon-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 285395,
+    "whitePixels": 122516,
+    "transparentPixels": 0
+  },
+  {
+    "file": "02-xingdai/app-icon-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 2786,
+    "whitePixels": 1141,
+    "transparentPixels": 0
+  },
+  {
+    "file": "02-xingdai/app-icon-rounded-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 684922,
+    "whitePixels": 314475,
+    "transparentPixels": 46475
+  },
+  {
+    "file": "02-xingdai/app-icon-rounded-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 267018,
+    "whitePixels": 122516,
+    "transparentPixels": 18377
+  },
+  {
+    "file": "02-xingdai/app-icon-rounded-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 2536,
+    "whitePixels": 1141,
+    "transparentPixels": 250
+  },
+  {
+    "file": "03-zhizhan/app-icon-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 816265,
+    "whitePixels": 229262,
+    "transparentPixels": 0
+  },
+  {
+    "file": "03-zhizhan/app-icon-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 318538,
+    "whitePixels": 89137,
+    "transparentPixels": 0
+  },
+  {
+    "file": "03-zhizhan/app-icon-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": false,
+    "hasAlpha": false,
+    "bluePixels": 3083,
+    "whitePixels": 790,
+    "transparentPixels": 0
+  },
+  {
+    "file": "03-zhizhan/app-icon-rounded-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 769790,
+    "whitePixels": 229262,
+    "transparentPixels": 46475
+  },
+  {
+    "file": "03-zhizhan/app-icon-rounded-640.png",
+    "width": 640,
+    "height": 640,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 300161,
+    "whitePixels": 89137,
+    "transparentPixels": 18377
+  },
+  {
+    "file": "03-zhizhan/app-icon-rounded-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "rounded": true,
+    "hasAlpha": true,
+    "bluePixels": 2833,
+    "whitePixels": 790,
+    "transparentPixels": 250
+  }
+]
