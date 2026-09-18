@@ -58,7 +58,7 @@ const visibleRows = computed(() =>
     .filter(
       (r) =>
         (!applied.search ||
-          r.code.includes(applied.search) ||
+          (r.code+' '+r.id).includes(applied.search) ||
           r.creator?.includes(applied.search)) &&
         (!applied.channel || r.channel === applied.channel) &&
         (!applied.status || r.status === applied.status) &&

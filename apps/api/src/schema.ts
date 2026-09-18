@@ -1,4 +1,5 @@
 import { db, transaction } from './db.ts'
+import { migrateImports } from './import-schema.ts'
 import {migrateSiteSettings} from './site-settings.ts'
 import {migrateIntegrations} from './integrations.ts'
 import {migrateWorkspaceTools} from './workspace-tools.ts'
@@ -18,7 +19,7 @@ import { migrateLearningRecords } from './learning-records.ts'
 import { migrateOrderManagement } from './order-management.ts'
 import { migrateCheatsheetManagement } from './cheatsheet-management.ts'
 import {migratePlatformMode} from './platform-mode.ts'
-export async function migrate() {await migrateCore();await migrateAdministratorDeletion();await migrateSiteSettings();await migrateIntegrations();await migrateProviders();await migrateWorkspaceTools();await migratePlatformMode()}
+export async function migrate() {await migrateCore();await migrateAdministratorDeletion();await migrateSiteSettings();await migrateIntegrations();await migrateProviders();await migrateWorkspaceTools();await migratePlatformMode();await migrateImports()}
 async function migrateAdministratorDeletion() {
   // Keep administrator identities for content ownership and historical audit references.
   await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_deleted_at timestamptz')

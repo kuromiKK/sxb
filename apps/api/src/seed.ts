@@ -14,17 +14,19 @@ import {isTestMode} from './platform-mode.ts'
 export async function seed() {
   await migrate()
   await initLearningTables()
+  const demoSeedDisabled=(await db.query("SELECT 1 FROM system_settings WHERE key='demo_seed_disabled' AND value='true'")).rows.length>0
   const messageTemplates = [
     ['weekly-plan','每周任务提醒','{{exam_name}}本周学习安排已更新','上周完成{{last_week_questions}}道题，本周计划完成{{this_week_questions}}道题。'],
     ['order-paid','购买成功通知','{{exam_name}}{{membership_permission}}已开通','有效期至{{membership_expire_time}}，感谢你的支持。'],
     ['report-ready','学习报告生成完成','{{report_month}}学习报告已生成','本月学习{{report_study_days}}天，完成{{report_questions}}道题。'],
     ['exam-reminder','考试倒计时提醒','距离{{exam_name}}考试还有{{exam_days_left}}天','请按学习计划安排复习。'],
   ]
-  for(const [tid,name,title,content] of messageTemplates) await db.query(`INSERT INTO message_templates(id,name,status,title,content,variables) VALUES($1,$2,'published',$3,$4,$5) ON CONFLICT(id) DO NOTHING`,[tid,name,title,content,JSON.stringify([])])
+  for(const [tid,name,title,content] of demoSeedDisabled?[]:messageTemplates) await db.query(`INSERT INTO message_templates(id,name,status,title,content,variables) VALUES($1,$2,'published',$3,$4,$5) ON CONFLICT(id) DO NOTHING`,[tid,name,title,content,JSON.stringify([])])
   if (process.env.ADMIN_PHONE && process.env.ADMIN_PASSWORD) {
     await db.query(`INSERT INTO users(id,phone,nickname,role,password_hash,invite_code,account_kind) VALUES($1,$2,'最高管理员','superadmin',$3,$4,'admin') ON CONFLICT(phone,account_kind) DO NOTHING`, [id(), process.env.ADMIN_PHONE, passwordHash(process.env.ADMIN_PASSWORD), String(randomInt(10000000, 99999999))])
   }
   if (process.env.APP_MODE === 'production'||!await isTestMode()) return
+  if(demoSeedDisabled)return
   for (const [examId, name] of [['junior-social-worker','初级社会工作师'],['mid-social-worker','中级社会工作师']]) {
     await db.query('INSERT INTO knowledge_nodes(id,title) VALUES($1,$2) ON CONFLICT DO NOTHING', [examId,name])
     for (let year = 2026; year <= 2029; year++) await db.query(`INSERT INTO exam_cycles(id,exam_id,year,ends_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [`${examId}-${year}`,examId,year,`${year}-05-31T23:59:59+08:00`])

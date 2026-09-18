@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref, watch } from 'vue'
 import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import QRCode from 'qrcode'
@@ -372,7 +373,7 @@ const shareReport = async () => {
 
 <template>
   <view v-if="loadedReport" class="report-page safe-top" :class="[{ 'multi-page': viewMode === 'multi' }, `device-${devicePreset}`]" :style="deviceStyle">
-    <view class="report-top"><button @tap="back"><uni-icons type="back" size="21" color="#dbe1eb" /></button><text>{{ report.month }}月学习报告</text><view v-if="viewMode === 'multi'" class="top-report-actions"><button :disabled="saving" @tap="savePoster"><uni-icons type="download" size="22" color="#e7ebf1" /></button><button @tap="shareReport"><uni-icons type="redo" size="22" color="#e7ebf1" /></button></view><view v-else></view></view>
+    <view class="report-top"><CircleAction @tap="back" tone="light"/><text>{{ report.month }}月学习报告</text><view v-if="viewMode === 'multi'" class="top-report-actions"><button :disabled="saving" @tap="savePoster"><uni-icons type="download" size="22" color="#e7ebf1" /></button><button @tap="shareReport"><uni-icons type="redo" size="22" color="#e7ebf1" /></button></view><view v-else></view></view>
     <view v-if="viewMode === 'long'" class="long-report">
     <view class="report-hero"><view class="hero-label"><text>MONTHLY REPORT</text><text>{{ report.generatedAt }} 生成</text></view><text class="hero-month">{{ report.year }}年 {{ report.month }}月</text><text class="hero-headline">{{ report.headline }}</text><view class="hero-metrics"><view><text>{{ report.metrics.studyDays }}</text><text>学习天数</text></view><view><text>{{ report.metrics.questions }}</text><text>完成题目</text></view><view><text>{{ formatMinutes(report.metrics.minutes) }}</text><text>学习时长</text></view><view><text>+{{ report.metrics.masteryGain }}%</text><text>掌握提升</text></view></view></view>
 

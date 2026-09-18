@@ -24,7 +24,7 @@ function periodISO(value:string){return value.replace(' ','T')+'+08:00'}
 const guideYears=(row:any)=>row.year_entries.filter((y:any)=>hasExamGuide(y.guideDocument)).map((y:any)=>y.year+' 年').join('、')
 function beforeTabLeave(){return !imageBusy.value&&!busy.value}
 const roots = computed(() => categories.value.filter(c => !c.parent_id))
-const filtered = computed(() => rows.value.filter(r => !search.value || r.name.includes(search.value) || r.short_title?.includes(search.value)))
+const filtered = computed(() => rows.value.filter(r => !search.value || (r.name+' '+r.id).toLowerCase().includes(search.value.trim().toLowerCase()) || r.short_title?.includes(search.value)))
 
 function parseIntro(value: any) {
   if (!value) return ''
@@ -118,7 +118,7 @@ defineExpose({ open, load })
 <template>
   <section class="projects-page">
     <form class="admin-filters" @submit.prevent="applySearch">
-      <label class="admin-filter-field exam-search-field"><span>考试名称</span><el-input v-model="keyword" aria-label="搜索考试名称或短标题" clearable placeholder="输入考试名称或短标题" @clear="applySearch"><template #prefix><Search :size="16" /></template></el-input></label>
+      <label class="admin-filter-field exam-search-field"><span>考试名称</span><el-input v-model="keyword" aria-label="搜索考试名称或短标题" clearable placeholder="输入考试名称或短标题或唯一 ID" @clear="applySearch"><template #prefix><Search :size="16" /></template></el-input></label>
       <div class="admin-filter-actions"><el-button type="primary" native-type="submit"><Search :size="16" />查询</el-button><el-button @click="resetSearch"><RotateCcw :size="16" />重置</el-button></div>
     </form>
     <el-table :data="filtered" empty-text="暂无考试项目">

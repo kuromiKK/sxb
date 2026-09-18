@@ -1,5 +1,6 @@
 /** Keep persisted action codes stable; all user-facing history uses this catalogue. */
 export const auditActions:Record<string,string>={
+ 'import.completed':'导入处理完成','content.bulk_disable':'批量停用内容','content.bulk_enable':'批量启用内容','content.bulk_publish':'批量发布内容','content.bulk_unpublish':'批量隐藏内容','content.bulk_draft':'批量转为草稿','content.bulk_review':'批量提交审核','maintenance.test_cleanup':'清理测试数据',
  'admin.login':'管理员登录','administrator.create':'新增管理员','administrator.update':'修改管理员','administrator.password_reset':'重设管理员密码','administrator.delete':'删除管理员',
  'ai.configure':'配置 AI 服务','ai.discover':'测试并读取模型','page-agent.model':'AI员工调用模型','page-agent.task':'AI员工执行任务',
  'article.save':'保存文章','article.status':'调整文章上下架','article.delete':'删除文章','cheatsheet.status':'调整小抄状态','cheatsheet.push':'推送考前小抄',

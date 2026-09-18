@@ -33,7 +33,7 @@ export const articleManagement=Router()
 articleManagement.get('/',async(req,res)=>{
  const q=z.object({title:z.string().max(2000).default(''),examId:z.string().max(160).default(''),status:z.enum(['','published','offline']).default(''),page:z.coerce.number().int().min(1).max(100000).default(1)}).parse(req.query)
  const args=[q.title.trim(),q.examId,q.status]
- const where=`WHERE ${visibleSql} AND ($1='' OR strpos(lower(c.title),lower($1))>0)
+ const where=`WHERE ${visibleSql} AND ($1='' OR strpos(lower(c.title),lower($1))>0 OR strpos(lower(c.id),lower($1))>0)
  AND ($2='' OR ($2='all' AND ${scopeSql}='all') OR ${examsSql} ? $2)
  AND ($3='' OR ($3='published' AND c.status='published') OR ($3='offline' AND c.status<>'published'))`
  const total=(await db.query('SELECT count(*)::int AS n FROM content c '+where,args)).rows[0].n

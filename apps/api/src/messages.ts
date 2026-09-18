@@ -15,7 +15,7 @@ const row=await transaction(async c=>{await lockResourceReferences(c);await vali
   },
   async list(input:any){
     const q=typeof input?.search==='string'?input.search.trim().slice(0,100):''; const type=input?.sendType; const params:any[]=[]; const where:string[]=[]
-    if(q){params.push('%'+q+'%');where.push(`title ILIKE $${params.length}`)}
+    if(q){params.push('%'+q+'%');where.push(`(title ILIKE ${params.length} OR id ILIKE ${params.length})`)}
     if(type&&['manual','scheduled','preset','draft'].includes(type)){params.push(type);where.push(`send_type=$${params.length}`)}
     return (await db.query(`SELECT m.*,t.name AS template_name,(SELECT count(*)::int FROM message_deliveries d WHERE d.message_id=m.id) AS sent_count,(SELECT count(*)::int FROM message_deliveries d WHERE d.message_id=m.id AND d.read_at IS NOT NULL) AS read_count FROM messages m LEFT JOIN message_templates t ON t.id=m.template_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY m.created_at DESC LIMIT 200`,params)).rows
   },

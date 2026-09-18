@@ -1,4 +1,4 @@
-export type ResourceKind = 'image' | 'video' | 'audio' | 'handout'
+export type ResourceKind = 'image' | 'video' | 'audio' | 'handout' | 'import'
 export type UploadedResource = { id: string; kind: ResourceKind; filename: string }
 
 /** Every persisted upload must be registered by the media API before being attached to content. */

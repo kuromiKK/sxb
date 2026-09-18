@@ -5,6 +5,8 @@ import KnowledgeReading from '@/components/KnowledgeReading.vue'
 import StudyContent from '@/components/StudyContent.vue'
 const data=ref<any>(),error=ref(''),busy=ref(true),previewToken=ref(''),courseId=ref('')
 const selectedCourse=computed(()=>data.value?.courses.find((c:any)=>c.id===courseId.value))
+const replacementBody=computed(()=>data.value?.node.kind==='knowledge'&&data.value.courses.some((c:any)=>c.type==='article'))
+const inlineCourses=computed(()=>[...(data.value?.courses||[])].sort((a:any,b:any)=>Number(a.type==='article')-Number(b.type==='article')))
 const path=computed(()=>data.value?.path.map((p:any)=>p.kind==='subject'?p.title:p.no?`第${p.no}${p.kind==='chapter'?'章':'节'}`:p.title)||[])
 let expiry:ReturnType<typeof setTimeout>|undefined
 async function load(){
@@ -29,8 +31,9 @@ onUnmounted(()=>clearTimeout(expiry))
   <template v-else-if="data">
    <view class="preview-top"><button v-if="selectedCourse" @tap="courseId=''">返回正文</button><text>{{selectedCourse?(data.node.kind==='section'?'精品课':'配套课'):data.node.kind==='section'?'节内容':'知识点详情'}}</text><text class="saved-state">{{data.node.status==='published'?'已发布':'未发布'}}</text></view>
    <template v-if="!selectedCourse">
-    <KnowledgeReading :title="data.node.title" :path="path" :stars="data.node.kind==='knowledge'?data.node.stars:undefined" :question-total="data.questionCount" :blocks="data.node.blocks" :heading="data.node.kind==='section'?'节正文':'知识点内容'" preview/>
-    <view v-if="data.courses.length" class="preview-courses"><text class="section-heading">{{data.node.kind==='section'?'本节精品课':'知识点配套课'}}</text><button v-for="course in data.courses" :key="course.id" class="course-link" @tap="courseId=course.id"><text>{{course.title}}</text><text class="course-meta">{{({article:'图文',video:'视频',audio:'音频'} as any)[course.type]}} · {{course.handouts.length?'含讲义':'暂无讲义'}}　›</text></button></view>
+    <KnowledgeReading :title="data.node.title" :path="path" :stars="data.node.kind==='knowledge'?data.node.stars:undefined" :question-total="data.questionCount" :blocks="data.node.blocks" :show-body="!replacementBody" :heading="data.node.kind==='section'?'节正文':'知识点内容'" preview/>
+    <template v-if="data.node.kind==='knowledge'"><view v-for="course in inlineCourses" :key="course.id" class="preview-course"><text class="section-heading">{{course.title}}</text><text class="course-meta">{{course.status==='published'?'已发布':'未发布 · 仅预览'}}{{course.type==='article'?' · 发布后作为知识点正文':''}}</text><video v-if="course.type==='video'&&course.mediaUrl" :src="course.mediaUrl" :poster="course.posterUrl" controls :autoplay="false"/><audio v-else-if="course.type==='audio'&&course.mediaUrl" :src="course.mediaUrl" :name="course.title" controls :autoplay="false"/><StudyContent v-else-if="course.type==='article'" :blocks="course.blocks" preview/><text v-else class="course-intro">暂未添加媒体文件</text><StudyContent v-if="course.handouts.length" :blocks="course.handouts" preview/></view></template>
+    <view v-else-if="data.courses.length" class="preview-courses"><text class="section-heading">{{data.node.kind==='section'?'本节精品课':'知识点配套课'}}</text><button v-for="course in data.courses" :key="course.id" class="course-link" @tap="courseId=course.id"><text>{{course.title}}</text><text class="course-meta">{{({article:'图文',video:'视频',audio:'音频'} as any)[course.type]}} · {{course.handouts.length?'含讲义':'暂无讲义'}}　›</text></button></view>
    </template>
    <view v-else class="preview-course">
     <h1>{{selectedCourse.title}}</h1><text class="course-intro">{{selectedCourse.intro}}</text>

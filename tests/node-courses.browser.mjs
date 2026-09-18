@@ -86,7 +86,7 @@ try{
    await mobile.screenshot({path:output+'/mobile-knowledge-course-handout.png',fullPage:true})
    await mobile.locator('.course-row').filter({hasText:'回归配套课'}).click()
    await expect(mobile.locator('.article-body')).toContainText('图文课程正文')
-   await expect(mobile.getByText('含配套讲义',{exact:true})).toBeVisible()
+   await expect(mobile.getByRole('button',{name:'下载讲义',exact:true})).toBeVisible()
   }
   await mobile.close()
   await page.getByRole('button',{name:'刷新数据',exact:true}).click();await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)

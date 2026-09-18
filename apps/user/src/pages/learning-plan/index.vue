@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
@@ -147,7 +148,7 @@ const save = async () => {
     await savePlan(next)
     state.todayTarget = next.target
     uni.showToast({ title: '学习计划已更新', icon: 'success' })
-    setTimeout(() => uni.reLaunch({ url: returnUrl.value }), 650)
+    setTimeout(() => backOrFallback(returnUrl.value), 650)
   } catch (error) { showApiError(error) } finally { saving.value = false }
 }
 const back = () => backOrFallback(returnUrl.value)
@@ -156,7 +157,7 @@ onLoad((options?: Record<string, string>) => { if (options?.returnUrl) returnUrl
 
 <template>
   <view class="plan-page page safe-top">
-    <view class="top-bar"><button class="icon-button" aria-label="返回" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-copy"><text>学习计划</text><text>{{ exam.name }}</text></view><view class="top-spacer"></view></view>
+    <view class="top-bar"><CircleAction class="icon-button" @tap="back"/><view class="top-copy"><text>学习计划</text><text>{{ exam.name }}</text></view><view class="top-spacer"></view></view>
     <view v-if="loading" class="loading-state"><uni-icons type="spinner-cycle" size="23" color="#3569e8" /><text>正在同步你的计划</text></view>
     <view v-else-if="loadError" class="loading-state" role="alert"><text>计划加载失败，请重试</text><button @tap="loadRemote">重新加载</button></view>
     <template v-else>

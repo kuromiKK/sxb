@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { api, selectedExamId, showApiError } from '@/services/api'
 import { getNotes, type NoteRecord, type NoteSourceType } from '@/utils/notes'
+import { backOrFallback } from '@/utils/navigation'
 
 type SelectableNote = NoteRecord & { title: string; demo?: boolean }
 type GeneratedRecord = { id: string; title: string; noteCount: number; createdAt: number; result?: string }
@@ -52,18 +54,7 @@ const toggle = (id: string) => {
   selected.value = [...selected.value, id]
 }
 
-const back = () => {
-  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
-  if (pages.length > 1) {
-    uni.navigateBack({ delta: 1 })
-    return
-  }
-  if (typeof window !== 'undefined' && window.history.length > 1) {
-    window.history.back()
-    return
-  }
-  uni.reLaunch({ url: '/pages/index/index' })
-}
+const back = () => backOrFallback('/pages/practice-tools/index?mode=note')
 const headerBack = () => {
   if (generated.value) {
     generated.value = false
@@ -204,7 +195,7 @@ const saveAsPdf = () => {
 <template>
   <view class="ai-page page safe-top">
     <view class="top-bar">
-      <button class="back-button" @tap="headerBack"><uni-icons type="back" size="21" color="#f0d68b" /></button>
+      <CircleAction class="back-button" @tap="headerBack" tone="light"/>
       <text>AI生成复习资料</text>
       <view />
     </view>
@@ -304,11 +295,11 @@ const saveAsPdf = () => {
     </view>
 
     <view v-if="exchangeVisible" class="overlay centered" @tap.self="exchangeVisible = false">
-      <view class="exchange-dialog">
+      <view class="exchange-dialog sxb-dialog">
         <view class="exchange-icon"><uni-icons type="gift" size="28" color="#1b1811" /></view>
         <text>获取生成次数</text>
         <text>后续可通过积分或会员权益兑换AI复习资料生成次数，具体兑换规则将在增值服务方案确定后开放。</text>
-        <button @tap="exchangeVisible = false">我知道了</button>
+        <button class="sxb-dialog-action" @tap="exchangeVisible = false">我知道了</button>
       </view>
     </view>
   </view>

@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 
-interface Titled { title: string }
+interface Titled { title: string; id?:string; status?:string; is_test_data?:boolean }
 interface Section extends Titled { knowledge: Titled[] }
 interface Chapter extends Titled { sections: Section[] }
 interface Subject extends Titled { chapters: Chapter[] }
@@ -48,11 +48,14 @@ export function createGraphWorkbook(graph: GraphExport) {
     views: [{ state: 'frozen', ySplit: 1 }]
   })
   const widths = [22, 28, 24, 48, 56, 40]
-  sheet.columns = graphHeaders.map((header, i) => ({ header, width: widths[i] }))
+  sheet.columns = [...graphHeaders.map((header, i) => ({ header, width: widths[i] })),...['科目ID','章ID','节ID','知识点ID','状态','测试内容'].map(header=>({header,width:header.endsWith('ID')?40:16}))]
   const rows = graphTitleRows(graph)
-  rows.forEach(values => {
+  const identifiers:any[][]=[]
+  function ids(node:any,path:any[]){const next=[...path,node];const children=node.chapters||node.sections||node.knowledge||[];if(children.length)children.forEach((n:any)=>ids(n,next));else identifiers.push([...Array.from({length:4},(_,i)=>next[i]?.id||''),node.status||'',node.is_test_data?'是':'否'])}
+  graph.subjects.forEach(s=>ids(s,[]))
+  rows.forEach((values,index) => {
     // Plain string values keep titles beginning with =, +, - or @ from becoming formulas.
-    const row = sheet.addRow(values)
+    const row = sheet.addRow([...values,...(identifiers[index]||[])])
     row.height = Math.max(36, ...values.map((value, i) => Math.ceil(value.length * 2 / (widths[i] - 2)) * 18 + 12))
     row.eachCell(cell => {
       cell.font = { name: '微软雅黑', size: 11, color: { argb: 'FF334155' } }
@@ -68,7 +71,7 @@ export function createGraphWorkbook(graph: GraphExport) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3569E8' } }
     cell.alignment = { vertical: 'middle', wrapText: true }
   })
-  sheet.autoFilter = { from: 'A1', to: `F${sheet.rowCount}` }
+  sheet.autoFilter = { from: 'A1', to: `L${sheet.rowCount}` }
   sheet.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:1' }
   const notes = workbook.addWorksheet('导出说明')
   notes.columns = [{ width: 20 }, { width: 100 }]
@@ -78,6 +81,7 @@ export function createGraphWorkbook(graph: GraphExport) {
     ['层级定义', graphHeaders.join(' → ')],
     ['数据来源', graph.isDemo ? '当前页面的演示目录，属于测试数据，不代表已发布的正式内容。' : '当前考试知识目录'],
     ['空目录', '没有下级内容的目录仍保留一行，其后层级留空。']
+    ,['唯一标识','ID 为数据库实际标识，改名不改变 ID。题目导入必须使用知识点 ID；其他层级 ID 不可替代。']
   ])
   notes.eachRow(row => {
     row.height = 36

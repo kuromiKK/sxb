@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { mkdir,readFile,rename,unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import JSZip from 'jszip'
+import ExcelJS from 'exceljs'
 import { db,transaction } from './db.ts'
 import { fail,hash,id } from './security.ts'
 import { mediaDirectory,ticket } from './study-content.ts'
@@ -11,10 +12,12 @@ import { lockResourceReferences } from './editor-images.ts'
 
 export const resourceManagement=Router()
 resourceManagement.get('/',async(req,res)=>{
- const q=z.object({search:z.string().max(200).default(''),kind:z.enum(['','image','video','audio','handout']).default(''),usage:z.enum(['','used','unused']).default(''),page:z.coerce.number().int().positive().default(1)}).parse(req.query)
+ const q=z.object({search:z.string().max(200).default(''),kind:z.enum(['','image','video','audio','handout','import']).default(''),usage:z.enum(['','used','unused']).default(''),page:z.coerce.number().int().positive().default(1)}).parse(req.query)
  const all=await resourceInventory(),used=all.filter(r=>r.references.length),unused=all.filter(r=>!r.references.length)
- const filtered=all.filter(r=>(!q.kind||r.kind===q.kind)&&(!q.usage||(q.usage==='used'?!!r.references.length:!r.references.length))&&(!q.search||r.filename.toLowerCase().includes(q.search.toLowerCase())))
- res.json({items:filtered.slice((q.page-1)*20,q.page*20).map(publicResource),total:filtered.length,summary:{total:all.length,used:used.length,unused:unused.length,bytes:all.reduce((n,r)=>n+r.size,0),unusedBytes:unused.reduce((n,r)=>n+r.size,0)}})
+ const diskGroups=new Map<string,typeof all>();for(const r of all){const key=r.diskName||r.id;diskGroups.set(key,[...(diskGroups.get(key)||[]),r])}
+ const groups=[...diskGroups.values()]
+ const filtered=all.filter(r=>(!q.kind||r.kind===q.kind)&&(!q.usage||(q.usage==='used'?!!r.references.length:!r.references.length))&&(!q.search||(r.filename+' '+r.id).toLowerCase().includes(q.search.trim().toLowerCase())))
+ res.json({items:filtered.slice((q.page-1)*20,q.page*20).map(publicResource),total:filtered.length,summary:{total:all.length,used:used.length,unused:unused.length,bytes:groups.reduce((n,r)=>n+r[0].size,0),unusedBytes:groups.filter(g=>g.every(r=>!r.references.length)).reduce((n,g)=>n+g[0].size,0)}})
 })
 resourceManagement.get('/location',async(req,res)=>{
  const q=z.object({kind:z.string(),id:z.string()}).parse(req.query)
@@ -33,6 +36,11 @@ resourceManagement.post('/:id/preview',async(req,res)=>{
  const asset=(await db.query("SELECT * FROM media_assets WHERE id=$1 AND source='upload'",[req.params.id])).rows[0];if(!asset)fail(404,'资源不存在')
  const signed=await ticket(asset,hash(req.headers.authorization?.replace(/^Bearer /,'')||''))
  const result:any={url:signed.url+'?preview=1',downloadUrl:signed.url}
+ if(asset.kind==='import'){
+  const w=new ExcelJS.Workbook();await w.xlsx.load(await readFile(diskPath(asset.disk_name)) as any)
+  result.text=w.worksheets.filter(s=>s.state==='visible'&&['知识目录','题目'].includes(s.name)).map(s=>s.name+'\n'+s.getRows(1,Math.min(s.rowCount,21))?.map(row=>(row.values as any[]).slice(1).map(v=>typeof v==='object'?v?.text||v?.richText?.map((x:any)=>x.text).join('')||'':String(v??'')).join(' | ')).join('\n')).join('\n\n')
+  result.notice='前20行预览；完整内容请下载原始文件。'
+ }
  if(/\.(docx|pptx)$/i.test(asset.filename)){
   // Preview text locally; never send private teaching materials to a third-party viewer.
   if(Number(asset.size_bytes)>32*1024*1024){result.notice='文件较大，请下载查看完整内容'}
@@ -61,7 +69,8 @@ resourceManagement.delete('/:id',async(req,res)=>{
    const current=(await resourceInventory(c)).find(r=>r.id===asset.id)
    if(current?.references.length)fail(409,'此文件仍被内容引用，不能清理。请先在对应内容中移除引用。')
    original=diskPath(asset.disk_name);const trash=join(mediaDirectory,'.trash');await mkdir(trash,{recursive:true});const destination=join(trash,id())
-   try{await rename(original,destination);moved=destination}catch(e:any){if(e.code!=='ENOENT')throw e}
+   const shared=(await c.query('SELECT 1 FROM media_assets WHERE disk_name=$1 AND id<>$2 LIMIT 1',[asset.disk_name,asset.id])).rows.length
+   if(!shared)try{await rename(original,destination);moved=destination}catch(e:any){if(e.code!=='ENOENT')throw e}
    await c.query('DELETE FROM media_tickets WHERE asset_id=$1',[asset.id]);await c.query('DELETE FROM media_assets WHERE id=$1',[asset.id])
    await c.query('INSERT INTO audit_logs(id,actor_id,action,target_id,details) VALUES($1,$2,$3,$4,$5)',[id(),res.locals.user.id,'resource.cleanup',asset.id,JSON.stringify({filename:asset.filename,size:Number(asset.size_bytes)})])
   })

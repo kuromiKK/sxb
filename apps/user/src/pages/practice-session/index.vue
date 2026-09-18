@@ -1,312 +1,176 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { onHide, onLoad, onShow } from '@dcloudio/uni-app'
+import PracticeCompletion from '@/components/PracticeCompletion.vue'
+import ActionButton from '@/components/ui/ActionButton.vue'
+import {computed,ref,onBeforeUnmount,watch} from 'vue'
+import {onLoad,onShow,onHide} from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
-import { knowledgeSubjects, practiceQuestions, type PracticeQuestion } from '@/mock/data'
-import { useAppStore } from '@/store/app'
-import { getAnswered, recordToday, saveAnswered } from '@/utils/practice-plan'
-import { getWeakQuestions, type WeakPointDebugState } from '@/utils/weak-points'
-import DebugMenu from '@/components/DebugMenu.vue'
+import CircleAction from '@/components/ui/CircleAction.vue'
+import ReadingSheet from '@/components/ui/ReadingSheet.vue'
 import ConfiguredQuestion from '@/components/ConfiguredQuestion.vue'
-import { getFavoriteIds, setFavorite } from '@/utils/favorites'
-import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
-import { api, refreshLearningPlan, showApiError, writeRecord } from '@/services/api'
+import {knowledgeSubjects,practiceQuestions} from '@/mock/data'
+import {useAppStore} from '@/store/app'
+import {api,token,selectedExamId,refreshLearningPlan,refreshPersonalData} from '@/services/api'
+import {learningReady} from '@/utils/learning-bootstrap'
+import {refreshCatalog} from '@/services/catalog'
+import {getWeakQuestions} from '@/utils/weak-points'
+import {getFavoriteIds,setFavorite} from '@/utils/favorites'
+import {getNoteBySource,saveNoteRecord} from '@/utils/notes'
+import {recordToday,saveAnswered} from '@/utils/practice-plan'
+import {backOrFallback,openPage,safePageUrl,currentPageUrl} from '@/utils/navigation'
+import {attemptStatus,statusLabels,practiceSummary,chapterPracticeQueues,resolvePracticeChapter,chapterContinuation,chapterSessionKey,readChapterRound,type Attempt,type PracticeChapter} from '@/utils/practice-session'
 
-type SessionMode = 'normal' | 'weak' | 'wrong' | 'favorite' | 'recite'
-type AnswerState = 'correct' | 'wrong'
-const { state, exam, requireLogin } = useAppStore()
-const mode = ref<SessionMode>('normal')
-const questions = ref<PracticeQuestion[]>([])
-const loadingQuestions = ref(true)
-const currentIndex = ref(0)
-const selected = ref<number[]>([])
-const answered = ref(false)
-const submitting = ref(false)
-const answerStates = ref<Record<string, AnswerState>>({})
-const sessionSelections = ref<Record<string, number[]>>({})
-const reciteRevealed = ref(false)
-const noteVisible = ref(false)
-const noteText = ref('')
-const sessionStartedAt = ref(Date.now())
-const elapsedSeconds = ref(0)
-let elapsedTimer: ReturnType<typeof setInterval> | undefined
-const completionVisible = ref(false)
-const debugState = ref((uni.getStorageSync('sxb-debug-state-题目内容页') || 'normal') as string)
-const sessionSource = ref('章节练习')
-const returnUrl = ref('/pages/practice/index')
-const knowledgePointSession = ref(false)
-const favoriteIds = ref<string[]>(getFavoriteIds())
-
-const current = computed(() => questions.value[currentIndex.value] || practiceQuestions[0])
-const progress = computed(() => questions.value.length ? Math.round((currentIndex.value + 1) / questions.value.length * 100) : 0)
-const isFavorite = computed(() => current.value ? favoriteIds.value.includes(current.value.id) : false)
-const isCorrect = computed(() => answered.value && selected.value.length === current.value.answer.length && selected.value.every(item => current.value.answer.includes(item)))
-const correctAnswer = computed(() => current.value.answer.map(index => String.fromCharCode(65 + index)).join('、'))
-const selectedAnswer = computed(() => selected.value.length ? selected.value.map(index => String.fromCharCode(65 + index)).join('、') : '未作答')
-const pageTitle = computed(() => sessionSource.value || (mode.value === 'recite' ? '挖空背题' : mode.value === 'weak' ? '薄弱项强化' : mode.value === 'wrong' ? '错题重练' : mode.value === 'favorite' ? '我的收藏' : '章节练习'))
-const elapsed = computed(() => {
-  const hours = Math.floor(elapsedSeconds.value / 3600)
-  const minutes = Math.floor(elapsedSeconds.value % 3600 / 60)
-  return `${hours}小时${minutes}分钟`
+const {state,exam,requireLogin}=useAppStore()
+const questions=ref<any[]>([]),currentIndex=ref(0),attempts=ref<Record<string,Attempt>>({}),noteDrafts=ref<Record<string,string>>({})
+const loading=ref(true),error=ref(''),storageError=ref(''),submitting=ref(false),active=ref(true),sheet=ref(''),completionData=ref(false),source=ref('章节练习'),returnUrl=ref('/pages/practice/index')
+const elapsedSeconds=ref(0),favoriteIds=ref<string[]>(getFavoriteIds()),favoriteBusy=ref(false),noteText=ref(''),noteError=ref(''),noteSaving=ref(false),cardFilter=ref('all'),renderRound=ref(0)
+const chapterMode=ref(false),chapterId=ref(''),chapters=ref<PracticeChapter[]>([]),completedChapters=ref<string[]>([])
+const chapter=computed(()=>chapters.value.find(c=>c.id===chapterId.value))
+const chapterFlow=computed(()=>chapterContinuation(chapters.value,chapterId.value,[...completedChapters.value.filter(id=>id!==chapterId.value),...(questions.value.length&&!summary.value.unanswered?[chapterId.value]:[])]))
+const chapterTarget=computed(()=>chapterFlow.value.next||chapterFlow.value.unfinished)
+let storageKey='',ownerToken='',ownerExam='',alive=true,routeOptions:Record<string,string>={},timer:ReturnType<typeof setInterval>|undefined,activeSince=0,totalMs=0,questionVersions:Record<string,string>={}
+const valid=()=>alive&&ownerToken===token()&&ownerExam===selectedExamId()
+const current=computed(()=>questions.value[currentIndex.value])
+const wrongQuestion=ref(false)
+function displayVerdict(id:string,wrong:boolean){if(id===current.value?.id)wrongQuestion.value=wrong}
+const summary=computed(()=>practiceSummary(questions.value.map(q=>q.id),attempts.value))
+const progress=computed(()=>summary.value.total?Math.round(summary.value.done/summary.value.total*100):0)
+const elapsed=computed(()=>`${Math.floor(elapsedSeconds.value/60).toString().padStart(2,'0')}:${(elapsedSeconds.value%60).toString().padStart(2,'0')}`)
+const isFavorite=computed(()=>favoriteIds.value.includes(current.value?.id))
+const contextLine=computed(()=>{
+ if(chapterMode.value&&chapter.value){
+  const c=chapter.value,section=knowledgeSubjects.find(s=>s.id===c.subjectId)?.chapters.find(ch=>ch.id===c.id)?.sections.find(t=>(current.value?.linkedSectionIds||[current.value?.sectionId]).includes(t.id))
+  return [c.subjectName,c.name,section?.name].filter(Boolean).join(' / ')
+ }
+ return [current.value?.subjectShortTitle||current.value?.subjectName,current.value?.chapterName,current.value?.sectionName].filter(Boolean).join(' / ')
 })
-const knowledgeLine = computed(() => `${current.value.subjectName.includes('实务') ? '初级实务' : '初级综合'} · 第${current.value.chapterId.split('-').pop()}章 · 第${current.value.sectionId.split('-').pop()}节`)
-const isLast = computed(() => questions.value.length > 0 && currentIndex.value === questions.value.length - 1)
-const isPlanSession = computed(() => sessionSource.value === '智能刷题')
-const currentSectionRecord = computed(() => {
-  for (const subject of knowledgeSubjects) {
-    for (const chapter of subject.chapters) {
-      const section = chapter.sections.find(item => item.id === current.value.sectionId)
-      if (section) return { subject, chapter, section }
-    }
-  }
-  return undefined
+const knowledgeLinks=computed(()=>{
+ const ids:string[]=current.value?.knowledgePointIds||[current.value?.knowledgePointId]
+ return [...new Set(ids)].filter(Boolean).map(id=>{for(const s of knowledgeSubjects)for(const c of s.chapters)for(const t of c.sections){const p=t.points.find(p=>p.id===id);if(p)return {id,title:p.title,path:[s.shortTitle||s.name,c.name,t.name].join(' / ')}}return {id,title:current.value.knowledgePointId===id?current.value.knowledgePointTitle||'查看知识点':'查看知识点',path:''}})
 })
-const nextSectionRecord = computed(() => {
-  const record = currentSectionRecord.value
-  if (!record) return undefined
-  const sections = record.subject.chapters.flatMap(chapter => chapter.sections.map(section => ({ chapter, section })))
-  const index = sections.findIndex(item => item.section.id === record.section.id)
-  return index >= 0 ? sections[index + 1] : undefined
+const cardItems=computed(()=>questions.value.map((q,index)=>({id:q.id,index,status:attemptStatus(attempts.value[q.id])})).filter(q=>cardFilter.value==='all'||(cardFilter.value==='unanswered'?['unanswered','draft'].includes(q.status):cardFilter.value==='wrong'?['wrong','partial'].includes(q.status):['pending','failed','self_review'].includes(q.status))))
+function persist(){
+ if(!storageKey||!valid())return
+ try{uni.setStorageSync(storageKey,{version:1,updatedAt:Date.now(),ids:questions.value.map(q=>q.id),currentId:current.value?.id,attempts:attempts.value,notes:noteDrafts.value,elapsedMs:totalMs+(activeSince?Date.now()-activeSince:0),versions:questionVersions});storageError.value=''}catch{storageError.value='本机存储空间不足，未提交的草稿暂不能保存。请勿刷新页面。'}
+}
+function pause(){if(activeSince){totalMs+=Date.now()-activeSince;activeSince=0}if(timer)clearInterval(timer);timer=undefined;persist()}
+function resume(){if(timer||loading.value||!active.value||sheet.value==='complete'||!valid())return;activeSince=Date.now();timer=setInterval(()=>{elapsedSeconds.value=Math.floor((totalMs+Date.now()-activeSince)/1000)},1000)}
+function visibility(){
+ // #ifdef H5
+ active.value=!document.hidden;if(active.value)resume();else pause()
+ // #endif
+}
+onShow(()=>{active.value=true;resume();favoriteIds.value=getFavoriteIds()})
+onHide(()=>{active.value=false;pause()})
+onBeforeUnmount(()=>{pause();alive=false;
+ // #ifdef H5
+ document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',pause)
+ // #endif
 })
-const completionKind = computed(() => {
-  if (isPlanSession.value) return 'plan'
-  const record = currentSectionRecord.value
-  if (!record) return 'section'
-  if (!nextSectionRecord.value) return 'subject'
-  return nextSectionRecord.value.chapter.id === record.chapter.id ? 'section' : 'chapter'
+watch(sheet,value=>{if(value==='complete')pause();else resume()})
+watch(noteText,value=>{if(sheet.value==='note'&&current.value){noteDrafts.value[current.value.id]=value;persist()}})
+onLoad(async(options?:Record<string,string>)=>{
+ routeOptions=options||{}
+ await load()
+ if(!alive)return
+ // #ifdef H5
+ document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',pause)
+ // #endif
 })
-const sessionDone = computed(() => questions.value.filter(q => sessionSelections.value[q.id]).length)
-const completionTitle = computed(() => knowledgePointSession.value ? '本知识点练习已完成' : ({ plan: '本次练习结束', section: '本节练习已完成', chapter: '本章练习已完成', subject: '本科目练习已完成' }[completionKind.value]))
-const completionDesc = computed(() => knowledgePointSession.value ? '已完成本知识点当前收录的全部题目，可以返回知识点继续学习。' : ({ plan: `本次作答 ${sessionDone.value} / ${questions.value.length} 题。未答题目会保留在计划中，整轮完成后自动进入巩固。`, section: '太棒了，继续保持节奏，下一节还有新的题目等你完成。', chapter: '本章的所有节都已完成，可以进入下一章继续练习。', subject: '当前科目的练习已经全部完成，可以开始第二轮巩固。' }[completionKind.value]))
-const nextLabel = computed(() => isLast.value ? (knowledgePointSession.value ? '完成练习' : '完成本节') : '下一题')
-const returnLabel = computed(() => knowledgePointSession.value ? '返回知识点' : sessionSource.value === '错题本' ? '返回错题本' : sessionSource.value === '我的收藏' ? '返回收藏' : sessionSource.value === '智能刷题' ? '返回学习计划' : '返回刷题首页')
-
-const createSectionQuestion = (sectionId: string): PracticeQuestion | undefined => {
-  for (const subject of knowledgeSubjects) {
-    for (const chapter of subject.chapters) {
-      const section = chapter.sections.find(item => item.id === sectionId)
-      if (!section) continue
-      const point = section.points[0]
-      return {
-        id: `demo-${section.id}`,
-        subjectId: subject.id,
-        subjectName: subject.name,
-        chapterId: chapter.id,
-        chapterName: chapter.name,
-        sectionId: section.id,
-        sectionName: section.name,
-        type: 'single',
-        typeName: '单选题',
-        year: '2024',
-        source: '全国真题',
-        difficulty: point.stars >= 4 ? '重点' : point.stars >= 3 ? '中等' : '基础',
-        stem: `关于“${point.title}”的理解，下列说法最符合考试要求的是？`,
-        options: [`准确把握${point.title}的核心概念与适用边界`, '只记忆结论，不需要理解情境', '将专业要求简单套用到所有对象', '忽略服务流程和政策依据'],
-        answer: [0],
-        explanation: `${point.content}答题时应结合题干情境理解概念、原则和操作边界，不能只凭关键词作出判断。`,
-        knowledgePointId: point.id,
-        knowledgePointTitle: point.title,
-      }
-    }
-  }
-  return undefined
+async function load(fresh=false){
+ loading.value=true;error.value=''
+ await learningReady
+ if(!alive)return
+ if(!requireLogin(currentPageUrl()))return
+ ownerToken=token();ownerExam=exam.value.id
+ const options=routeOptions,mode=options.mode||'normal'
+ returnUrl.value=safePageUrl(options.returnUrl,'/pages/practice/index')
+ if(mode==='recite'){uni.redirectTo({url:'/pages/recite/index'});return}
+ source.value=options.knowledgePointId?'知识点练习':options.plan?'智能刷题':({weak:'薄弱项强化',wrong:'错题重练',favorite:'收藏练习'} as Record<string,string>)[mode]||'章节练习'
+ try{
+  const user=await api('/me');if(!valid())return
+  await refreshCatalog();if(!valid())return
+  chapterMode.value=mode==='normal'&&!options.plan&&!options.knowledgePointId
+  chapters.value=chapterPracticeQueues(knowledgeSubjects,practiceQuestions)
+  const chosen=chapterMode.value?resolvePracticeChapter(chapters.value,options):undefined
+  chapterId.value=chosen?.id||''
+  let list=[...practiceQuestions] as any[],planScope=''
+  if(options.plan){const plan=await refreshLearningPlan();if(!valid())return;list=(plan?.questionIds||[]).map((id:string)=>practiceQuestions.find(q=>q.id===id)).filter(Boolean);const p=plan?.plan||{};planScope=JSON.stringify([p.subjectIds,p.chapterIds,p.years,p.sources])}
+  else if(options.knowledgePointId)list=list.filter(q=>(q.knowledgePointIds||[q.knowledgePointId]).includes(options.knowledgePointId))
+  else if(chapterMode.value)list=chosen?chosen.questionIds.map(id=>practiceQuestions.find(q=>q.id===id)).filter(Boolean):[]
+  if(!options.knowledgePointId){if(mode==='weak')list=getWeakQuestions(ownerExam);if(mode==='wrong'){const ids=uni.getStorageSync('sxb-wrong-questions')||[];list=list.filter(q=>ids.includes(q.id))}if(mode==='favorite')list=list.filter(q=>favoriteIds.value.includes(q.id))}
+  const scope=JSON.stringify([mode,options.plan||'',options.knowledgePointId||'',options.sectionId||'',planScope])
+  const chapterKey=(id:string)=>chapterSessionKey(user.id,ownerExam,id)
+  storageKey=chapterMode.value?chapterKey(chapterId.value):`sxb-practice-session-${user.id}-${ownerExam}-${scope}`
+  const readRound=(c:PracticeChapter)=>readChapterRound(c,user.id,ownerExam,key=>uni.getStorageSync(key))
+  const saved=fresh?undefined:chosen?readRound(chosen):uni.getStorageSync(storageKey)
+  completedChapters.value=chosen?chapters.value.filter(c=>c.subjectId===chosen.subjectId&&c.questionIds.length).filter(c=>{const s=readRound(c);return s?.version===1&&c.questionIds.every(id=>s.attempts?.[id]?.result&&!s.attempts[id].history)}).map(c=>c.id):[]
+  // Wrong/favorite/plan queues evolve after submissions. Freeze this round, except unpublished items.
+  if(!chapterMode.value&&saved?.version===1&&saved?.ids?.length)list=saved.ids.map((id:string)=>practiceQuestions.find(q=>q.id===id)).filter(Boolean)
+  questions.value=list;attempts.value={};currentIndex.value=0;totalMs=0;questionVersions=Object.fromEntries(list.map(q=>[q.id,String(q.updatedAt||JSON.stringify(q))]))
+  if(saved?.version===1){for(const q of list){const a=saved.attempts?.[q.id];if(a&&!a.history&&(a.result||saved.versions?.[q.id]===questionVersions[q.id]))attempts.value[q.id]=a}noteDrafts.value=saved.notes||{};totalMs=Number(saved.elapsedMs)||0;currentIndex.value=Math.max(0,list.findIndex(q=>q.id===(options.questionId||saved.currentId)))}
+  else if(options.questionId)currentIndex.value=Math.max(0,list.findIndex(q=>q.id===options.questionId))
+  elapsedSeconds.value=Math.floor(totalMs/1000)
+  persist()
+ }catch(e:any){if(valid())error.value=e.message}finally{if(alive){loading.value=false;resume()}}
 }
-
-onLoad(async (options?: Record<string, string>) => {
-  if (!requireLogin(`/pages/practice-session/index${options ? `?${new URLSearchParams(options as Record<string, string>).toString()}` : ''}`)) return
-  options = options || {}
-  if (options.returnUrl) returnUrl.value = decodeURIComponent(options.returnUrl)
-  const nextMode = (options.mode || 'normal') as SessionMode
-  mode.value = nextMode
-  knowledgePointSession.value = Boolean(options.knowledgePointId)
-  sessionSource.value = options.knowledgePointId ? '知识点练习' : options.plan ? '智能刷题' : nextMode === 'favorite' ? '我的收藏' : nextMode === 'wrong' ? '错题本' : nextMode === 'weak' ? '薄弱项强化' : nextMode === 'recite' ? '挖空背题' : '章节练习'
-  sessionStartedAt.value = Date.now()
-  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
-  const favoriteQuestionIds = favoriteIds.value.filter(id => practiceQuestions.some(q => q.id === id))
-  let list = practiceQuestions
-  if (options.plan) {
-    try {
-      const live = await refreshLearningPlan()
-      const queue: string[] = live?.questionIds || []
-      list = queue.map(id => practiceQuestions.find(q => q.id === id)).filter(Boolean) as PracticeQuestion[]
-    } catch (error) { showApiError(error); list=[] }
-  }
-  else if (options.knowledgePointId) list = practiceQuestions.filter(item => (item.knowledgePointIds || [item.knowledgePointId]).includes(options.knowledgePointId))
-  else if (options.sectionId) {
-    list = practiceQuestions.filter(item => (item.linkedSectionIds || [item.sectionId]).includes(options.sectionId))
-  }
-  if (!options.knowledgePointId && nextMode === 'weak') {
-    const homeDebugState = uni.getStorageSync('sxb-debug-state-刷题首页')
-    const weakDebugState = homeDebugState === 'weak-demo' || homeDebugState === 'weak-empty'
-      ? homeDebugState as WeakPointDebugState
-      : 'normal'
-    list = getWeakQuestions(exam.value.id, weakDebugState)
-  }
-  if (!options.knowledgePointId && nextMode === 'wrong') list = practiceQuestions.filter(item => wrongIds.includes(item.id))
-  if (!options.knowledgePointId && nextMode === 'favorite') list = practiceQuestions.filter(item => favoriteQuestionIds.includes(item.id))
-  if (!options.knowledgePointId && nextMode === 'recite') list = practiceQuestions.filter(item => item.difficulty !== '基础')
-  if (debugState.value === 'empty') list = []
-  if (debugState.value === 'completed' && list.length) currentIndex.value = list.length - 1
-  questions.value = list
-  loadingQuestions.value = false
-  const storedAnswers = getAnswered(exam.value.id)
-  Object.keys(storedAnswers).forEach(id => { answerStates.value[id] = storedAnswers[id] })
-  if (options.questionId) currentIndex.value = Math.max(questions.value.findIndex(item => item.id === options.questionId), 0)
-  loadCurrentState()
-})
-
-const startTimer = () => {
-  if (elapsedTimer) clearInterval(elapsedTimer)
-  elapsedTimer = setInterval(() => { elapsedSeconds.value = Math.max(Math.floor((Date.now() - sessionStartedAt.value) / 1000), 0) }, 1000)
+function change(id:string,attempt:Attempt){if(!valid())return;attempts.value[id]=attempt;persist()}
+function submitted(id:string,result:any){
+ if(!valid())return
+ state.todayDone=Math.max(state.todayDone,recordToday(ownerExam,id).length)
+ if(result.status==='graded'&&typeof result.correct==='boolean')saveAnswered(ownerExam,id,result.correct?'correct':'wrong')
+ // Separate refresh errors from a successfully committed answer.
+ void refreshPersonalData().catch(()=>{});void refreshLearningPlan().catch(()=>{})
 }
-onShow(startTimer)
-onHide(() => { if (elapsedTimer) clearInterval(elapsedTimer) })
-onBeforeUnmount(() => { if (elapsedTimer) clearInterval(elapsedTimer) })
-
-const loadCurrentState = () => {
-  if (!questions.value.length || !current.value) return
-  const storedSelection = uni.getStorageSync(`sxb-question-selection-${exam.value.id}-${current.value.id}`) || []
-  const sessionSelection = sessionSelections.value[current.value.id]
-  const isRetryMode = mode.value === 'weak' || mode.value === 'wrong'
-  selected.value = sessionSelection ? [...sessionSelection] : isRetryMode ? [] : [...storedSelection]
-  answered.value = Boolean(sessionSelection)
-  if (answered.value) selected.value = sessionSelections.value[current.value.id] || []
-  reciteRevealed.value = false
-  noteText.value = getNoteBySource(current.value.id, 'question')?.content || uni.getStorageSync(`sxb-question-note-${current.value.id}`) || ''
+function goTo(index:number){if(submitting.value||index<0||index>=questions.value.length)return;currentIndex.value=index;sheet.value='';error.value='';persist();uni.pageScrollTo({scrollTop:0,duration:180})}
+function next(){if(submitting.value)return;if(currentIndex.value===questions.value.length-1){completionData.value=false;sheet.value='complete'}else goTo(currentIndex.value+1)}
+function back(){if(submitting.value)return;pause();sheet.value='';backOrFallback(returnUrl.value)}
+async function favorite(){if(!current.value||favoriteBusy.value)return;favoriteBusy.value=true;const id=current.value.id,on=!isFavorite.value;try{await setFavorite(id,'question',on);if(valid())favoriteIds.value=getFavoriteIds()}catch(e:any){error.value=e.message}finally{favoriteBusy.value=false}}
+function openNote(){noteText.value=noteDrafts.value[current.value.id]??getNoteBySource(current.value.id,'question')?.content??'';noteError.value='';sheet.value='note'}
+function closeSheet(){if(noteSaving.value)return;sheet.value='';persist()}
+async function saveNote(){
+ if(noteSaving.value)return;if(!noteText.value.trim()){noteError.value='请先填写笔记内容';return}noteSaving.value=true;noteError.value='';const id=current.value.id,value=noteText.value
+ try{await saveNoteRecord(id,'question',value);if(valid()){delete noteDrafts.value[id];sheet.value='';persist();uni.showToast({title:'笔记已保存',icon:'success'})}}catch(e:any){noteError.value=e.message}finally{noteSaving.value=false}
 }
-const chooseOption = (index: number) => {
-  if (answered.value || submitting.value || mode.value === 'recite') return
-  if (current.value.type === 'single') {
-    selected.value = [index]
-    submitAnswer()
-    return
-  }
-  selected.value = selected.value.includes(index) ? selected.value.filter(item => item !== index) : [...selected.value, index].sort()
+function openKnowledge(id:string){persist();const url=currentPageUrl();sheet.value='';openPage(`/pages/knowledge-detail/index?id=${encodeURIComponent(id)}&returnUrl=${encodeURIComponent(url)}`)}
+function continueUnanswered(){const index=questions.value.findIndex(q=>!attempts.value[q.id]?.result);if(index>=0)goTo(index)}
+function continueChapter(){
+ const target=chapterTarget.value
+ if(submitting.value||summary.value.unanswered||!target||target.subjectId!==chapter.value?.subjectId)return
+ pause();uni.redirectTo({url:`/pages/practice-session/index?subjectId=${encodeURIComponent(target.subjectId)}&chapterId=${encodeURIComponent(target.id)}&returnUrl=${encodeURIComponent(returnUrl.value)}`})
 }
-const recordDailyQuestion = () => {
-  const before = recordToday(exam.value.id, current.value.id)
-  if (before.length > state.todayDone) state.todayDone = before.length
-}
-const answerRequestIds = new Map<string, string>()
-const submitAnswer = async () => {
-  if (!selected.value.length || answered.value || submitting.value) return
-  submitting.value = true
-  const question = current.value
-  const examId = exam.value.id
-  const selection = [...selected.value]
-  const requestKey = `${examId}:${question.id}:${selection.join(',')}`
-  if (!answerRequestIds.has(requestKey)) answerRequestIds.set(requestKey, `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  try {
-  const resultFromServer = await api('/answers', 'POST', { examId, questionId: question.id, selection, requestId: answerRequestIds.get(requestKey) })
-  if (current.value.id !== question.id || exam.value.id !== examId) return
-  current.value.answer = resultFromServer.answer
-  current.value.explanation = resultFromServer.explanation
-  answered.value = true
-  sessionSelections.value[current.value.id] = [...selected.value]
-  uni.setStorageSync(`sxb-question-selection-${exam.value.id}-${current.value.id}`, selected.value)
-  const result: AnswerState = selected.value.length === current.value.answer.length && selected.value.every(item => current.value.answer.includes(item)) ? 'correct' : 'wrong'
-  answerStates.value[current.value.id] = result
-  const status: Record<string, string> = uni.getStorageSync('sxb-question-status') || {}
-  status[current.value.id] = result
-  uni.setStorageSync('sxb-question-status', status)
-  saveAnswered(exam.value.id, current.value.id, result)
-  const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
-  const nextWrongIds = result === 'correct' ? wrongIds : Array.from(new Set([...wrongIds, current.value.id]))
-  uni.setStorageSync('sxb-wrong-questions', nextWrongIds)
-  recordDailyQuestion()
-  await refreshLearningPlan()
-  } catch (error) { showApiError(error) } finally { submitting.value = false }
-}
-const configuredSubmitted = async (result: any) => {
-  sessionSelections.value[current.value.id] = []
-  recordDailyQuestion()
-  if (result.status === 'graded') {
-    const outcome: AnswerState = result.correct ? 'correct' : 'wrong'
-    answerStates.value[current.value.id] = outcome
-    saveAnswered(exam.value.id, current.value.id, outcome)
-    const wrongIds: string[] = uni.getStorageSync('sxb-wrong-questions') || []
-    uni.setStorageSync('sxb-wrong-questions', result.correct ? wrongIds : Array.from(new Set([...wrongIds, current.value.id])))
-    try { await refreshLearningPlan() } catch (error) { showApiError(error) }
-  }
-}
-const markRecite = async (remembered: boolean) => {
-  try { await writeRecord('recite', current.value.id, { remembered }) } catch (error) { showApiError(error); return }
-  answerStates.value[current.value.id] = remembered ? 'correct' : 'wrong'
-  const reviewIds: string[] = uni.getStorageSync('sxb-recite-review') || []
-  uni.setStorageSync('sxb-recite-review', remembered ? reviewIds.filter(id => id !== current.value.id) : Array.from(new Set([...reviewIds, current.value.id])))
-  recordDailyQuestion()
-  if (currentIndex.value < questions.value.length - 1) setTimeout(() => goTo(currentIndex.value + 1), 280)
-}
-const optionClass = (index: number) => ({ selected: selected.value.includes(index), correct: answered.value && current.value.answer.includes(index), wrong: answered.value && selected.value.includes(index) && !current.value.answer.includes(index) })
-const goTo = (index: number) => { if (submitting.value || index < 0 || index >= questions.value.length) return; currentIndex.value = index; loadCurrentState() }
-const previous = () => goTo(currentIndex.value - 1)
-const next = () => { if (submitting.value) return; if (isLast.value) { completionVisible.value = true; return } goTo(currentIndex.value + 1) }
-const continueAfterCompletion = () => {
-  if (completionKind.value === 'plan') {
-    completionVisible.value = false
-    uni.redirectTo({ url: `/pages/practice-session/index?plan=1&returnUrl=${encodeURIComponent(returnUrl.value)}` })
-    return
-  }
-  const nextRecord = nextSectionRecord.value
-  if (!nextRecord) {
-    uni.showToast({ title: '本科目已全部完成', icon: 'success' })
-    return
-  }
-  completionVisible.value = false
-  uni.redirectTo({ url: `/pages/practice-session/index?sectionId=${encodeURIComponent(nextRecord.section.id)}&returnUrl=${encodeURIComponent(returnUrl.value)}` })
-}
-const toggleFavorite = async () => {
-  if (!questions.value.length) return
-  await setFavorite(current.value.id, 'question', !isFavorite.value)
-  favoriteIds.value = isFavorite.value ? favoriteIds.value.filter(id => id !== current.value.id) : [...favoriteIds.value, current.value.id]
-  uni.showToast({ title: isFavorite.value ? '已收藏题目' : '已取消收藏', icon: 'none' })
-}
-const openKnowledge = () => uni.navigateTo({ url: `/pages/knowledge-detail/index?id=${encodeURIComponent(current.value.knowledgePointId)}` })
-const openNote = () => { noteText.value = getNoteBySource(current.value.id, 'question')?.content || uni.getStorageSync(`sxb-question-note-${current.value.id}`) || ''; noteVisible.value = true }
-const saveNote = async () => { if (!noteText.value.trim()) return uni.showToast({ title: '请先填写笔记内容', icon: 'none' }); await saveNoteRecord(current.value.id, 'question', noteText.value); noteVisible.value = false; uni.showToast({ title: '题目笔记已保存', icon: 'success' }) }
-const back = () => {
-  completionVisible.value = false
-  noteVisible.value = false
-  uni.reLaunch({ url: returnUrl.value })
-}
-const applyDebug = (key: string) => { debugState.value = key; if (key === 'empty') { questions.value = []; completionVisible.value = false } else if (key === 'completed' && questions.value.length) { currentIndex.value = questions.value.length - 1; loadCurrentState(); completionVisible.value = true } else completionVisible.value = false }
+function finishSubject(){if(!chapterFlow.value.complete)return;pause();uni.redirectTo({url:'/pages/practice/index'})}
+function restart(){uni.showModal({title:'开始新一轮练习？',content:'将按当前范围重新读取题目，已提交的历史记录和笔记仍保留。',success:r=>{if(!r.confirm)return;pause();storageKey='';attempts.value={};currentIndex.value=0;totalMs=0;elapsedSeconds.value=0;renderRound.value++;sheet.value='';void load(true)}})}
 </script>
 
 <template>
-  <view class="session-page page safe-top"><view class="session-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><view class="top-title"><text>{{ pageTitle }}</text><text>本次刷题 {{ elapsed }}</text></view><button class="favorite-button" :class="{ active: isFavorite }" @tap="toggleFavorite"><uni-icons :type="isFavorite ? 'star-filled' : 'star'" size="21" :color="isFavorite ? '#e98a3a' : '#8a96a7'" /></button></view><view v-if="loadingQuestions" class="empty-session" role="status"><text>正在加载计划题目</text></view><view v-else-if="!questions.length" class="empty-session"><uni-icons type="checkmarkempty" size="30" color="#1a9a7b" /><text>{{ knowledgePointSession ? '本知识点无题' : isPlanSession ? '当前计划范围暂无可练题目' : '本节暂无可练题目' }}</text><text>{{ knowledgePointSession ? '当前知识点暂未收录练习题，请返回继续学习其他内容' : isPlanSession ? '请回到学习计划选择已收录题目的科目和章' : '当前章节题库正在补充，请返回选择其他章节' }}</text><button @tap="back">返回上一页</button></view><template v-else><view class="progress-head"><text>第 {{ currentIndex + 1 }} / {{ questions.length }} 题</text><text>{{ progress }}%</text></view><view class="progress-track"><view :style="{ width: `${progress}%` }"></view></view><view class="question-params"><text>{{ current.typeName }}</text><text>{{ current.year ? current.year+'年真题' : '' }}</text><text>{{ current.source }}</text><text>{{ current.difficulty }}</text></view>
-
-    <ConfiguredQuestion v-if="current.type==='configured'" :key="current.id" :question="current" :exam-id="exam.id" @submitted="configuredSubmitted" @busy="submitting=$event"/>
-    <template v-else-if="mode === 'recite'"><view class="recite-card"><view class="recite-label"><uni-icons type="flag" size="18" color="#6949df" /><text>挖空回忆</text></view><text class="question-stem">{{ current.stem }}</text><view class="blank-area"><text v-for="(_, index) in current.answer" :key="index">第 {{ index + 1 }} 处答案</text></view><button v-if="!reciteRevealed" class="reveal-button" @tap="reciteRevealed = true">查看答案</button><view v-else class="recite-answer"><text>参考答案</text><text>{{ current.answer.map(index => current.options[index]).join('；') }}</text><text>{{ current.explanation }}</text><view class="recite-actions"><button @tap="markRecite(false)">还没记住</button><button @tap="markRecite(true)">记住了</button></view></view></view></template>
-
-    <template v-else><text class="question-stem">{{ current.stem }}</text><view class="options"><view v-for="(option, index) in current.options" :key="option" class="option" :class="optionClass(index)" @tap="chooseOption(index)"><text class="option-letter">{{ String.fromCharCode(65 + index) }}</text><text class="option-text">{{ option }}</text><uniIcons v-if="answered && current.answer.includes(index)" type="checkmarkempty" size="21" color="#1a9a7b" /><uniIcons v-else-if="answered && selected.includes(index)" type="closeempty" size="21" color="#d45d63" /></view></view><button v-if="current.type === 'multiple' && !answered && selected.length" class="submit-button" @tap="submitAnswer">确认答案</button><view v-if="answered" class="analysis-card" :class="isCorrect ? 'correct' : 'wrong'"><view class="result-line"><view class="result-icon"><uni-icons :type="isCorrect ? 'checkmarkempty' : 'closeempty'" size="20" :color="isCorrect ? '#1a9a7b' : '#d45d63'" /></view><view><text>{{ isCorrect ? '回答正确' : '回答错误' }}</text><text>你的答案：{{ selectedAnswer }}　正确答案：{{ correctAnswer }}</text></view></view><view class="analysis-content"><text class="analysis-title">答案解析</text><text class="analysis-text">{{ current.explanation }}</text></view></view></template>
-    <view class="knowledge-float" @tap="openKnowledge"><view class="knowledge-link"><view><text>{{ knowledgeLine }}</text><text class="knowledge-title">{{ current.knowledgePointId.replace('kp-', '').replaceAll('-', '.') }} {{ current.knowledgePointTitle }}</text></view><uni-icons type="forward" size="20" color="#7e8ca0" /></view></view><view class="session-bottom"><button :disabled="currentIndex === 0" @tap="previous"><uni-icons type="back" size="18" color="#526783" />上一题</button><button class="note-bottom" @tap="openNote"><uni-icons type="compose" size="18" color="#7655df" />记笔记</button><button @tap="next">{{ nextLabel }}<uni-icons type="forward" size="18" color="#526783" /></button></view></template>
-
-    <view v-if="completionVisible && questions.length" class="completion-mask"><view class="completion-panel"><view class="completion-icon"><uni-icons type="checkmarkempty" size="28" color="#fff" /></view><text class="completion-title">{{ completionTitle }}</text><text class="completion-desc">{{ completionDesc }}</text><view class="completion-stats"><view><text>{{ questions.length }}</text><text>本组题目</text></view><view><text>{{ isPlanSession ? Math.round(sessionDone / Math.max(questions.length, 1) * 100) : progress }}%</text><text>作答进度</text></view></view><button v-if="!knowledgePointSession && completionKind === 'plan'" class="completion-primary" @tap="continueAfterCompletion">继续学习计划</button><button v-else-if="!knowledgePointSession && nextSectionRecord" class="completion-primary" @tap="continueAfterCompletion">{{ completionKind === 'chapter' ? '进入下一章' : '继续下一节' }}</button><button class="completion-secondary" @tap.stop="back">{{ returnLabel }}</button></view></view>
-    <DebugMenu page="题目内容页" :options="[{ key: 'normal', label: '正常答题' }, { key: 'empty', label: '暂无题目' }, { key: 'completed', label: '最后一题完成' }]" @select="applyDebug" />
-    <view v-if="noteVisible" class="drawer-mask" @tap="noteVisible = false"><view class="note-drawer" @tap.stop><view class="drawer-handle"></view><view class="note-head"><text>题目笔记</text><button @tap="noteVisible = false"><uni-icons type="closeempty" size="20" color="#64758b" /></button></view><text class="note-question">{{ current.stem }}</text><textarea v-model="noteText" maxlength="1000" placeholder="记录解题思路、易错原因或复习提醒" placeholder-class="note-placeholder" /><view class="note-foot"><text>{{ noteText.length }} / 1000</text><button @tap="saveNote">保存笔记</button></view></view></view>
+ <view class="session-page">
+  <view class="session-header"><view class="session-top"><CircleAction class="back-button" :disabled="submitting" @tap="back"/><view class="top-title"><text>{{source}}</text><text>专注 {{elapsed}}</text></view><CircleAction class="favorite-button" :icon="isFavorite?'heart-filled':'heart'" :label="isFavorite?'取消收藏':'收藏题目'" :active="isFavorite" :disabled="favoriteBusy||!current" @tap="favorite"/></view>
+   <template v-if="current&&!loading"><view class="progress-head"><text>第 <text class="current-number">{{currentIndex+1}}</text> / {{questions.length}} 题</text><text>已答 {{summary.done}} 题 · {{progress}}%</text></view><view class="progress-track" role="progressbar" :aria-valuenow="summary.done" :aria-valuemax="questions.length" aria-valuemin="0" aria-label="本轮已答题数"><view :style="{width:progress+'%'}"/></view><text class="context-line">{{contextLine}}</text></template>
   </view>
+  <view v-if="storageError" class="page-error" role="alert">{{storageError}}</view>
+  <view v-if="error" class="page-error" role="alert">{{error}}<ActionButton v-if="!current" @tap="load()">重新加载</ActionButton></view>
+  <view v-if="loading" class="empty-session" role="status">正在准备题目…</view>
+  <view v-else-if="!current" class="empty-session"><uni-icons type="list" size="36" color="#7c93b5"/><text>当前范围暂无可练题目</text><text>返回选择其他章节，或稍后再来看看。</text><ActionButton @tap="back">返回上一页</ActionButton></view>
+  <template v-else>
+   <view class="question-paper" :class="{'has-mistake':wrongQuestion}"><view class="question-params"><text class="type-badge">{{current.typeName||'练习题'}}</text><text v-if="current.year||current.source" class="source-meta">{{[current.year?current.year+'年':'',current.source].filter(Boolean).join(' · ')}}</text></view>
+    <ConfiguredQuestion :key="current.id+'-'+renderRound" :question="current" :exam-id="exam.id" :initial="attempts[current.id]" :active="active" @change="change" @submitted="submitted" @busy="submitting=$event" @verdict="displayVerdict"/>
+    <view class="question-tools"><ActionButton @tap="openNote"><uni-icons type="compose" size="18" color="#627895" aria-hidden="true"/>记笔记<text v-if="noteDrafts[current.id]" class="draft-dot"/></ActionButton><ActionButton v-if="knowledgeLinks.length" @tap="sheet='knowledge'"><uni-icons type="map" size="18" color="#627895" aria-hidden="true"/>关联知识点<text class="tool-count">{{knowledgeLinks.length}}</text></ActionButton></view>
+   </view>
+   <text class="save-hint">作答草稿自动保留，可随时切换题目</text>
+   <view class="session-bottom"><ActionButton :disabled="currentIndex===0||submitting" @tap="goTo(currentIndex-1)"><uni-icons type="left" size="18" color="#62748a" aria-hidden="true"/>上一题</ActionButton><ActionButton class="card-button" :disabled="submitting" @tap="sheet='card'"><uni-icons type="list" size="19" color="#3569e8" aria-hidden="true"/>答题卡</ActionButton><ActionButton :disabled="submitting" @tap="next">{{currentIndex===questions.length-1?(chapterMode?'本章结束':'结束练习'):'下一题'}}<uni-icons type="right" size="18" color="#62748a" aria-hidden="true"/></ActionButton></view>
+  </template>
+  <ReadingSheet v-if="sheet==='card'" title="本轮答题卡" @close="closeSheet"><view class="sheet-summary"><text>已答 {{summary.done}} / {{summary.total}}</text><text>{{summary.accuracy===null?'暂无客观题结果':'客观题正确率 '+summary.accuracy+'%'}}</text></view><view class="card-filters"><ActionButton v-for="item in [{id:'all',text:'全部'},{id:'unanswered',text:'未答'},{id:'wrong',text:'错题 / 部分'},{id:'pending',text:'待评分'}]" :key="item.id" :class="{active:cardFilter===item.id}" @tap="cardFilter=item.id">{{item.text}}</ActionButton></view><view class="number-grid"><ActionButton v-for="item in cardItems" :key="item.id" class="number-item" :class="[item.status,{current:item.index===currentIndex}]" :aria-label="'第'+(item.index+1)+'题，'+statusLabels[item.status]" @tap="goTo(item.index)"><text>{{item.index+1}}</text><text>{{statusLabels[item.status]}}</text></ActionButton></view><text v-if="!cardItems.length" class="sheet-muted">没有符合此状态的题目</text><ActionButton class="secondary-button" @tap="completionData=true;sheet='complete'">查看本轮统计</ActionButton></ReadingSheet>
+  <ReadingSheet v-if="sheet==='knowledge'" title="关联知识点" @close="closeSheet"><ActionButton v-for="point in knowledgeLinks" :key="point.id" class="knowledge-entry" @tap="openKnowledge(point.id)"><view><text>{{point.title}}</text><text>{{point.path}}</text></view><uni-icons type="right" size="17" color="#647a96"/></ActionButton></ReadingSheet>
+  <ReadingSheet v-if="sheet==='note'" title="题目笔记" @close="closeSheet"><text class="note-caption">{{current?.stem||current?.title}}</text><textarea v-model="noteText" class="note-input" :maxlength="1000" placeholder="记录解题思路、易错原因或复习提醒" aria-label="题目笔记内容"/><view class="note-meta"><text>关闭后保留本机草稿</text><text>{{noteText.length}} / 1000</text></view><text v-if="noteError" class="page-error" role="alert">{{noteError}}</text><ActionButton class="primary-button" :loading="noteSaving" :disabled="noteSaving" @tap="saveNote">保存笔记</ActionButton></ReadingSheet>
+  <PracticeCompletion v-if="sheet==='complete'" :show-data="completionData" :ids="questions.map(q=>q.id)" :attempts="attempts" :elapsed="elapsed" :chapter-name="chapterMode&&chapter?chapter.subjectName+' · 第'+chapter.no+'章 '+chapter.name:source" :chapter-mode="chapterMode" :subject-complete="chapterFlow.complete" :has-next="!!chapterFlow.next" :has-unfinished="!!chapterFlow.unfinished" :active="active" @close="closeSheet" @resume="continueUnanswered" @next="continueChapter" @finish="finishSubject" @restart="restart" @leave="back" @question="goTo"/>
+
+ </view>
 </template>
 
-<style scoped lang="scss">
-.session-page { max-width: 430px; min-height: 100vh; margin: 0 auto; box-sizing: border-box; padding-top: calc(env(safe-area-inset-top) + 16rpx); padding-bottom: calc(110px + env(safe-area-inset-bottom)); background: #f5f7fb; }.session-top { display: flex; align-items: center; justify-content: space-between; min-height: 58rpx; }.back-button,.favorite-button { width: 58rpx; height: 58rpx; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; background: #edf1fb; border-radius: 15rpx; }.favorite-button { background: #fff; border: 1rpx solid #e0e6f0; }.favorite-button.active { background: #fff4e6; border-color: #f8d5a7; }.back-button::after,.favorite-button::after { display: none; }.top-title { display: flex; align-items: center; flex: 1; min-width: 0; flex-direction: column; gap: 3rpx; }.top-title text:first-child { color: #1e3048; font-size: var(--sxb-text-item); font-weight: 700; }.top-title text:last-child { overflow: hidden; max-width: 240rpx; color: #8a96a5; font-size: var(--sxb-text-meta); text-overflow: ellipsis; white-space: nowrap; }.progress-head { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; color: #536783; font-size: var(--sxb-text-small); }.progress-head text:first-child { color: #30425c; font-weight: 700; }.progress-head text:last-child { color: #3569e8; font-weight: 700; }.progress-track { height: 7rpx; margin-top: 8rpx; overflow: hidden; background: #e3e9f2; border-radius: 7rpx; }.progress-track view { height: 100%; background: linear-gradient(90deg,#3569e8,#7655df); border-radius: 7rpx; }.question-params { display: flex; align-items: center; flex-wrap: wrap; gap: 7rpx; margin-top: 18rpx; }.question-params text { padding: 5rpx 9rpx; color: #3569e8; background: #eaf0ff; border-radius: 6rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.question-params text:nth-child(2) { color: #d47a25; background: #fff2df; }.question-params text:nth-child(3) { color: #6949df; background: #f0edff; }.question-params text:nth-child(4) { color: #1a9a7b; background: #e8f7f1; }.question-stem { display: block; margin: 22rpx 0 24rpx; color: #1c2d44; font-size: var(--sxb-text-title); line-height: 1.65; font-weight: 700; }.options { display: flex; flex-direction: column; gap: 12rpx; }.option { display: flex; align-items: center; gap: 12rpx; min-height: 72rpx; padding: 14rpx 15rpx; background: #fff; border: 2rpx solid #e0e6ef; border-radius: 11rpx; }.option.selected { background: #eef3ff; border-color: #7c9cf0; }.option.correct { background: #ebf8f3; border-color: #59af98; }.option.wrong { background: #fff0ef; border-color: #dc7579; }.option-letter { width: 42rpx; height: 42rpx; display: flex; align-items: center; justify-content: center; flex: none; color: #62738a; background: #edf1f6; border-radius: 50%; font-size: var(--sxb-text-small); font-weight: 700; }.selected .option-letter { color: #fff; background: #3569e8; }.correct .option-letter { color: #fff; background: #1a9a7b; }.wrong .option-letter { color: #fff; background: #d45d63; }.option-text { flex: 1; color: #30425c; font-size: var(--sxb-text-body); line-height: 1.55; }.submit-button { width: 100%; height: 56rpx; line-height: 56rpx; margin: 18rpx 0 0; color: #fff; background: #3569e8; border-radius: 9rpx; font-size: var(--sxb-text-body); font-weight: 700; }.submit-button[disabled] { opacity: .45; }.submit-button::after { display: none; }.analysis-card { margin-top: 19rpx; padding: 17rpx; background: #fff; border: 1rpx solid #dfe6f0; border-top: 5rpx solid #1a9a7b; border-radius: 12rpx; }.analysis-card.wrong { border-top-color: #d45d63; }.result-line { display: flex; align-items: center; gap: 10rpx; }.result-icon { width: 39rpx; height: 39rpx; display: flex; align-items: center; justify-content: center; flex: none; background: #e8f7f1; border-radius: 50%; }.wrong .result-icon { background: #fff0ef; }.result-line>view:last-child { display: flex; flex-direction: column; gap: 3rpx; }.result-line>view:last-child text:first-child { color: #1a9a7b; font-size: var(--sxb-text-body); font-weight: 700; }.wrong .result-line>view:last-child text:first-child { color: #d45d63; }.result-line>view:last-child text:last-child { color: #6f7e91; font-size: var(--sxb-text-meta); }.analysis-content { margin-top: 15rpx; padding-top: 14rpx; border-top: 1rpx solid #e9edf3; }.analysis-title { display: block; color: #263953; font-size: var(--sxb-text-body); font-weight: 700; }.analysis-text { display: block; margin-top: 8rpx; color: #53657c; font-size: var(--sxb-text-body); line-height: 1.75; }.note-action { width: 100%; height: 62rpx; display: flex; align-items: center; justify-content: center; gap: 8rpx; margin: 16rpx 0 0; padding: 0; color: #6548ca; background: #f0edff; border: 1rpx solid #ddd5ff; border-radius: 9rpx; font-size: var(--sxb-text-body); font-weight: 700; }.note-action::after { display: none; }.knowledge-link { display: flex; align-items: center; justify-content: space-between; gap: 8rpx; margin-top: 12rpx; padding: 12rpx; background: #edf3ff; border-radius: 8rpx; }.knowledge-link>view { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3rpx; }.knowledge-link text:first-child { color: #3569e8; font-size: var(--sxb-text-meta); font-weight: 700; }.knowledge-link text:last-child { overflow: hidden; color: #40536d; font-size: var(--sxb-text-small); text-overflow: ellipsis; white-space: nowrap; }.recite-card { margin-top: 17rpx; padding: 19rpx; background: #fff; border: 1rpx solid #dfd9fa; border-top: 5rpx solid #7655df; border-radius: 13rpx; }.recite-label { display: flex; align-items: center; gap: 6rpx; color: #6949df; font-size: var(--sxb-text-small); font-weight: 700; }.recite-card .question-stem { margin-bottom: 18rpx; }.blank-area { display: flex; flex-direction: column; gap: 10rpx; }.blank-area text { padding: 15rpx; color: #9b91ba; background: #f6f3ff; border: 2rpx dashed #cfc5f5; border-radius: 9rpx; font-size: var(--sxb-text-small); text-align: center; }.reveal-button { width: 100%; height: 54rpx; line-height: 54rpx; margin: 19rpx 0 0; color: #fff; background: #7655df; border-radius: 9rpx; font-size: var(--sxb-text-small); font-weight: 700; }.reveal-button::after { display: none; }.recite-answer { margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid #ece7fb; }.recite-answer>text { display: block; }.recite-answer>text:first-child { color: #6949df; font-size: var(--sxb-text-small); font-weight: 700; }.recite-answer>text:nth-child(2) { margin-top: 8rpx; color: #263953; font-size: var(--sxb-text-body); line-height: 1.6; font-weight: 700; }.recite-answer>text:nth-child(3) { margin-top: 9rpx; color: #66768b; font-size: var(--sxb-text-small); line-height: 1.65; }.recite-actions { display: flex; gap: 9rpx; margin-top: 17rpx; }.recite-actions button { flex: 1; height: 51rpx; line-height: 51rpx; margin: 0; color: #b56929; background: #fff2df; border-radius: 8rpx; font-size: var(--sxb-text-small); font-weight: 700; }.recite-actions button:last-child { color: #fff; background: #1a9a7b; }.recite-actions button::after { display: none; }.session-bottom { position: fixed; z-index: 30; left: 50%; bottom: 0; width: 100%; max-width: 430px; box-sizing: border-box; display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 8rpx; padding: 12rpx 20px calc(12rpx + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #fff; border-top: 1rpx solid #e0e6ef; box-shadow: 0 -8rpx 24rpx rgba(36,54,79,.1); }.session-bottom button { height: 58rpx; display: flex; align-items: center; justify-content: center; gap: 4rpx; margin: 0; padding: 0; color: #526783; background: #f2f5f9; border-radius: 8rpx; font-size: var(--sxb-text-small); }.session-bottom .card-button { color: #fff; background: #3569e8; font-weight: 700; }.session-bottom button::after { display: none; }.session-bottom button[disabled] { color: #b5beca; opacity: .55; }.drawer-mask { position: fixed; z-index: 60; inset: 0; display: flex; align-items: flex-end; justify-content: center; background: rgba(18,29,50,.46); }.answer-drawer,.note-drawer { width: 100%; max-width: 430px; max-height: 77vh; box-sizing: border-box; padding: 10rpx 20px calc(18rpx + env(safe-area-inset-bottom)); background: #fff; border-radius: 17rpx 17rpx 0 0; box-shadow: 0 -16rpx 38rpx rgba(23,36,62,.18); }.drawer-handle { width: 48rpx; height: 6rpx; margin: 0 auto 14rpx; background: #d6dce5; border-radius: 6rpx; }.drawer-head,.note-head { display: flex; align-items: center; justify-content: space-between; }.drawer-head>view { display: flex; flex-direction: column; gap: 3rpx; }.drawer-head>view text:first-child,.note-head>text { color: #1f3149; font-size: var(--sxb-text-item); font-weight: 700; }.drawer-head>view text:last-child { color: #8b96a5; font-size: var(--sxb-text-meta); }.drawer-head button,.note-head button { width: 39rpx; height: 39rpx; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; background: #f1f4f8; border-radius: 50%; }.drawer-head button::after,.note-head button::after { display: none; }.answer-stats { display: flex; align-items: center; gap: 15rpx; margin-top: 17rpx; color: #68788e; font-size: var(--sxb-text-meta); }.answer-stats>view:not(.accuracy) { display: flex; align-items: center; gap: 4rpx; }.accuracy { display: flex; flex-direction: column; margin-right: auto; }.accuracy text:first-child { color: #1f3149; font-size: var(--sxb-text-heading); line-height: 1; font-weight: 700; }.accuracy text:last-child { margin-top: 3rpx; color: #8a96a5; font-size: var(--sxb-text-meta); }.green-dot,.red-dot,.gray-dot { width: 9rpx; height: 9rpx; border-radius: 50%; }.green-dot { background: #35b58c; }.red-dot { background: #e26f74; }.gray-dot { background: #c8ced8; }.drawer-progress { height: 7rpx; margin-top: 13rpx; overflow: hidden; background: #e7ecf3; border-radius: 7rpx; }.drawer-progress view { height: 100%; background: linear-gradient(90deg,#3569e8,#1a9a7b); border-radius: 7rpx; }.card-filters { display: flex; gap: 7rpx; margin-top: 15rpx; }.card-filters text { flex: 1; padding: 8rpx 2rpx; color: #75849a; background: #f2f4f8; border-radius: 7rpx; font-size: var(--sxb-text-meta); text-align: center; }.card-filters text.active { color: #3569e8; background: #eaf0ff; font-weight: 700; }.number-scroll { max-height: 45vh; margin-top: 17rpx; }.number-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14rpx; padding: 2rpx 1rpx 12rpx; }.number-item { position: relative; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; color: #8793a3; background: #f0f2f5; border: 3rpx solid transparent; border-radius: 50%; font-size: var(--sxb-text-small); font-weight: 700; }.number-item.correct { color: #1a9a7b; background: #e5f7f0; }.number-item.wrong { color: #d45d63; background: #fff0ef; }.number-item.current { border-color: #3569e8; box-shadow: 0 0 0 4rpx #e8eeff; }.number-item uni-icons { position: absolute; right: -2rpx; top: -4rpx; }.filter-empty { padding: 38rpx 0; color: #9aa5b4; font-size: var(--sxb-text-meta); text-align: center; }.note-drawer { padding-bottom: calc(20rpx + env(safe-area-inset-bottom)); }.note-question { display: block; overflow: hidden; margin-top: 14rpx; color: #53657c; font-size: var(--sxb-text-meta); line-height: 1.5; white-space: nowrap; text-overflow: ellipsis; }.note-drawer textarea { width: 100%; min-height: 190rpx; box-sizing: border-box; margin-top: 13rpx; padding: 13rpx; color: #30425c; background: #f8fafd; border: 1rpx solid #dfe6f0; border-radius: 9rpx; font-size: var(--sxb-text-body); line-height: 1.6; }.note-placeholder { color: #9ea9b8; }.note-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 11rpx; color: #9aa5b4; font-size: var(--sxb-text-meta); }.note-foot button { width: 116rpx; height: 43rpx; line-height: 43rpx; margin: 0; padding: 0; color: #fff; background: #3569e8; border-radius: 7rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.note-foot button::after { display: none; }
-.session-page { padding-bottom: calc(154px + env(safe-area-inset-bottom)); }
-.knowledge-float { position: fixed; z-index: 31; left: 50%; bottom: calc(69px + env(safe-area-inset-bottom)); width: calc(100% - 40px); max-width: 390px; box-sizing: border-box; transform: translateX(-50%); }
-.knowledge-float .knowledge-link { margin: 0; min-height: 50px; box-sizing: border-box; padding: 11px 14px; background: #edf3ff; border: 1px solid #d7e4ff; border-radius: 10px; box-shadow: 0 7px 18px rgba(36,54,79,.12); }
-.knowledge-float .knowledge-link text:first-child { font-size: var(--sxb-text-meta); }
-.knowledge-float .knowledge-title { font-size: var(--sxb-text-body) !important; line-height: 1.45; }
-.completion-mask { position: fixed; z-index: 70; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(18,29,50,.48); }
-.completion-panel { width: 100%; max-width: 360px; box-sizing: border-box; display: flex; align-items: center; flex-direction: column; padding: 28rpx 24rpx 22rpx; background: #fff; border-radius: 17rpx; box-shadow: 0 20rpx 48rpx rgba(23,36,62,.22); }
-.completion-icon { width: 64rpx; height: 64rpx; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,#1a9a7b,#38b995); border-radius: 50%; }
-.completion-title { margin-top: 14rpx; color: #1d3048; font-size: var(--sxb-text-title); font-weight: 700; }
-.completion-desc { margin-top: 8rpx; color: #718096; font-size: var(--sxb-text-meta); line-height: 1.6; text-align: center; }
-.completion-stats { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10rpx; margin-top: 18rpx; }
-.completion-stats view { display: flex; align-items: center; flex-direction: column; padding: 12rpx 6rpx; background: #f5f8fc; border-radius: 9rpx; }
-.completion-stats text:first-child { color: #315bd4; font-size: var(--sxb-text-item); font-weight: 700; }
-.completion-stats text:last-child { margin-top: 4rpx; color: #8a96a5; font-size: var(--sxb-text-meta); }
-.completion-primary,.completion-secondary { width: 100%; height: 54rpx; line-height: 54rpx; margin: 16rpx 0 0; padding: 0; border-radius: 8rpx; font-size: var(--sxb-text-small); font-weight: 700; }
-.completion-primary { color: #fff; background: #3569e8; }
-.completion-secondary { margin-top: 9rpx; color: #60728a; background: #f0f3f7; }
-.completion-primary::after,.completion-secondary::after { display: none; }
+<style scoped>
 
-@import '@/styles/content-system.scss';
+.session-page{--session-blue:#3569e8;--session-ink:#263953;--session-muted:#63748a;max-width:430px;min-height:100vh;box-sizing:border-box;margin:0 auto;padding:env(safe-area-inset-top) 0 calc(100px + env(safe-area-inset-bottom));background:#f3f6fb;color:var(--session-ink)}button{font:inherit;line-height:1.5;margin:0;box-sizing:border-box}button:after{border:0}button:focus-visible,textarea:focus-visible{outline:2px solid var(--session-blue);outline-offset:2px}.session-header{padding:12px 20px 0;background:linear-gradient(145deg,#eaf1ff 0%,#f3f6fb 80%)}.session-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.top-title{display:flex;align-items:center;flex-direction:column;gap:4px}.top-title>text:first-child{font-size:17px;font-weight:600;letter-spacing:.5px}.top-title>text:last-child{font-size:11px;font-variant-numeric:tabular-nums;color:var(--session-muted)}.progress-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:24px;font-size:12px;color:var(--session-muted)}.progress-head>text:first-child{color:var(--session-ink)}.current-number{font-size:26px;line-height:1.1;font-weight:650;margin-right:3px;font-variant-numeric:tabular-nums}.progress-track{height:4px;border-radius:4px;margin-top:12px;background:#dfe7f4;overflow:hidden}.progress-track>view{height:100%;background:var(--session-blue);border-radius:inherit;transition:width .2s}.context-line{display:block;margin:14px 0;color:var(--session-muted);font-size:11px;line-height:1.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.question-paper{background:#fff;margin:0 12px;border:1px solid #e9eef5;border-radius:20px;padding:20px 19px 0;box-shadow:0 4px 20px #253b5a03}.question-params{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:20px}.type-badge{background:#edf3ff;color:#315fc8;font-size:12px;padding:5px 9px;border-radius:6px;font-weight:600}.source-meta{font-size:11px;color:var(--session-muted)}.question-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:20px;padding:10px 0;border-top:1px solid #edf0f5}.question-tools button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:6px 2px;background:transparent;color:#526a88;font-size:12px}.tool-count{display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;background:#edf2fa;border-radius:5px;font-size:10px}.draft-dot{height:5px;width:5px;border-radius:50%;background:var(--session-blue)}.save-hint{display:block;text-align:center;margin:18px 12px 0;font-size:11px;color:#738297}.session-bottom{position:fixed;z-index:30;left:50%;bottom:0;transform:translateX(-50%);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;width:100%;max-width:430px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));box-sizing:border-box;background:#fff;border-top:1px solid #e4eaf3}.session-bottom button{display:flex;align-items:center;justify-content:center;gap:4px;min-height:46px;padding:0;background:transparent;color:#4f647e;font-size:13px}.session-bottom .card-button{background:#edf3ff;color:var(--session-blue);border-radius:12px;font-weight:600}.session-bottom button[disabled]{opacity:.4}.empty-session{display:flex;align-items:center;flex-direction:column;gap:18px;padding:80px 24px;font-size:16px}.empty-session>text+text{font-size:13px;color:var(--session-muted);text-align:center}.empty-session button,.secondary-button{background:#edf2f9;color:#426085;padding:13px 18px;border-radius:12px;font-size:14px;min-height:46px}.sheet-summary{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--session-muted);line-height:1.8}.card-filters{display:flex;gap:6px;margin:16px 0}.card-filters button{flex:1;min-height:44px;padding:8px 2px;background:#f5f7fa;color:#66778f;font-size:12px;border-radius:8px}.card-filters button.active{background:#eaf1ff;color:#315fc8}.number-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:4px 0 22px;padding:3px}.number-item{display:flex;align-items:center;flex-direction:column;justify-content:center;gap:4px;min-height:58px;padding:6px 1px;background:#f2f4f7;border:1px solid transparent;border-radius:10px;color:#65778d;font-size:16px;font-weight:600}.number-item>text+text{font-size:9px;font-weight:400}.number-item.current{outline:2px solid var(--session-blue);outline-offset:2px}.number-item.correct{background:#eaf6f0;color:#267759}.number-item.wrong{background:#fff0ee;color:#ac4137}.number-item.partial,.number-item.failed,.number-item.pending,.number-item.self_review{background:#fff5e4;color:#8d6420}.number-item.draft{background:#edf2ff;color:#3569c7}.number-item.reviewed{background:#e8f4f7;color:#356e80}.knowledge-entry{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:16px 0;background:transparent;border-bottom:1px solid #edf0f5}.knowledge-entry>view{display:flex;flex:1;min-width:0;flex-direction:column;gap:7px}.knowledge-entry text:first-child{font-size:15px;color:var(--session-ink);line-height:1.7}.knowledge-entry text+text{font-size:11px;color:var(--session-muted)}.note-caption{display:block;max-height:50px;overflow:hidden;font-size:13px;line-height:1.8;color:var(--session-muted);margin-bottom:12px}.note-input{width:100%;height:180px;padding:12px;box-sizing:border-box;border:1px solid #dce4ef;border-radius:12px;background:#fafbfd;font-size:16px;line-height:1.8}.note-meta{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--session-muted);margin:10px 0 16px}.primary-button{background:var(--session-blue);color:#fff;min-height:46px;padding:12px;border-radius:12px;font-size:15px;font-weight:600}.primary-button[disabled]{opacity:.5;color:#fff}.secondary-button{width:100%;margin-top:10px}.text-button{background:transparent;color:var(--session-muted);min-height:44px;font-size:12px;margin:8px auto 0}.sheet-muted{display:block;font-size:13px;line-height:1.85;color:var(--session-muted);padding-bottom:8px}.page-error{display:block;background:#fff0ed;color:#a54439;margin:12px;padding:12px;border-radius:10px;font-size:13px;line-height:1.7}.page-error button{background:transparent;color:inherit;min-height:44px;font-size:13px}@media(max-width:350px){.question-paper{margin:0 8px;padding:16px 14px 0}.session-header{padding-left:16px;padding-right:16px}.number-grid{gap:8px}.question-tools button{font-size:11px}}@media(prefers-reduced-motion:reduce){.progress-track>view{transition:none}}
+</style>
+<style scoped>
+.question-paper.has-mistake{border-color:#c63743;box-shadow:inset 0 0 0 1px #c63743,0 6px 22px #c6374310}
 </style>

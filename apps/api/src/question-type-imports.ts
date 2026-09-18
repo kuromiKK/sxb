@@ -32,7 +32,7 @@ export function questionColumns(def:TypeDefinition):Column[]{
   return cols
 }
 const text=(v:any):string=>v==null?'':typeof v==='object'?v.richText?.map((r:any)=>r.text).join('')??v.text??String(v.result??''):String(v)
-function workbook(t:any){
+export function workbook(t:any){
   const w=new ExcelJS.Workbook(),s=w.addWorksheet('题目'),cols=questionColumns(t.definition)
   s.addRow(cols.map(c=>c.title));s.views=[{state:'frozen',ySplit:1}]
   s.columns=cols.map((c,i)=>({width:i===1?42:i<6?24:40}))
@@ -70,8 +70,8 @@ typeImports.get('/file',async(req,res)=>{
   }
   res.setHeader('Content-Disposition',`attachment; filename="questions-${b.mode}.xlsx"`);res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(Buffer.from(await w.xlsx.writeBuffer()))
 })
-typeImports.post('/preview',async(req,res)=>{
-  const b=z.object({examId:z.string().min(1),typeId:z.string().min(1),filename:z.string().max(200),data:z.string().max(12000000)}).parse(req.body)
+export async function previewTypedQuestions(actor:string,input:unknown,allowExisting=false){
+  const b=z.object({examId:z.string().min(1),typeId:z.string().min(1),filename:z.string().max(200),data:z.string().max(12000000)}).parse(input)
   if(Buffer.byteLength(b.data,'base64')>8*1024*1024)fail(400,'文件不能超过8MB')
   const w=new ExcelJS.Workbook();try{await w.xlsx.load(Buffer.from(b.data,'base64') as any)}catch{fail(400,'无法读取xlsx文件')}
   const meta=w.getWorksheet('题型版本'),s=w.getWorksheet('题目')
@@ -88,7 +88,9 @@ typeImports.post('/preview',async(req,res)=>{
     const cells=cols.map((_,i)=>text(s.getCell(line,i+1).value).trim());if(cells.every(v=>!v))continue
     const qid=cells[0]||id()
     try{
-      if(seen.has(qid)||(await db.query('SELECT id FROM content WHERE id=$1',[qid])).rows.length)fail(400,'题目ID重复或已存在，导入不会覆盖原题')
+      const existing=(await db.query('SELECT kind,exam_id FROM content WHERE id=$1',[qid])).rows[0]
+      if(!allowExisting&&(seen.has(qid)||existing))fail(400,'题目ID重复或已存在，导入不会覆盖原题')
+      if(existing&&(existing.kind!=='question'||existing.exam_id!==b.examId))fail(400,'题目ID被其他内容或考试占用')
       seen.add(qid);z.string().max(160).parse(qid)
       const pointIds=cells[2].split(/[,，\s]+/).filter(Boolean)
       if(!pointIds.length||new Set(pointIds).size!==pointIds.length)fail(400,'知识点ID不能为空或重复')
@@ -120,7 +122,8 @@ typeImports.post('/preview',async(req,res)=>{
   }
   if(!rows.length&&!errors.length)fail(400,'文件中没有题目')
   const batchId=id()
-  await db.query('INSERT INTO import_batches(id,actor_id,exam_id,filename,rows,errors) VALUES($1,$2,$3,$4,$5,$6)',[batchId,res.locals.user.id,b.examId,b.filename,JSON.stringify(rows),JSON.stringify(errors)])
-  await audit(res.locals.user.id,'import.preview',batchId,{typeId:t.id,version:t.version,valid:rows.length,invalid:errors.length})
-  res.json({id:batchId,rows,errors})
-})
+  await db.query('INSERT INTO import_batches(id,actor_id,exam_id,filename,rows,errors) VALUES($1,$2,$3,$4,$5,$6)',[batchId,actor,b.examId,b.filename,JSON.stringify(rows),JSON.stringify(errors)])
+  await audit(actor,'import.preview',batchId,{typeId:t.id,version:t.version,valid:rows.length,invalid:errors.length})
+  return {id:batchId,rows,errors}
+}
+typeImports.post('/preview',async(req,res)=>res.json(await previewTypedQuestions(res.locals.user.id,req.body)))

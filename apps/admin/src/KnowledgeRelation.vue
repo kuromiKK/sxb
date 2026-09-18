@@ -15,7 +15,7 @@ const tones=computed<Record<string,string>>(()=>graphConfig.value.colors)
 const children=(n:any):any[]=>n?.children||n?.chapters||n?.sections||[...(n?.courses||[]),...(n?.knowledge||[])]
 const active=computed(()=>trail.value.at(-1)||props.root)
 const breadcrumbs=computed(()=>[props.root,...trail.value])
-const matches=computed(()=>children(active.value).filter(n=>n.title.toLowerCase().includes(query.value.trim().toLowerCase())))
+const matches=computed(()=>children(active.value).filter(n=>(n.title+' '+n.id).toLowerCase().includes(query.value.trim().toLowerCase())))
 const visible=computed(()=>matches.value.slice((page.value-1)*8,page.value*8))
 let graph:Graph|undefined,observer:ResizeObserver|undefined,frame=0,revision=0,disposed=false
 const motion=()=>!graphConfig.value.animation||window.matchMedia('(prefers-reduced-motion: reduce)').matches?false:{duration:280}

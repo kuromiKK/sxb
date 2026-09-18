@@ -67,8 +67,8 @@ learningRecords.get('/collections/:kind',async(req,res)=>{
  const time=kind==='wrong'?'r.last_wrong_at':kind==='notes'?'r.updated_at':'r.created_at'
  const scope=res.locals.profileScope
  const args:any[]=[scope?.examId||q.examId,q.user.trim(),q.title.trim(),q.kind,q.typeId,q.result,q.text.trim(),q.from?q.from+'T00:00:00+08:00':null,q.to?new Date(Date.parse(q.to+'T00:00:00+08:00')+86400000).toISOString():null,scope?.userId||null]
- const where=` WHERE ($1='' OR r.exam_id=$1) AND ($2='' OR strpos(u.nickname,$2)>0 OR strpos(u.phone,$2)>0)
- AND ($3='' OR strpos(${titleSql},$3)>0) AND ($4='' OR c.kind=$4) AND ($5='' OR ${typeSql}=$5)
+ const where=` WHERE ($1='' OR r.exam_id=$1) AND ($2='' OR strpos(u.nickname,$2)>0 OR strpos(u.phone,$2)>0 OR strpos(u.id,$2)>0)
+ AND ($3='' OR strpos(${titleSql},$3)>0 OR strpos(r.id,$3)>0 OR strpos(r.record_id,$3)>0 OR strpos(r.content_id,$3)>0) AND ($4='' OR c.kind=$4) AND ($5='' OR ${typeSql}=$5)
  AND ($6='' OR ($6='correct' AND r.result->>'correct'='true') OR ($6='wrong' AND r.result->>'correct'='false') OR r.result->>'status'=$6)
  AND ($7='' OR strpos(r.note,$7)>0) AND ($8::timestamptz IS NULL OR ${time}>=$8) AND ($9::timestamptz IS NULL OR ${time}<$9) AND ($10::text IS NULL OR r.user_id=$10)`
  const prefix=base(kind)

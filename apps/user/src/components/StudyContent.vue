@@ -4,11 +4,13 @@ import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import { api, token } from '@/services/api'
 import VerificationGate from './VerificationGate.vue'
 import {verifiedDownload,openDownload} from '@/utils/verified-download'
+import {currentPageUrl} from '@/utils/navigation'
 const verification=ref<InstanceType<typeof VerificationGate>>()
 const props=defineProps<{blocks:any[];preview?:boolean}>()
+const emit=defineEmits<{layout:[]}>()
 const urls=ref<Record<string,string>>({}),busy=ref(''),errors=ref<Record<string,string>>({})
 watch(()=>props.blocks,()=>{urls.value={};errors.value={}})
-function membership(){const redirect=location.hash.slice(1)||'/pages/knowledge/index';uni.navigateTo({url:token()?'/pages/profile-center/index?mode=rights':`/pages/login/index?redirect=${encodeURIComponent(redirect)}`})}
+function membership(){const redirect=currentPageUrl();uni.navigateTo({url:token()?'/pages/profile-center/index?mode=rights':`/pages/login/index?redirect=${encodeURIComponent(redirect)}`})}
 async function open(block:any){
   if(props.preview){
     if(!block.url?.startsWith('/api/content-preview/')){errors.value[block.assetId]='该资源暂时无法预览';return}
@@ -28,7 +30,7 @@ async function open(block:any){
   <VerificationGate ref="verification"/>
   <view v-for="(block,index) in blocks" :key="`${index}-${block.assetId||'text'}`" class="content-block">
     <rich-text v-if="block.kind==='text'" class="study-prose" :nodes="block.html" />
-    <image v-else-if="block.kind==='image'&&block.url" class="study-image" :src="block.url" mode="widthFix" :alt="block.title" @error="errors[block.assetId]='图片加载失败，请重新打开页面'" />
+    <image v-else-if="block.kind==='image'&&block.url" class="study-image" :src="block.url" mode="widthFix" :alt="block.title" @load="emit('layout')" @error="errors[block.assetId]='图片加载失败，请重新打开页面';emit('layout')" />
     <template v-else>
       <video v-if="block.kind==='video'&&urls[block.assetId]" class="study-video" :src="urls[block.assetId]" :poster="block.poster" controls :autoplay="true" @error="delete urls[block.assetId];errors[block.assetId]='播放失败，请重试'" />
       <audio v-else-if="block.kind==='audio'&&urls[block.assetId]" class="study-audio" :src="urls[block.assetId]" controls autoplay @error="delete urls[block.assetId];errors[block.assetId]='播放失败，请重试'" />

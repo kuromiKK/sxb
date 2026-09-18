@@ -12,7 +12,7 @@ courseManagement.get('/',async(req,res)=>{
   JOIN content ch ON ch.id=sec.parent_id AND ch.kind='chapter'
   JOIN content sub ON sub.id=ch.parent_id AND sub.kind='subject'
   JOIN exams e ON e.id=c.exam_id
-  WHERE c.kind='course' AND owner.kind=$1 AND NOT (c.payload ? 'deletedAt') AND c.title ILIKE $2
+  WHERE c.kind='course' AND owner.kind=$1 AND NOT (c.payload ? 'deletedAt') AND (c.title ILIKE $2 OR c.id ILIKE $2)
    AND ($3='' OR c.exam_id=$3) AND ($4='' OR sub.id=$4) AND ($5='' OR ch.id=$5) AND ($6='' OR sec.id=$6) AND ($7='' OR owner.id=$7) AND ($8='' OR c.status=$8)`
  const total=(await db.query('SELECT count(*)::int AS n '+from,params)).rows[0].n
  const items=(await db.query(`SELECT c.*,owner.title AS parent_title,owner.kind AS parent_kind,e.name AS exam_name,sub.title AS subject_name,ch.title AS chapter_name,sec.title AS section_name,sub.id AS subject_id,ch.id AS chapter_id,sec.id AS section_id ${from} ORDER BY c.updated_at DESC,c.id LIMIT 20 OFFSET $9`,[...params,(q.page-1)*20])).rows

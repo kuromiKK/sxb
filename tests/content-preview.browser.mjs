@@ -38,8 +38,8 @@ try{
  await page.screenshot({path:'.local/qa/content-preview/knowledge.png',animations:'disabled'})
  await page.mouse.click(25,500);await expect(drawer).toBeVisible()
  for(const width of [375,430]){await drawer.locator('.el-radio-button').filter({hasText:String(width)}).click();assert.equal(Math.round((await drawer.locator('iframe').boundingBox()).width),width-2)}
- await frame.locator('.course-link').filter({hasText:'预览配套视频课'}).click();await expect(frame.locator('video')).toBeVisible();await expect(frame.getByText('预览讲义',{exact:true})).toBeVisible()
- await frame.locator('.preview-top uni-button').click();await expect(frame.locator('.hero-title')).toHaveText('预览知识点')
+ await expect(frame.locator('video')).toBeVisible();await expect(frame.getByText('预览讲义',{exact:true})).toBeVisible()
+ await expect(frame.locator('.hero-title')).toHaveText('预览知识点')
  await drawer.locator('.el-drawer__close-btn').click();await expect(drawer).toBeHidden()
  await manager.getByRole('button',{name:'编辑内容',exact:true}).click()
  const editor=page.locator('.editor-drawer:visible');await editor.getByRole('textbox',{name:'图文正文编辑器'}).fill('保存并预览的新正文')

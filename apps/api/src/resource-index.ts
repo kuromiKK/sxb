@@ -2,18 +2,22 @@ import { createHash } from 'node:crypto'
 import { db, type Queryable } from './db.ts'
 
 export type ResourceReference={id:string;kind:string;title:string;examName:string;status:string;location:string}
-export type ResourceItem={id:string;filename:string;kind:string;mime:string;size:number;createdAt:string|null;storage:'file'|'embedded';references:ResourceReference[];diskName?:string;data?:string}
+export type ResourceItem={id:string;filename:string;kind:string;mime:string;size:number;createdAt:string|null;storage:'file'|'embedded';references:ResourceReference[];diskName?:string;data?:string;ownerId?:string;uploader?:string}
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 // Scan saved content, including drafts and offline content. Upload ownership alone is not a reference.
 export async function resourceInventory(c:Queryable=db):Promise<ResourceItem[]> {
- const assets=(await c.query("SELECT * FROM media_assets WHERE source='upload' ORDER BY created_at DESC,id")).rows
- const items=new Map<string,ResourceItem>(assets.map(a=>[a.id,{id:a.id,filename:a.filename,kind:a.kind,mime:a.mime,size:Number(a.size_bytes),createdAt:a.legacy_image_hash?null:a.created_at,storage:'file',diskName:a.disk_name,references:[]}]))
+ const assets=(await c.query("SELECT a.*,u.nickname AS uploader FROM media_assets a LEFT JOIN users u ON u.id=a.owner_id WHERE a.source='upload' ORDER BY a.created_at DESC,a.id")).rows
+ const items=new Map<string,ResourceItem>(assets.map(a=>[a.id,{id:a.id,filename:a.filename,kind:a.kind,mime:a.mime,size:Number(a.size_bytes),createdAt:a.legacy_image_hash?null:a.created_at,storage:'file',diskName:a.disk_name,ownerId:a.owner_id,uploader:a.uploader,references:[]}]))
  const legacyImages=new Map(assets.filter(a=>a.legacy_image_hash).map(a=>[a.legacy_image_hash,a.id]))
  const exams=(await c.query('SELECT id,name,cover_url,intro FROM exams')).rows
  const examNames=new Map(exams.map(e=>[e.id,e.name]))
  const content=(await c.query("SELECT id,kind,title,exam_id,status,payload FROM content WHERE NOT (payload ? 'deletedAt')")).rows
  const categories=(await c.query('SELECT id,name,cover_url,intro,enabled FROM exam_categories')).rows
  const link=(item:ResourceItem,ref:ResourceReference)=>{if(!item.references.some(r=>r.id===ref.id&&r.kind===ref.kind&&r.location===ref.location))item.references.push(ref)}
+ if((await c.query('SELECT 1 FROM schema_versions WHERE version=30')).rows.length){
+  for(const j of (await c.query('SELECT j.*,a.filename FROM import_jobs j JOIN media_assets a ON a.id=j.asset_id')).rows){const item=items.get(j.asset_id);if(item)link(item,{id:j.id,kind:'import-job',title:j.filename,examName:examNames.get(j.exam_id)||'',status:j.status,location:'导入批次与结果'})}
+  for(const o of (await c.query('SELECT o.*,c.title,c.kind,c.exam_id,c.status FROM content_origins o JOIN content c ON c.id=o.content_id')).rows){const item=items.get(o.asset_id);if(item)link(item,{id:o.content_id,kind:o.kind,title:o.title,examName:examNames.get(o.exam_id)||'',status:o.status,location:`导入来源 · ${o.sheet} 第 ${o.line} 行`})}
+ }
  function visit(value:any,ref:ResourceReference,depth=0){
   if(depth>40||value==null)return
   if(typeof value==='string'){

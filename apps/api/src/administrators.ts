@@ -15,7 +15,7 @@ async function log(c: Queryable, actor: string, action: string, target: string, 
 }
 administrators.get('/', async (req, res) => {
   const b = z.object({ search: z.string().max(100).default(''), page: z.coerce.number().int().min(1).default(1) }).parse(req.query)
-  const where = "account_kind='admin' AND admin_deleted_at IS NULL AND (phone ILIKE $1 OR nickname ILIKE $1)"
+  const where = "account_kind='admin' AND admin_deleted_at IS NULL AND (phone ILIKE $1 OR nickname ILIKE $1 OR id ILIKE $1)"
   const query = `%${b.search}%`
   const items = (await db.query(`SELECT ${fields} FROM users WHERE ${where} ORDER BY created_at,id LIMIT 20 OFFSET $2`, [query, (b.page - 1) * 20])).rows
   const total = (await db.query(`SELECT count(*)::int AS n FROM users WHERE ${where}`, [query])).rows[0].n

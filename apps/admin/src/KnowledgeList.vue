@@ -11,7 +11,7 @@ const data=computed(()=>buildKnowledgeRows(props.rows,props.subjects))
 const subjects=computed(()=>data.value.filter(r=>r.kind==='subject'))
 const chapters=computed(()=>data.value.filter(r=>r.kind==='chapter'&&(!subject.value||r.subjectId===subject.value)))
 const sections=computed(()=>data.value.filter(r=>r.kind==='section'&&(!subject.value||r.subjectId===subject.value)&&(!chapter.value||r.chapterId===chapter.value)))
-const filtered=computed(()=>data.value.filter(r=>r.kind===kind.value&&(!subject.value||r.subjectId===subject.value)&&(!chapter.value||r.chapterId===chapter.value)&&(!section.value||r.sectionId===section.value)&&(!keyword.value||r.displayTitle.toLowerCase().includes(keyword.value.trim().toLowerCase()))&&(!status.value||r.status===status.value)&&(!course.value||r.hasCourse===(course.value==='yes'))))
+const filtered=computed(()=>data.value.filter(r=>r.kind===kind.value&&(!subject.value||r.subjectId===subject.value)&&(!chapter.value||r.chapterId===chapter.value)&&(!section.value||r.sectionId===section.value)&&(!keyword.value||(r.displayTitle+' '+r.id).toLowerCase().includes(keyword.value.trim().toLowerCase()))&&(!status.value||r.status===status.value)&&(!course.value||r.hasCourse===(course.value==='yes'))))
 const visible=computed(()=>filtered.value.slice((page.value-1)*20,page.value*20))
 const statuses:Record<string,string>={draft:'草稿',review:'审核中',published:'已发布',offline:'停用'}
 const parentLabel=computed(()=>({knowledge:'节',section:'章',chapter:'科目',subject:'考试项目'})[kind.value])
@@ -37,7 +37,7 @@ const date=(value:any)=>value?new Date(value).toLocaleString('zh-CN',{hour12:fal
   <section class="knowledge-list-manager">
     <div class="table-toolbar"><el-radio-group v-model="kind" aria-label="内容层级"><el-radio-button v-for="(label,k) in nodeLabels" :key="k" :value="k">{{label}}</el-radio-button></el-radio-group><el-button type="primary" @click="create"><Plus :size="16"/>新增{{nodeLabels[kind]}}</el-button></div>
     <div class="knowledge-filters">
-      <label class="title-filter"><span>标题</span><el-input v-model="keyword" placeholder="搜索标题" clearable><template #prefix><Search :size="15"/></template></el-input></label>
+      <label class="title-filter"><span>标题</span><el-input v-model="keyword" placeholder="搜索标题或唯一 ID" clearable><template #prefix><Search :size="15"/></template></el-input></label>
       <label v-if="kind!=='subject'"><span>科目</span><el-select :empty-values="[null,undefined]" v-model="subject" aria-label="筛选科目" filterable><el-option label="全部科目" value=""/><el-option v-for="s in subjects" :key="s.id" :value="s.id" :label="s.title"/></el-select></label>
       <label v-if="['section','knowledge'].includes(kind)"><span>章</span><el-select :empty-values="[null,undefined]" v-model="chapter" aria-label="筛选章" filterable><el-option label="全部章" value=""/><el-option v-for="c in chapters" :key="c.id" :value="c.id" :label="c.displayTitle"/></el-select></label>
       <label v-if="kind==='knowledge'"><span>节</span><el-select :empty-values="[null,undefined]" v-model="section" aria-label="筛选节" filterable><el-option label="全部节" value=""/><el-option v-for="s in sections" :key="s.id" :value="s.id" :label="s.displayTitle"/></el-select></label>
@@ -47,6 +47,7 @@ const date=(value:any)=>value?new Date(value).toLocaleString('zh-CN',{hour12:fal
     </div>
     <el-table :key="kind" :data="visible" row-key="id" empty-text="暂无符合条件的内容">
       <el-table-column label="标题" min-width="280"><template #default="{row}"><el-tooltip :trigger="['hover','focus']" :content="row.displayTitle" placement="top" :show-after="350"><button class="table-title" :aria-label="row.displayTitle" @click="edit(row)">{{shortTitle(row.displayTitle)}}</button></el-tooltip></template></el-table-column>
+      <el-table-column v-if="kind==='subject'" label="短标题" min-width="140"><template #default="{row}">{{row.payload?.shortTitle || '—'}}</template></el-table-column>
       <el-table-column :label="parentLabel" min-width="220"><template #default="{row}"><template v-if="kind==='subject'">{{exam.name}}</template><template v-else><span class="parent-title">{{row.parentTitle}}</span><small v-if="kind!=='chapter'" class="cell-sub">{{row.parentPath}}</small></template></template></el-table-column>
       <el-table-column v-if="kind==='knowledge'" label="题数" width="80"><template #default="{row}">{{row.questionCount||0}}</template></el-table-column>
       <el-table-column v-if="kind==='chapter'||kind==='section'" :label="kind==='chapter'?'节数':'知识点数'" width="100"><template #default="{row}">{{row.childCount||0}}</template></el-table-column>

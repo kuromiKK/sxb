@@ -34,7 +34,7 @@ defineExpose({load,inspect})
   <form class="admin-filters" @submit.prevent="search">
    <label v-if="!scopeUrl" class="admin-filter-field"><span>用户</span><el-input v-model="filters.user" placeholder="昵称或手机号" aria-label="筛选用户" clearable/></label>
    <label v-if="!scopeUrl" class="admin-filter-field"><span>考试项目</span><el-select v-model="filters.examId" filterable aria-label="考试项目" :empty-values="[null,undefined]"><el-option label="全部考试" value=""/><el-option v-for="e in exams" :key="e.id" :label="e.name" :value="e.id"/></el-select></label>
-   <label class="admin-filter-field"><span>{{isQuestion?'题目标题':'关联内容'}}</span><el-input v-model="filters.title" placeholder="搜索标题" aria-label="内容标题" clearable/></label>
+   <label class="admin-filter-field"><span>{{isQuestion?'题目标题':'关联内容'}}</span><el-input v-model="filters.title" placeholder="搜索标题或唯一 ID" aria-label="内容标题" clearable/></label>
    <template v-if="isQuestion">
     <label class="admin-filter-field"><span>题型</span><el-select v-model="filters.typeId" filterable aria-label="题型" :empty-values="[null,undefined]"><el-option label="全部题型" value=""/><el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id"/></el-select></label>
     <label class="admin-filter-field"><span>{{kind==='wrong'?'最近作答结果':'作答结果'}}</span><el-select v-model="filters.result" aria-label="作答结果" :empty-values="[null,undefined]"><el-option label="全部结果" value=""/><el-option label="正确" value="correct"/><el-option label="错误" value="wrong"/><el-option v-for="(label,value) in statuses" :key="value" :label="label" :value="value"/></el-select></label>

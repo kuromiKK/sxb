@@ -15,6 +15,11 @@ const graph: GraphExport = {
   ]
 }
 
+test('exports actual stable IDs even when names repeat across chapters',()=>{
+ const w=createGraphWorkbook({categoryTitle:'考试',examTitle:'项目',isDemo:false,subjects:[{id:'subject-id',title:'科目',chapters:[{id:'chapter-a',title:'章甲',sections:[{id:'section-a',title:'基本概念',knowledge:[{id:'point-a',title:'同名知识点',status:'draft',is_test_data:false}]}]},{id:'chapter-b',title:'章乙',sections:[{id:'section-b',title:'基本概念',knowledge:[{id:'point-b',title:'同名知识点',status:'published',is_test_data:true}]}]}]}]})
+ const s=w.worksheets[0];assert.equal(s.getCell('J1').value,'知识点ID');assert.equal(s.getCell('J2').value,'point-a');assert.equal(s.getCell('J3').value,'point-b');assert.equal(s.getCell('G2').value,'subject-id');assert.equal(s.getCell('L3').value,'是')
+})
+
 test('exports all six levels, source order and empty branches without truncating titles',()=>{
   const rows=graphTitleRows(graph)
   assert.equal(rows.length,6)
@@ -32,7 +37,7 @@ test('real XLSX round-trip retains complete titles as strings and marks demo dat
   await loaded.xlsx.load(bytes)
   const sheet=loaded.worksheets[0]
   assert.equal(sheet.rowCount,7)
-  assert.deepEqual((sheet.getRow(1).values as string[]).slice(1),graphHeaders)
+  assert.deepEqual((sheet.getRow(1).values as string[]).slice(1,7),graphHeaders)
   assert.equal(sheet.getCell('D2').value,'长章节名称'.repeat(15))
   assert.equal(sheet.getCell('F2').type,ExcelJS.ValueType.String)
   assert.equal(sheet.getCell('F2').value,'=原样保留标题')

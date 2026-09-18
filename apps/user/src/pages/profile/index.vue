@@ -9,6 +9,7 @@ import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
 import { api, account, refreshRights, refreshPersonalData, selectedExamId, showApiError } from '@/services/api'
 import { ensureStudentNickname } from '@/utils/profile'
+import { openLogin } from '@/utils/navigation'
 
 const { state, exam } = useAppStore()
 const nickname = ref('')
@@ -71,7 +72,7 @@ const loadProfileData = async () => {
 onShow(() => {
   state.selectedTab = 4
   if (!state.isLoggedIn) {
-    uni.navigateTo({ url: '/pages/login/index?redirect=%2Fpages%2Fprofile%2Findex' })
+    openLogin('/pages/profile/index', true)
     return
   }
   void loadProfileData().catch(showApiError)
@@ -87,7 +88,7 @@ const selectRights = (level: RightsLevel) => {
 const applyDebug = (key: string) => {
   if (key.startsWith('rights-')) selectRights(key.replace('rights-', '') as RightsLevel)
 }
-const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value)) return uni.showToast({title:'请输入10位推荐码',icon:'none'}); referralBusy.value=true; try { const r=await api('/referrals/use','POST',{code:referralCode.value}); referralVisible.value=false; referralCode.value=''; uni.showToast({title:r.permission?`成功获取${String(r.permission).toUpperCase()} ${r.hours}小时`:'推荐码使用成功',icon:'none'}); if(r.examId) uni.reLaunch({url:`/pages/exam-switch/index?examId=${r.examId}`}) } catch(e){showApiError(e)} finally {referralBusy.value=false} }
+const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value)) return uni.showToast({title:'请输入10位推荐码',icon:'none'}); referralBusy.value=true; try { const r=await api('/referrals/use','POST',{code:referralCode.value}); referralVisible.value=false; referralCode.value=''; uni.showToast({title:r.permission?`成功获取${String(r.permission).toUpperCase()} ${r.hours}小时`:'推荐码使用成功',icon:'none'}); if(r.examId) uni.navigateTo({url:`/pages/exam-switch/index?examId=${r.examId}`}) } catch(e){showApiError(e)} finally {referralBusy.value=false} }
 </script>
 
 <template>
@@ -143,7 +144,7 @@ const useReferral = async () => { if(!/^[A-Z2-9]{10}$/.test(referralCode.value))
     <DebugMenu page="我的页面" :options="[{ key: 'rights-none', label: '无权益' }, { key: 'rights-basic', label: '基础版权益' }, { key: 'rights-trial', label: '1元试听权益' }, { key: 'rights-pro', label: '专业版权益' }, { key: 'rights-flagship', label: '旗舰版权益' }]" @select="applyDebug" />
 
     <CustomerService v-model="serviceVisible"/>
-    <view v-if="referralVisible" class="modal-mask" @tap="referralVisible = false"><view class="service-modal" @tap.stop><text class="service-title">使用推荐码</text><text class="service-time">每位用户只能使用一次推荐码</text><input v-model="referralCode" maxlength="10" class="referral-input" placeholder="请输入10位推荐码" @input="referralCode=referralCode.toUpperCase()"/><button class="copy-button" :loading="referralBusy" @tap="useReferral">立即使用</button><button class="cancel-button" @tap="referralVisible=false">取消</button></view></view>
+    <view v-if="referralVisible" class="modal-mask" @tap="referralVisible = false"><view class="service-modal sxb-dialog" @tap.stop><text class="service-title">使用推荐码</text><text class="service-time">每位用户只能使用一次推荐码</text><input v-model="referralCode" maxlength="10" class="referral-input" placeholder="请输入10位推荐码" @input="referralCode=referralCode.toUpperCase()"/><button class="copy-button sxb-dialog-action" :loading="referralBusy" @tap="useReferral">立即使用</button><button class="cancel-button sxb-dialog-action" @tap="referralVisible=false">取消</button></view></view>
   </view>
 </template>
 

@@ -9,7 +9,7 @@ cheatsheetManagement.get('/',async(req,res)=>{
  const q=z.object({search:z.string().max(200).default(''),examId:z.string().default(''),status:z.enum(['','draft','review','published','offline']).default(''),pushed:z.enum(['','yes','no']).default(''),from:z.string().datetime({offset:true}).optional(),to:z.string().datetime({offset:true}).optional(),page:z.coerce.number().int().positive().default(1)}).parse(req.query)
  if(q.from&&q.to&&Date.parse(q.to)<Date.parse(q.from))fail(400,'结束时间不能早于开始时间')
  const params=[`%${q.search.trim()}%`,q.examId,q.status,q.pushed,q.from||null,q.to||null]
- const where=`FROM content c LEFT JOIN exams e ON e.id=c.exam_id WHERE c.kind='cheatsheet' AND c.title ILIKE $1 AND ($2='' OR c.exam_id=$2) AND ($3='' OR c.status=$3)
+ const where=`FROM content c LEFT JOIN exams e ON e.id=c.exam_id WHERE c.kind='cheatsheet' AND (c.title ILIKE $1 OR c.id ILIKE $1) AND ($2='' OR c.exam_id=$2) AND ($3='' OR c.status=$3)
  AND ($4='' OR EXISTS(SELECT 1 FROM cheatsheet_pushes p WHERE p.content_id=c.id)=($4='yes'))
  AND ($5::timestamptz IS NULL OR (c.payload->>'closesAt')::timestamptz >= $5::timestamptz) AND ($6::timestamptz IS NULL OR (c.payload->>'opensAt')::timestamptz <= $6::timestamptz)`
  const total=(await db.query('SELECT count(*)::int n '+where,params)).rows[0].n

@@ -21,7 +21,7 @@ watch(page,load);onMounted(load);defineExpose({load})
  <section class="cheatsheet-management">
   <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon/>
   <form class="admin-filters" @submit.prevent="search">
-   <label class="admin-filter-field"><span>标题</span><el-input v-model="filters.search" aria-label="筛选标题" placeholder="搜索小抄标题" clearable @clear="search"><template #prefix><Search :size="16"/></template></el-input></label>
+   <label class="admin-filter-field"><span>标题</span><el-input v-model="filters.search" aria-label="筛选标题" placeholder="搜索小抄标题或唯一 ID" clearable @clear="search"><template #prefix><Search :size="16"/></template></el-input></label>
    <label class="admin-filter-field"><span>考试项目</span><el-select v-model="filters.examId" aria-label="筛选考试项目" filterable :empty-values="[null,undefined]" @change="search"><el-option label="全部考试" value=""/><el-option v-for="exam in props.exams" :key="exam.id" :label="exam.name" :value="exam.id"/></el-select></label>
    <label class="admin-filter-field"><span>状态</span><el-select v-model="filters.status" aria-label="筛选状态" :empty-values="[null,undefined]" @change="search"><el-option label="全部状态" value=""/><el-option v-for="(label,value) in statuses" :key="value" :value="value" :label="label"/></el-select></label>
    <label class="admin-filter-field"><span>推送状态</span><el-select v-model="filters.pushed" aria-label="筛选推送状态" :empty-values="[null,undefined]" @change="search"><el-option label="全部" value=""/><el-option label="已推送" value="yes"/><el-option label="未推送" value="no"/></el-select></label>

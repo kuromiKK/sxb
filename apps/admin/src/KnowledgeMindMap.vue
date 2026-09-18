@@ -20,7 +20,7 @@ const catalog=computed(()=>{
   }
   walk(props.root);return entries
 })
-const options=computed(()=>[...catalog.value.values()].filter(({node})=>node.title.toLowerCase().includes(query.value.trim().toLowerCase())).slice(0,40))
+const options=computed(()=>[...catalog.value.values()].filter(({node})=>(node.title+' '+node.id).toLowerCase().includes(query.value.trim().toLowerCase())).slice(0,40))
 let graph:Graph|undefined,observer:ResizeObserver|undefined,frame=0,revision=0,disposed=false,focusId='',first=true
 const motion=()=>!graphConfig.value.animation||matchMedia('(prefers-reduced-motion: reduce)').matches?false:{duration:260}
 function schedule(){pending.value=true;cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>void draw())}

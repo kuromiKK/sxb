@@ -43,7 +43,7 @@ export function clearSession() {
 export function clearPersonalCache() {
   learningPlan.data = null
   const keys = uni.getStorageInfoSync().keys
-  keys.filter(key => /^sxb-(favorite|note|wrong|answered|today-questions|practice-plan|rights-orders|pending-order|handout|course-progress|completed-courses|question-selection|question-status|recite|unread|knowledge-note|course-note|question-note)/.test(key)).forEach(key => uni.removeStorageSync(key))
+  keys.filter(key => /^sxb-(favorite|note|wrong|answered|today-questions|practice-plan|practice-session|rights-orders|pending-order|handout|course-progress|completed-courses|question-selection|question-status|recite|unread|knowledge-note|course-note|question-note)/.test(key)).forEach(key => uni.removeStorageSync(key))
 }
 export function acceptSession(result: { token: string; user: any }) {
   clearPersonalCache()

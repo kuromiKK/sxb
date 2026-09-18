@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
@@ -80,7 +81,7 @@ function recordRecite(){if(token()&&record.value)void visit.begin(point.value.id
 
 <template>
   <view v-if="record" class="recite-detail page safe-top">
-    <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>智能背题</text><view /></view>
+    <view class="top-bar"><CircleAction @tap="back"/><text>智能背题</text><view /></view>
     <view class="crumb"><text>{{ record.subject.name }}</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.chapter.no }}章</text><uni-icons type="forward" size="13" color="#9ba6b5" /><text>第{{ record.section.no }}节</text></view>
     <view class="point-hero">
       <view class="hero-icon"><uni-icons type="flag" size="25" color="#f2c76e" /></view>

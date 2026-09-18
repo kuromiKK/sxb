@@ -30,7 +30,7 @@ defineExpose({load:refresh})
   <section class="question-manager">
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
     <form class="admin-filters" @submit.prevent="search">
-      <label class="admin-filter-field question-title-filter"><span>标题</span><el-input v-model="keyword" aria-label="筛选标题" placeholder="输入题目标题" clearable @clear="search"><template #prefix><Search :size="16"/></template></el-input></label>
+      <label class="admin-filter-field question-title-filter"><span>标题</span><el-input v-model="keyword" aria-label="筛选标题" placeholder="输入题目标题或唯一 ID" clearable @clear="search"><template #prefix><Search :size="16"/></template></el-input></label>
       <label class="admin-filter-field"><span>题型</span><el-select v-model="typeId" aria-label="筛选题型" :empty-values="[null,undefined]" filterable @change="search"><el-option label="全部题型" value=""/><el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id"/></el-select></label>
       <label class="admin-filter-field question-point-filter"><span>知识点</span><el-select v-model="knowledgeId" aria-label="筛选知识点" :empty-values="[null,undefined]" filterable @change="search" popper-class="question-point-options"><el-option label="全部知识点" value=""/><el-option v-for="p in points" :key="p.id" :label="p.path" :value="p.id"><span class="question-option-title">{{p.title}}</span><small class="question-option-path">{{p.path}}</small></el-option></el-select></label>
       <label class="admin-filter-field"><span>状态</span><el-select v-model="status" aria-label="筛选状态" :empty-values="[null,undefined]" @change="search"><el-option label="全部状态" value=""/><el-option v-for="(label,value) in statuses" :key="value" :label="label" :value="value"/></el-select></label>

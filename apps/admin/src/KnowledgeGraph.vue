@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RecordIdentifier from './RecordIdentifier.vue'
+import ImportWizard from './ImportWizard.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { GraduationCap, List, Network, GitBranch } from 'lucide-vue-next'
 import { request } from './api'
@@ -9,6 +10,8 @@ import KnowledgeList from './KnowledgeList.vue'
 import KnowledgeRelation from './KnowledgeRelation.vue'
 import KnowledgeMindMap from './KnowledgeMindMap.vue'
 const emit=defineEmits<{edit:[row:any];course:[node:any];courses:[node:any];preview:[row:any]}>()
+const importer=ref<InstanceType<typeof ImportWizard>>()
+function importExcel(){if(selected.value)importer.value?.open({examId:selected.value.id,kind:'structure'})}
 const exams=ref<any[]>([]),selected=ref<any>(),tab=ref('list'),error=ref(''),busy=ref(false),exportBusy=ref(false)
 const structure=ref<any>({subjects:[],rows:[],counts:{}})
 const search=ref(''),category=ref(''),page=ref(1)
@@ -26,7 +29,7 @@ function tabKeydown(event:KeyboardEvent,index:number){
 }
 const name=(e:any)=>e?.name||'未命名考试',cover=(e:any)=>e?.cover_url||''
 const categories=computed(()=>[...new Map(exams.value.filter(e=>e.category_id).map(e=>[e.category_id,{id:e.category_id,name:e.category_name}])).values()])
-const filtered=computed(()=>exams.value.filter(e=>(!category.value||e.category_id===category.value)&&name(e).includes(search.value.trim())))
+const filtered=computed(()=>exams.value.filter(e=>(!category.value||e.category_id===category.value)&&(name(e)+' '+e.id).toLowerCase().includes(search.value.trim().toLowerCase())))
 const current=computed(()=>structure.value),root=computed(()=>({id:selected.value?.id,type:'exam',title:name(selected.value),children:current.value.subjects}))
 function editNode(n:any){const row=current.value.rows.find((r:any)=>r.id===n.id);if(row)emit('edit',row)}
 async function loadDetail(){
@@ -49,13 +52,13 @@ async function exportExcel(){
 }
 watch([search,category],()=>page.value=1)
 onMounted(load)
-defineExpose({isDetail:computed(()=>!!selected.value),back,load,exportBusy,exportExcel})
+defineExpose({isDetail:computed(()=>!!selected.value),selectedExamId:computed(()=>selected.value?.id),back,load,exportBusy,exportExcel,importExcel})
 </script>
 <template>
-<section class="kg" v-loading="busy">
+<section class="kg" v-loading="busy"><ImportWizard ref="importer" :exams="exams" @saved="load"/>
   <el-alert v-if="error" :title="error" type="error" :closable="false"/>
   <template v-if="!selected">
-    <div class="filters"><el-input v-model="search" aria-label="搜索考试项目" placeholder="搜索考试项目" clearable/><el-select v-model="category" aria-label="考试分类" placeholder="考试分类" clearable><el-option v-for="c in categories" :key="c.id" :value="c.id" :label="c.name"/></el-select></div>
+    <div class="filters"><el-input v-model="search" aria-label="搜索考试项目" placeholder="搜索考试项目或唯一 ID" clearable/><el-select v-model="category" aria-label="考试分类" placeholder="考试分类" clearable><el-option v-for="c in categories" :key="c.id" :value="c.id" :label="c.name"/></el-select></div>
     <div class="grid"><button v-for="e in filtered.slice((page-1)*12,page*12)" :key="e.id" @click="open(e)"><div class="cover"><img v-if="cover(e)" :src="cover(e)" :alt="name(e)"/><GraduationCap v-else/></div><strong>{{name(e)}}</strong><small>{{e.category_name||'未分类'}}</small></button></div>
     <el-empty v-if="!filtered.length&&!busy" description="暂无匹配考试"/>
     <div class="pagination"><el-pagination v-model:current-page="page" :total="filtered.length" :page-size="12" layout="total,prev,pager,next"/></div>

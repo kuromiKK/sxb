@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref, watch, onUnmounted } from 'vue'
 import {onShow} from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
@@ -30,7 +31,7 @@ async function open(item:any){if(busy.value)return;busy.value=true;try{if(item.k
 </script>
 
 <template>
- <view class="search-page safe-top"><view class="search-head"><button class="back" aria-label="返回" @tap="goBack"><uni-icons type="back" size="21" color="#44536a"/></button><view class="search-input"><input v-model="keyword" aria-label="搜索内容" maxlength="100" confirm-type="search" :placeholder="siteSettings.search.placeholder" @confirm="search()"/><button v-if="keyword" class="clear-search" aria-label="清空搜索" @tap="keyword=''">×</button></view><button class="submit-search" :disabled="busy||!siteSettings.search.enabled" @tap="search()">搜索</button></view>
+ <view class="search-page safe-top"><view class="search-head"><CircleAction class="back" @tap="goBack"/><view class="search-input"><input v-model="keyword" aria-label="搜索内容" maxlength="100" confirm-type="search" :placeholder="siteSettings.search.placeholder" @confirm="search()"/><button v-if="keyword" class="clear-search" aria-label="清空搜索" @tap="keyword=''">×</button></view><button class="submit-search" :disabled="busy||!siteSettings.search.enabled" @tap="search()">搜索</button></view>
  <text class="search-scope">{{examName}} · 仅搜索本考试及适用的常见问题</text>
  <view v-if="!siteSettings.search.enabled" class="search-state">搜索功能暂未开放</view>
  <template v-else><view class="tabs"><button v-for="tab in tabs" :key="tab.value" :class="{active:activeTab===tab.value}" @tap="choose(tab.value)">{{tab.label}}</button></view>

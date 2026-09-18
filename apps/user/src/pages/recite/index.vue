@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
@@ -74,7 +75,7 @@ onShow(restoreListState)
 
 <template>
   <view class="recite-page page safe-top">
-    <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>背题</text><view /></view>
+    <view class="top-bar"><CircleAction @tap="back"/><text>背题</text><view /></view>
     <view class="recite-header">
       <view class="header-main"><view class="header-icon"><uni-icons type="flag" size="27" color="#f2c76e" /></view><view class="header-copy"><text>智能背题</text><text>按科目章节选择知识点进行背题强化复习</text></view></view>
       <view class="header-count"><text>{{ recitablePointCount }}</text><text>可背知识点</text></view>

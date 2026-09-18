@@ -26,6 +26,7 @@ export function validateQuestion(value: any) {
   return q
 }
 export async function validateContent(row: z.infer<typeof contentSchema>, c: Queryable = db) {
+  if(row.kind==='subject')row.payload.shortTitle=z.string().trim().max(12,'科目短标题最多12个字').default('').parse(row.payload.shortTitle)
   if(['article','announcement','faq'].includes(row.kind)&&row.payload.document){const checked=inspectDocument(row.payload.document);if(checked.assets.length)fail(400,'此正文仅支持文字和图片');row.payload.content=checked.text}
   if(row.kind!=='question'&&row.grade!=null)fail(400,'等级仅适用于题目')
   if(['subject','chapter','section','knowledge','cheatsheet'].includes(row.kind)) {
@@ -61,7 +62,6 @@ export async function validateContent(row: z.infer<typeof contentSchema>, c: Que
     for(const key of ['mediaUrl','downloadUrl'])if(p[key]&&!/^https:\/\/[^\s]+$/.test(p[key]))fail(400,'资源链接必须使用HTTPS')
     if(p.type==='article'){delete p.mediaAssetId;delete p.mediaUrl;delete p.totalMinutes}
     else if(p.totalMinutes!=null)p.totalMinutes=z.number().min(0).max(100000).parse(p.totalMinutes)
-    if(p.type!=='video')delete p.posterAssetId
     const legacy=(await c.query("SELECT 1 FROM content WHERE kind='handout' AND parent_id=$1 AND status<>'offline' LIMIT 1",[row.id])).rows.length>0
     p.hasHandout=Boolean(p.handouts.length||p.downloadUrl||(!p.removeLegacyHandout&&legacy))
   }
@@ -113,12 +113,13 @@ export async function catalog(examId: string) {
   const ancestry=(row:any) => {
     const result:Record<string,any>={};let node=byId.get(row.parent_id)
     while(node){result[node.kind]=node;node=byId.get(node.parent_id)}
-    return {subjectId:result.subject?.id,subjectName:result.subject?.title,chapterId:result.chapter?.id,chapterName:result.chapter?.title,chapterNo:result.subject&&result.chapter?children(result.subject.id,'chapter').findIndex(c=>c.id===result.chapter.id)+1:undefined,sectionId:result.section?.id,sectionNo:result.chapter&&result.section?children(result.chapter.id,'section').findIndex(s=>s.id===result.section.id)+1:undefined,sectionName:row.kind==='course'?row.title:result.section?.title,knowledgePointId:result.knowledge?.id,knowledgePointTitle:result.knowledge?.title}
+    return {subjectId:result.subject?.id,subjectName:result.subject?.payload.shortTitle?.trim()||result.subject?.title,chapterId:result.chapter?.id,chapterName:result.chapter?.title,chapterNo:result.subject&&result.chapter?children(result.subject.id,'chapter').findIndex(c=>c.id===result.chapter.id)+1:undefined,sectionId:result.section?.id,sectionNo:result.chapter&&result.section?children(result.chapter.id,'section').findIndex(s=>s.id===result.section.id)+1:undefined,sectionName:row.kind==='course'?row.title:result.section?.title,knowledgePointId:result.knowledge?.id,knowledgePointTitle:result.knowledge?.title}
   }
-  const children=(parent: string, kind: string) => all.filter(x=>x.parent_id===parent && x.kind===kind)
+  const directoryOrder=(a:any,b:any)=>(Number(a.payload.no)||0)-(Number(b.payload.no)||0)||new Date(a.created_at).getTime()-new Date(b.created_at).getTime()||a.id.localeCompare(b.id)
+  const children=(parent: string, kind: string) => all.filter(x=>x.parent_id===parent && x.kind===kind).sort(directoryOrder)
   const safePoint=(p:any)=>{const {document,handouts,...payload}=p.payload;return payload}
   const questionIdsFor=(ids:string[])=>all.filter(x=>x.kind==='question'&&linksFor(x.id).some(id=>ids.includes(id))).map(x=>x.id)
-  const knowledgeSubjects=all.filter(x=>x.kind==='subject').map(s=>({ ...s.payload,id:s.id,name:s.title,chapters:children(s.id,'chapter').map(c=>({ ...c.payload,id:c.id,name:c.title,sections:children(c.id,'section').map(t=>({ ...t.payload,id:t.id,name:t.title,questionTotal:questionIdsFor(children(t.id,'knowledge').map(p=>p.id)).length,courseIds:children(t.id,'course').map(x=>x.id),points:children(t.id,'knowledge').map(p=>({...safePoint(p),id:p.id,title:p.title,courseIds:children(p.id,'course').map(x=>x.id),questionTotal:questionIdsFor([p.id]).length,questionDone:0,mastery:0})) })) })) }))
+  const knowledgeSubjects=all.filter(x=>x.kind==='subject').sort(directoryOrder).map(s=>({ ...s.payload,id:s.id,name:s.payload.shortTitle?.trim()||s.title,fullName:s.title,chapters:children(s.id,'chapter').map(c=>({ ...c.payload,id:c.id,name:c.title,sections:children(c.id,'section').map(t=>({ ...t.payload,id:t.id,name:t.title,questionTotal:questionIdsFor(children(t.id,'knowledge').map(p=>p.id)).length,courseIds:children(t.id,'course').map(x=>x.id),points:children(t.id,'knowledge').map(p=>({...safePoint(p),id:p.id,title:p.title,courseIds:children(p.id,'course').map(x=>x.id),questionTotal:questionIdsFor([p.id]).length,questionDone:0,mastery:0})) })) })) }))
   for(const s of knowledgeSubjects){
     for(const ch of s.chapters)ch.questionTotal=questionIdsFor(ch.sections.flatMap((sec:any)=>sec.points.map((p:any)=>p.id))).length
     s.questionTotal=questionIdsFor(s.chapters.flatMap((ch:any)=>ch.sections.flatMap((sec:any)=>sec.points.map((p:any)=>p.id)))).length
@@ -126,7 +127,7 @@ export async function catalog(examId: string) {
   const records=(kind:string) => all.filter(x=>x.kind===kind).map(x=>{
     const linked=kind==='question'?linksFor(x.id):[]
     const paths=linked.map(id=>ancestry(byId.get(id)))
-    return {...(kind==='question'?publicQuestion(x.payload):x.payload),...(['article','announcement','faq'].includes(kind)&&x.payload.document?{contentHtml:renderText(x.payload.document)}:{}),...ancestry(x),...(kind==='question'?{knowledgePointIds:linked,linkedSectionIds:[...new Set(paths.map(p=>p.sectionId))],linkedChapterIds:[...new Set(paths.map(p=>p.chapterId))],linkedSubjectIds:[...new Set(paths.map(p=>p.subjectId))]}:{}),id:x.id,title:x.title,isTestData:x.is_test_data,updatedAt:x.updated_at}
+    return {...(kind==='question'?publicQuestion(x.payload):x.payload),...(kind==='course'?{coverUrl:x.payload.posterAssetId?'/api/course-covers/'+encodeURIComponent(x.id):''}:{}),...(['article','announcement','faq'].includes(kind)&&x.payload.document?{contentHtml:renderText(x.payload.document)}:{}),...ancestry(x),...(kind==='question'?{knowledgePointIds:linked,linkedSectionIds:[...new Set(paths.map(p=>p.sectionId))],linkedChapterIds:[...new Set(paths.map(p=>p.chapterId))],linkedSubjectIds:[...new Set(paths.map(p=>p.subjectId))]}:{}),id:x.id,title:x.title,isTestData:x.is_test_data,updatedAt:x.updated_at}
   })
   return { knowledgeSubjects, courseCatalog:records('course').map(({ mediaUrl, downloadUrl, content, articleSections, document, ...x })=>({...x,type:x.type||'article',typeName:({video:'视频',audio:'音频',article:'图文'} as Record<string,string>)[x.type||'article'],totalMinutes:Number(x.totalMinutes)||0,progress:0,currentMinute:0,completed:false})), practiceQuestions:records('question').map(({answer,explanation,referenceAnswer,rubric,...x})=>({...x,answer:[],explanation:''})), articles:records('article'), announcements:records('announcement'), faqs:await publicFaqs(examId) }
 }

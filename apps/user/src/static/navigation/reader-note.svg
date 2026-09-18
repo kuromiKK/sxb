@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+ <g fill="none" stroke="#4F6888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M25 7H13a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 13 24h16a1.5 1.5 0 0 0 1.5-1.5V17" fill="#F1F6FC"/>
+  <path d="m21 17 1-4L30 5l3 3-8 8-4 1ZM28 7l3 3M16 19h5M16 11h2"/>
+ </g>
+ <text x="22" y="39" text-anchor="middle" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="11" fill="#4F6888">笔记</text>
+</svg>

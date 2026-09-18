@@ -10,6 +10,7 @@ import { createRightsOrder, loadOrders, persistOrders, type PaymentMethod } from
 import { api, account, learningPlan, refreshLearningPlan, refreshRights, showApiError, token, selectedExamId } from '@/services/api'
 import { refreshOrders } from '@/utils/orders'
 import {siteSettings,refreshSiteSettings} from '@/services/site-settings'
+import { openPage } from '@/utils/navigation'
 onShow(()=>{void refreshSiteSettings().catch(()=>{})})
 
 const { state, exam, todayRemaining, refreshPlanState, requireLogin, login, logout } = useAppStore()
@@ -54,7 +55,7 @@ const visibleHomeReports = computed<HomeReportCard[]>(() => {
     }))
 })
 
-const goRoute = (url: string) => uni.reLaunch({ url })
+const goRoute = (url: string) => openPage(url)
 const gated = (url: string) => { if (requireLogin(url)) goRoute(url) }
 const showMessage = (message: string) => uni.showToast({ title: message, icon: 'none' })
 const openExamSwitch = () => uni.navigateTo({ url: '/pages/exam-switch/index', animationType: 'slide-in-bottom', animationDuration: 260 })
@@ -170,7 +171,7 @@ const stages = [
       <button class="plan-continue" @tap="gated('/pages/practice-session/index?plan=1')">{{ learningPlan.data.progress.isRest ? '自由练习' : '继续计划刷题' }}<uni-icons type="right" size="16" color="#3569e8" /></button>
       <button v-for="item in learningPlan.data.reminders" :key="item.title" class="plan-reminder" @tap="openReminder(item)">{{ item.title }}<uni-icons type="right" size="16" color="#64748b" /></button>
     </view>
-    <view v-for="item in contentNotices" :key="item.id" class="content-notice"><view class="notice-heading"><uni-icons type="notification" size="20" color="#3569e8" /><text>考前小抄已开放</text></view><text class="notice-title">{{ item.title }}</text><view class="notice-actions"><button @tap="dismissNotice(item)">知道了</button><button @tap="uni.navigateTo({url:'/pages/cheatsheets/index'})">查看资料<uni-icons type="right" size="15" color="#3569e8" /></button></view></view>
+    <view v-for="item in contentNotices" :key="item.id" class="content-notice"><view class="notice-heading"><uni-icons type="notification" size="20" color="#3569e8" /><text>考前小抄已开放</text></view><text class="notice-title">{{ item.title }}</text><view class="notice-actions"><button @tap="dismissNotice(item)">知道了</button><button @tap="openPage('/pages/cheatsheets/index')">查看资料<uni-icons type="right" size="15" color="#3569e8" /></button></view></view>
     <view class="section-head flow-head"><view><text class="section-title">一套完整的学习流程</text><text class="section-subtitle">这是效率更高的建议路径，也可以从任意环节直接开始</text></view></view>
     <view class="study-flow"><view v-for="stage in stages" :key="stage.round" class="stage" :class="stage.tone"><view class="stage-header"><view class="stage-number">{{ stage.round }}</view><view><text class="stage-title">{{ stage.title }}</text><text class="stage-summary">{{ stage.summary }}</text></view></view><view class="action-list"><view v-for="action in stage.actions" :key="action.no" class="action-row"><view class="action-copy"><view class="action-heading"><text class="action-no">{{ action.no }}</text><text class="action-name">{{ action.name }}</text><text class="action-meta">{{ action.meta }}</text></view><text class="action-description">{{ action.description }}</text></view><view class="action-buttons"><button class="start-button" @tap="action.route ? gated(action.route) : showMessage(action.message)">立即开始</button></view></view></view></view></view>
 
@@ -203,7 +204,7 @@ const stages = [
     <view class="section-head"><view><text class="section-title">本考期权益套餐</text><text class="section-subtitle">选择适合你的权益，至本考期结束</text></view></view>
     <view v-if="!plans.length" class="promo-desc">当前考试暂无在售套餐</view>
     <view class="price-list"><view v-for="plan in plans" :key="plan.id" class="price-card" :class="plan.level==='svip'?'flagship':'pro'"><view class="plan-heading"><view><text class="plan-name">{{plan.title}}</text><text class="plan-intro">{{plan.intro}}</text></view></view><view class="price"><text>¥</text><text>{{(plan.priceCents/100).toFixed(2)}}</text><text v-if="plan.originalPriceCents" class="original">¥{{(plan.originalPriceCents/100).toFixed(2)}}</text></view><view class="benefits"><view v-for="benefit in plan.permissions" :key="benefit" class="benefit-row"><view class="benefit-check"><uni-icons type="checkmarkempty" size="14" color="#fff"/></view><text>{{benefit}}</text></view></view><button class="plan-button" @tap="openPlanPayment(plan)">查看套餐详情<uni-icons type="arrowright" size="15" color="#fff"/></button></view></view>
-    <view v-if="reportAccessVisible" class="report-access-mask" @tap="reportAccessVisible = false"><view class="report-access-modal" @tap.stop><view class="report-access-mark"><uni-icons type="medal" size="27" color="#e4c36f" /></view><text class="report-access-title">学习报告为SVIP专享</text><text class="report-access-copy">升级SVIP后，可以查看每月学习日历、刷题趋势、知识点掌握变化和学习建议。</text><view class="report-access-preview"><text>{{ selectedReport?.month || '本' }}月学习报告</text><text>完整记录每个月的成长</text></view><button class="report-access-primary" @tap="openFlagshipRights">查看SVIP权益</button><button class="report-access-cancel" @tap="reportAccessVisible = false">暂不升级</button></view></view>
+    <view v-if="reportAccessVisible" class="report-access-mask" @tap="reportAccessVisible = false"><view class="report-access-modal sxb-dialog" @tap.stop><view class="report-access-mark"><uni-icons type="medal" size="27" color="#e4c36f" /></view><text class="report-access-title">学习报告为SVIP专享</text><text class="report-access-copy">升级SVIP后，可以查看每月学习日历、刷题趋势、知识点掌握变化和学习建议。</text><view class="report-access-preview"><text>{{ selectedReport?.month || '本' }}月学习报告</text><text>完整记录每个月的成长</text></view><button class="report-access-primary sxb-dialog-action" @tap="openFlagshipRights">查看SVIP权益</button><button class="report-access-cancel sxb-dialog-action" @tap="reportAccessVisible = false">暂不升级</button></view></view>
     <AppTabBar active="home" />
     <DebugMenu page="首页账号权限" :options="[{ key:'logged-out',label:'未登录用户' },{ key:'unpaid',label:'已登录未付款用户' },{ key:'trial',label:'1元试听用户' },{ key:'basic',label:'普通会员' },{ key:'pro',label:'VIP用户' },{ key:'flagship',label:'SVIP用户' }]" @select="applyHomeDebug" />
   </view>

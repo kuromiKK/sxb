@@ -30,5 +30,24 @@ for (const service of [
   child.unref(); closeSync(out); closeSync(err)
   console.log(`${service.name}: started PID ${child.pid}, port ${service.port}`)
 }
+// Creating a process is not proof that its HTTP service is ready.
+await Promise.all([
+  ['api','http://127.0.0.1:4310/api/health',true],
+  ['admin','http://127.0.0.1:5180/api/health',true],
+  ['user','http://127.0.0.1:5174',false],
+].map(async ([name,url,json])=>{
+  const deadline=Date.now()+45_000
+  while(Date.now()<deadline){
+    try{
+      const response=await fetch(url,{signal:AbortSignal.timeout(3000)})
+      if(response.ok&&(!json||(await response.json()).status==='ok')){
+        console.log(`${name}: HTTP ready`)
+        return
+      }
+    }catch{}
+    await new Promise(resolve=>setTimeout(resolve,500))
+  }
+  throw new Error(`${name}: HTTP readiness check failed. Inspect .local/${name}.err.log and .local/api.err.log`)
+}))
 console.log('Admin: http://127.0.0.1:5180 | User: http://127.0.0.1:5174')
 console.log('Local HTTP; services bind to this computer only. Production requires HTTPS.')

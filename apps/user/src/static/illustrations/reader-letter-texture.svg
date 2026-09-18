@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="320" viewBox="0 0 430 320" fill="none">
+ <defs>
+  <!-- Outlined SXB letterforms: paths keep the texture independent of installed fonts. -->
+  <g id="letters" stroke="#B1C3DB" stroke-width="4" stroke-linejoin="round">
+   <path d="M86 6H25C10 6 2 17 2 32v16c0 14 9 23 24 27l28 8c6 2 9 5 9 10v7H4v29h64c17 0 27-11 27-28V84c0-15-8-24-24-29l-30-8c-5-2-7-4-7-8v-4h52V6Z"/>
+   <path d="m110 6 31 59-34 64h36l18-36 19 36h37l-36-65 32-58h-36l-16 32-15-32h-36Z"/>
+   <path d="M231 6h50c25 0 38 12 38 32 0 13-5 22-15 27 14 5 20 16 20 30 0 23-16 34-41 34h-52V6Zm31 27v22h16c7 0 11-4 11-11s-4-11-11-11h-16Zm0 47v22h19c8 0 12-4 12-11s-4-11-12-11h-19Z"/>
+  </g>
+  <pattern id="grain" width="9" height="9" patternUnits="userSpaceOnUse"><circle cx="2" cy="3" r=".55" fill="#D1DBE8" opacity=".045"/><circle cx="7" cy="8" r=".45" fill="#000" opacity=".09"/></pattern>
+ </defs>
+ <g opacity=".085" transform="translate(-56 -46) rotate(-19 215 160)">
+  <use href="#letters"/>
+  <use href="#letters" x="350" y="-8"/>
+  <use href="#letters" x="-104" y="154"/>
+  <use href="#letters" x="246" y="148"/>
+  <use href="#letters" x="20" y="306"/>
+ </g>
+ <path d="m367 39 13 8-8 13m-6 152 10-3 3 10M65 278l-11 6-6-11" stroke="#AFC0D5" stroke-width="1.5" opacity=".12"/>
+ <path fill="url(#grain)" d="M0 0h430v320H0z"/>
+</svg>

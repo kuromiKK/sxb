@@ -8,11 +8,15 @@ Use `uploadResource(file, { kind, contentId, examId, onProgress })` from `apps/a
 
 - `CoverImagePicker` requires `contentId`. Public product, exam and category covers use registered public image URLs. The existing `/api/message-images/:id` URL supports these public images as well as message illustrations.
 - `CourseAssetPicker`, `RichEditor`, and `KnowledgeHandouts` use the same uploader. Protected course media and attachments keep asset IDs and require authenticated access/tickets. No changes to paid media authorization are implied by registration.
-- External links remain external; do not claim they are uploaded server files. Spreadsheet imports are temporary parsing inputs, not media resources.
+- External links remain external; do not claim they are uploaded server files. Knowledge/question import source workbooks now require permanent provenance: register them as protected `import` assets through the same upload endpoint. Unrelated temporary spreadsheet parsing inputs remain temporary.
 
 ## Reference lifecycle
 
+Course covers use the existing registered `posterAssetId` field for video, audio and article courses. `/api/course-covers/:courseId` exposes only the selected image of a published course whose ancestors are published; it verifies asset kind, content owner and exam. Course body images, video/audio and attachments remain protected. The admin form marks the cover as public and recommends 16:9. Resource management already indexes `posterAssetId` as “课程封面”, preserving navigation and deletion protection.
+
 `resourceInventory` discovers references in saved content, current products, product versions, order snapshots, exam/category covers, exam guides, and messages. Upload ownership alone is not a saved reference. Resource cleanup rechecks references under the same transaction lock used by content saves. Every new persisted resource field or snapshot owner must extend this index and the resource location navigation.
+
+Import jobs and content origins also protect their source assets. These references navigate to the import result or content editor. Upload SHA-256 deduplication shares only disk bytes, never resource IDs or access control. Before unlinking a disk file, cleanup checks every resource record sharing its disk name under the resource lock.
 
 ## Legacy images
 

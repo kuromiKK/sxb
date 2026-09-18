@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="108" viewBox="0 0 160 108" fill="none">
+ <ellipse cx="86" cy="96" rx="54" ry="6" fill="#D3E1DA"/>
+ <g transform="rotate(-9 81 52)"><rect x="46" y="17" width="67" height="76" rx="6" fill="#A9C9BA"/><rect x="51" y="11" width="66" height="76" rx="6" fill="#FFFCF4" stroke="#8FAB9F" stroke-width="1.5"/><path d="M62 12v74" stroke="#D9E2D9"/><path d="M73 27h29M73 33h19" stroke="#89AB9E" stroke-width="2" stroke-linecap="round"/><rect x="73" y="44" width="10" height="10" rx="2" fill="#D7E9DD"/><path d="m76 49 2 2 4-5M89 49h13M73 64h29M73 71h23" stroke="#9BB5A7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+ <g transform="rotate(28 125 57)"><rect x="121" y="26" width="8" height="55" rx="2" fill="#D9AC70"/><path d="M121 34h8" stroke="#FFF0D9" stroke-width="2"/><path d="m121 81 4 10 4-10" fill="#F4DDB7"/><path d="m123 86 2 5 2-5" fill="#627F76"/></g>
+ <circle cx="34" cy="60" r="13" fill="#B7D5C9"/><path d="m28 60 4 4 8-9" stroke="#F8FCF9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M137 12v10m-5-5h10" stroke="#91B4A6" stroke-width="2" stroke-linecap="round"/>
+</svg>

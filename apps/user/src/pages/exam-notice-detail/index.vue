@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { ref } from 'vue'
 import { onLoad,onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
@@ -14,7 +15,7 @@ const date=(v:string)=>new Date(v).toLocaleDateString('zh-CN')
 </script>
 <template>
  <view class="exam-guide-page safe-top">
-  <view class="guide-header"><button aria-label="返回" @tap="back"><uni-icons type="back" size="22" color="#26384d"/></button><text>了解考试</text></view>
+  <view class="guide-header"><CircleAction @tap="back"/><text>了解考试</text></view>
   <view v-if="busy" class="guide-state" role="status">正在加载…</view>
   <view v-else-if="error" class="guide-state" role="alert"><text>{{error}}</text><button @tap="load">重新加载</button></view>
   <template v-else-if="article">

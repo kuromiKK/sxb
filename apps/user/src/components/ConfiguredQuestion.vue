@@ -1,73 +1,173 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { flattenFields, optionsFor, type QuestionField } from '../../../shared/question-types'
-import { api, showApiError } from '@/services/api'
-const props=defineProps<{question:any;examId:string}>(),emit=defineEmits(['submitted','busy'])
-const answers=ref<Record<string,any>>({}),result=ref<any>(null),busy=ref(false),requests=new Map<string,string>()
-const savedQuestion=ref<any>(null),selfScores=ref<Record<string,string>>({}),localError=ref(''),restoring=ref(false)
-const displayQuestion=computed(()=>savedQuestion.value||props.question)
-const fields=computed(()=>flattenFields(displayQuestion.value.definition.fields))
-const hasAI=computed(()=>fields.value.some(f=>f.kind==='text'&&f.aiGrading))
-const canRetry=computed(()=>['ai_failed','ai_pending','ai_processing'].includes(result.value?.status))
-const resultTitle=computed(()=>({ai_processing:'作答已保存，AI 正在判分',ai_pending:'作答已保存，等待 AI 判分',ai_failed:'作答已保存，AI 判分失败',self_review:'请对照参考答案完成自评',self_graded:'参考总分（含自评）',ai_graded:'AI 评分结果',graded:'本题得分'} as Record<string,string>)[result.value?.status]||'作答已保存')
-let poll:ReturnType<typeof setTimeout>|undefined,generation=0
-function applyResult(r:any){result.value=r;for(const [key,value] of Object.entries(r.fields) as any[])if(value.method==='self'&&value.score!=null)selfScores.value[key]=String(value.score)}
-async function restore(){const current=++generation;restoring.value=true;try{const saved=await api('/answers/configured/'+encodeURIComponent(props.question.id));if(current!==generation)return;if(saved){savedQuestion.value=saved.question;answers.value=saved.answers;applyResult(saved.result);schedulePoll()}}catch(e){if(current===generation)localError.value='历史作答加载失败，可重新进入查看；新作答不会覆盖历史记录。'}finally{if(current===generation)restoring.value=false}}
-function schedulePoll(){clearTimeout(poll);if(result.value?.status==='ai_processing')poll=setTimeout(async()=>{await restore()},3000)}
-watch(()=>props.question.id,()=>{clearTimeout(poll);answers.value={};result.value=null;savedQuestion.value=null;selfScores.value={};localError.value='';void restore()},{immediate:true})
-onBeforeUnmount(()=>{generation++;clearTimeout(poll)})
-function again(){requests.clear();generation++;clearTimeout(poll);result.value=null;savedQuestion.value=null;answers.value={};selfScores.value={};localError.value=''}
-function select(f:QuestionField,i:number){if(busy.value||result.value)return;const old=answers.value[f.id]||[];answers.value[f.id]=f.kind==='multiple'?old.includes(i)?old.filter((n:number)=>n!==i):[...old,i]:[i]}
-async function submit(){if(busy.value||result.value)return;busy.value=true;emit('busy',true);const qid=props.question.id,examId=props.examId
-  try{const data=JSON.parse(JSON.stringify(answers.value)),key=qid+JSON.stringify(data);if(!requests.has(key))requests.set(key,Date.now()+'-'+Math.random().toString(36).slice(2));const r=await api('/answers/configured','POST',{examId,questionId:qid,answers:data,requestId:requests.get(key)});if(props.question.id!==qid)return;applyResult(r);schedulePoll();emit('submitted',r)}catch(e){showApiError(e)}finally{busy.value=false;emit('busy',false)}
+import ActionButton from '@/components/ui/ActionButton.vue'
+import {computed, ref, onBeforeUnmount, watch, nextTick} from 'vue'
+import {api,token,selectedExamId} from '@/services/api'
+import {optionsFor,isAnswer,type QuestionField} from '../../../shared/question-types'
+import {questionForPractice,questionEntries,missingAnswers,attemptStatus,statusLabels,hasObjectiveMistake,type Attempt} from '@/utils/practice-session'
+const props=withDefaults(defineProps<{question:any;examId:string;initial?:Attempt;active?:boolean}>(),{active:true})
+const emit=defineEmits<{change:[id:string,attempt:Attempt];submitted:[id:string,result:any];busy:[boolean];verdict:[id:string,wrong:boolean]}>()
+const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v))
+const answers=ref<Record<string,any>>(clone(props.initial?.answers||{})),result=ref<any>(props.initial?.result),snapshot=ref<any>(props.initial?.question)
+const history=ref(false),busy=ref(false),error=ref(''),missing=ref<QuestionField[]>([]),focusField=ref(''),selfScores=ref<Record<string,string>>({})
+const stampImpact=ref(false)
+let stampTimer:ReturnType<typeof setTimeout>|undefined
+let requestId=props.initial?.requestId||'',requestData=props.initial?.requestData||'',previousDraft:Attempt|undefined,alive=true,polling=false
+const auth=token(),examId=props.examId,id=props.question.id
+const valid=()=>alive&&auth===token()&&examId===selectedExamId()
+const question=computed(()=>questionForPractice(snapshot.value||props.question))
+const entries=computed(()=>questionEntries(question.value.definition.fields))
+const status=computed(()=>statusLabels[attemptStatus({answers:answers.value,result:result.value})])
+const mistake=computed(()=>hasObjectiveMistake(result.value))
+const stampField=computed(()=>entries.value.find(({field})=>fieldResult(field)?.status==='graded'&&fieldResult(field)?.correct===false)?.field.id)
+watch(mistake,value=>{emit('verdict',id,value);if(!value)clearStamp()},{immediate:true})
+function clearStamp(){stampImpact.value=false;if(stampTimer)clearTimeout(stampTimer);stampTimer=undefined}
+const state=():Attempt=>clone({answers:answers.value,result:result.value,question:snapshot.value,requestId,requestData})
+const publish=()=>{if(valid()&&!history.value)emit('change',id,state())}
+const setBusy=(v:boolean)=>{busy.value=v;emit('busy',v)}
+const fieldResult=(f:QuestionField)=>result.value?.fields?.[f.id]
+const fieldValue=(f:QuestionField)=>question.value.values[f.id]
+const choices=(f:QuestionField)=>optionsFor(f,question.value.values)
+const letters=(v:any)=>Array.isArray(v)&&v.length?v.map((n:number)=>String.fromCharCode(65+n)).join('、'):'未作答'
+function choose(f:QuestionField,n:number){
+ if(result.value||busy.value)return
+ const a:number[]=answers.value[f.id]||[]
+ answers.value[f.id]=f.kind==='multiple'?(a.includes(n)?a.filter(x=>x!==n):[...a,n].sort((a,b)=>a-b)):[n]
+ missing.value=missing.value.filter(x=>x.id!==f.id);error.value='';publish()
 }
-async function retry(){if(busy.value)return;busy.value=true;emit('busy',true);try{applyResult(await api('/answers/submissions/'+result.value.submissionId+'/retry','POST',{}));schedulePoll()}catch(e){showApiError(e)}finally{busy.value=false;emit('busy',false)}}
-async function selfScore(f:QuestionField){const value=selfScores.value[f.id];if(value==null||!value.trim())return showApiError(new Error('请填写自评分，0分也需要明确填写'));const score=Number(value);if(!Number.isFinite(score)||score<0||score>f.maxScore)return showApiError(new Error(`请填写0至${f.maxScore}之间的自评分`));busy.value=true;emit('busy',true);try{applyResult(await api('/answers/submissions/'+result.value.submissionId+'/self-score','POST',{fieldId:f.id,score}))}catch(e){showApiError(e)}finally{busy.value=false;emit('busy',false)}}
+function edit(f:QuestionField,e:any){answers.value[f.id]=e.detail.value;missing.value=missing.value.filter(x=>x.id!==f.id);error.value='';publish()}
+function optionState(f:QuestionField,n:number){
+ const r=fieldResult(f),selected=(answers.value[f.id]||[]).includes(n)
+ if(!r||!Array.isArray(r.answer))return selected?'selected':''
+ return r.answer.includes(n)?selected?'correct':'missed':selected?'wrong':''
+}
+const optionLabel=(f:QuestionField,n:number)=>(({correct:'正确',missed:'漏选',wrong:'错选'} as Record<string,string>)[optionState(f,n)]||'')
+async function locate(f:QuestionField){
+ focusField.value='';await nextTick();focusField.value=f.id
+ // #ifdef H5
+ const el=document.getElementById('answer-field-'+f.id);el?.scrollIntoView({behavior:'smooth',block:'center'});el?.focus({preventScroll:true})
+ // #endif
+ // #ifndef H5
+ uni.pageScrollTo({selector:'#answer-field-'+f.id,duration:200})
+ // #endif
+}
+function applyResult(r:any){
+ const impact=!hasObjectiveMistake(result.value)&&hasObjectiveMistake(r)&&!history.value&&props.active
+ result.value=r;publish();emit('submitted',id,r)
+ if(impact)void showMistakeStamp(result.value)
+}
+async function showMistakeStamp(gradedResult:any){
+ clearStamp();await nextTick()
+ if(!valid()||!props.active||history.value||result.value!==gradedResult||!stampField.value)return
+ const reveal=()=>{if(!valid()||!props.active||history.value||result.value!==gradedResult)return;stampImpact.value=true;stampTimer=setTimeout(clearStamp,3200)}
+ // Bring an off-screen explanation into view so a long question doesn't hide the feedback.
+ // #ifdef H5
+ const feedback=document.getElementById('feedback-field-'+stampField.value),bounds=feedback?.getBoundingClientRect()
+ if(bounds&&(bounds.top<80||bounds.top>window.innerHeight-180)){
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  uni.pageScrollTo({scrollTop:Math.max(0,window.scrollY+bounds.top-140),duration:reduced?0:180,complete:reveal});return
+ }
+ reveal()
+ // #endif
+ // #ifndef H5
+ uni.pageScrollTo({selector:'#feedback-field-'+stampField.value,duration:180,complete:reveal})
+ // #endif
+}
+async function submit(){
+ if(busy.value||result.value)return
+ missing.value=missingAnswers(question.value,answers.value)
+ if(missing.value.length){error.value='还有必答小题未完成，请补充后提交';await locate(missing.value[0]);return}
+ const data=clone(answers.value),serialized=JSON.stringify(data)
+ if(!requestId||requestData!==serialized){requestId=Date.now()+'-'+Math.random().toString(36).slice(2);requestData=serialized}
+ publish();error.value='';setBusy(true)
+ try{
+  const configured=props.question.type==='configured'
+  const r=await api(configured?'/answers/configured':'/answers','POST',configured?{examId,questionId:id,answers:data,requestId}:{examId,questionId:id,selection:data.answer,requestId})
+  if(!valid())return
+  snapshot.value=clone(props.question)
+  applyResult(configured?r:{status:'graded',correct:r.correct,legacy:true,fields:{answer:{...r,status:'graded'}}})
+ }catch(e:any){if(valid())error.value=e.message}finally{if(alive)setBusy(false)}
+}
+async function updateScore(f?:QuestionField){
+ if(busy.value||history.value||!result.value?.submissionId)return
+ let score:number|undefined
+ if(f){const raw=String(selfScores.value[f.id]??'').trim();score=Number(raw);if(!raw||!Number.isFinite(score)||score<0||score>fieldResult(f).maxScore||Math.abs(score*100-Math.round(score*100))>1e-6){error.value='请输入 0 至满分之间的分数，最多两位小数';return}}
+ error.value='';setBusy(true)
+ try{const r=await api('/answers/submissions/'+result.value.submissionId+(f?'/self-score':'/retry'),'POST',f?{fieldId:f.id,score}:{});if(valid())applyResult(r)}catch(e:any){if(valid())error.value=e.message}finally{if(alive)setBusy(false)}
+}
+async function loadHistory(){
+ if(busy.value)return
+ error.value='';setBusy(true)
+ try{const last=await api('/answers/configured/'+encodeURIComponent(id));if(!valid())return;if(!last){error.value='还没有历史作答';return}previousDraft=state();history.value=true;answers.value=last.answers;result.value=last.result;snapshot.value=last.question}
+ catch(e:any){if(valid())error.value=e.message}finally{if(alive)setBusy(false)}
+}
+function restore(){const a=previousDraft||{answers:{}};history.value=false;answers.value=a.answers;result.value=a.result;snapshot.value=a.question;requestId=a.requestId||'';requestData=a.requestData||'';error.value=''}
+function restart(){history.value=false;answers.value={};result.value=undefined;snapshot.value=undefined;requestId='';requestData='';selfScores.value={};error.value='';publish()}
+const poll=setInterval(async()=>{
+ if(!valid()||!props.active||busy.value||polling||history.value||!['ai_pending','ai_processing'].includes(result.value?.status))return
+ polling=true;const submissionId=result.value.submissionId
+ try{const last=await api('/answers/configured/'+encodeURIComponent(id));if(valid()&&!history.value&&last?.result?.submissionId===submissionId&&result.value?.submissionId===submissionId)applyResult(last.result)}catch{ /* Keep the submitted answer; next visible poll retries. */ }finally{polling=false}
+},4000)
+watch(()=>props.active,()=>{if(!props.active){focusField.value='';clearStamp()}})
+onBeforeUnmount(()=>{alive=false;clearInterval(poll);clearStamp();emit('busy',false)})
 </script>
-<template>
-<view class="cq">
-  <view v-if="restoring" class="cq-notice">正在读取已保存的作答…</view>
-  <view v-if="localError" class="cq-notice">{{localError}}</view>
-  <view v-if="!result&&hasAI" class="cq-notice">本题含 AI 判分，提交后将依据参考答案和评分要点评分。</view>
-  <view v-for="f in fields" :key="f.id" class="cq-field" :class="{'cq-group':f.kind==='group'}">
-    <view class="cq-label"><text>{{f.label}}</text><text v-if="['single','multiple','boolean','text'].includes(f.kind)" class="cq-points">{{f.maxScore}}分</text></view>
-    <text v-if="f.kind==='text'" class="cq-method">{{f.aiGrading?'AI 判分':'自评练习'}}</text>
-    <text v-if="f.help" class="cq-help">{{f.help}}</text>
-    <template v-if="f.kind==='material'"><text class="cq-text">{{displayQuestion.values[f.id]}}</text></template>
-    <template v-else-if="f.kind==='options'"><text v-for="(v,i) in displayQuestion.values[f.id]" :key="i" class="cq-text">{{String.fromCharCode(65+Number(i))}}. {{v}}</text></template>
-    <template v-else-if="f.kind!=='group'">
-      <text class="cq-text">{{displayQuestion.values[f.id]?.prompt}}</text>
-      <textarea v-if="f.kind==='text'" v-model="answers[f.id]" class="cq-answer" :disabled="busy||restoring||!!result" maxlength="100000" placeholder="请填写你的答案"/>
-      <button v-for="(option,i) in f.kind==='text'?[]:optionsFor(f,displayQuestion.values)" :key="i" class="cq-option" :class="{selected:(answers[f.id]||[]).includes(i),correct:result?.fields[f.id]?.answer?.includes(i)}" :disabled="busy||restoring||!!result" @tap="select(f,i)"><text class="cq-letter">{{String.fromCharCode(65+i)}}</text><text>{{option}}</text></button>
-      <view v-if="result?.fields[f.id]" class="cq-analysis">
-        <template v-if="f.kind==='text'">
-          <text v-if="result.fields[f.id].status==='ai_graded'" class="cq-score">AI 评分 {{result.fields[f.id].score}} / {{f.maxScore}}</text>
-          <text v-else-if="result.fields[f.id].status==='self_graded'" class="cq-score">自评分 {{result.fields[f.id].score}} / {{f.maxScore}}</text>
-          <text v-else-if="result.fields[f.id].status==='ai_failed'" class="cq-failed">判分失败，作答已保存</text>
-          <text v-else-if="['ai_pending','ai_processing'].includes(result.fields[f.id].status)">AI 正在判分，作答已保存</text>
-          <text v-else>对照答案，自行核对</text>
-          <text v-if="result.fields[f.id].feedback">{{result.fields[f.id].feedback}}</text>
-          <text v-if="result.fields[f.id].error" class="cq-failed">{{result.fields[f.id].error}}</text>
-        </template>
-        <text v-else>得分 {{result.fields[f.id].score}} / {{result.fields[f.id].maxScore}} · 正确答案 {{result.fields[f.id].answer.map((n:number)=>String.fromCharCode(65+n)).join('、')}}</text>
-        <text v-if="result.fields[f.id].reference">参考答案：{{result.fields[f.id].reference}}</text>
-        <text v-else-if="f.kind==='text'">暂无参考答案，请联系老师补充。</text>
-        <text v-if="result.fields[f.id].rubric">评分要点：{{result.fields[f.id].rubric}}</text>
-        <text v-if="result.fields[f.id].explanation">解析：{{result.fields[f.id].explanation}}</text>
-        <view v-if="result.fields[f.id].method==='self'" class="cq-self">
-          <text>我的自评分（0～{{f.maxScore}}分）</text>
-          <view class="cq-self-controls"><input v-model="selfScores[f.id]" type="digit" :disabled="busy" :aria-label="f.label+'自评分'" placeholder="填写分数"/><button :disabled="busy" @tap="selfScore(f)">保存自评</button></view>
-          <text class="cq-small">自评分仅供复习参考，不计入客观正确率。</text>
-        </view>
-      </view>
-    </template>
-  </view>
-  <button v-if="!result" class="cq-submit" :loading="busy" :disabled="busy||restoring" @tap="submit">{{busy&&hasAI?'正在提交与判分…':'提交作答'}}</button>
-  <view v-else class="cq-result"><text>{{resultTitle}}{{result.score!=null?'：'+result.score+' / '+result.maxScore:''}}</text><text v-if="result.score==null">未完成评分的部分不计为零分。</text><button v-if="canRetry" :loading="busy" :disabled="busy" @tap="retry">{{result.status==='ai_processing'?'查询 / 重试判分':'重试 AI 判分'}}</button><button class="cq-again" :disabled="busy" @tap="again">重新练习</button></view>
-</view>
-</template>
-<style scoped>
-.cq-notice{padding:14px 16px;background:#edf3ff;color:var(--cq-muted);font-size:13px;line-height:1.8;margin-bottom:16px;border-radius:8px}.cq-method{display:inline-block;color:var(--cq-primary);background:#eef4ff;padding:3px 8px;margin-top:10px;font-size:12px;border-radius:4px}.cq-self{border-top:1px solid var(--cq-border);padding-top:14px;margin-top:14px}.cq-self-controls{display:flex;gap:10px;margin-top:10px;align-items:center}.cq-self-controls input{min-width:0;flex:1;height:44px;border:1px solid var(--cq-border);border-radius:6px;background:white;padding:0 12px;font-size:15px}.cq-self-controls button,.cq-result button{font-size:14px;line-height:44px;padding:0 14px;background:var(--cq-primary);color:white;border-radius:6px;white-space:nowrap}.cq-result button{margin-top:12px}.cq-result .cq-again{background:white;color:var(--cq-primary);border:1px solid var(--cq-border)}.cq-analysis .cq-small{font-size:12px;color:var(--cq-muted)}.cq-analysis .cq-score{color:var(--cq-primary);font-size:16px;font-weight:600}.cq-analysis .cq-failed{color:#b34832}.cq-option[disabled]{color:var(--cq-text);opacity:1}
 
-.cq{--cq-primary:#3569e8;--cq-text:#263953;--cq-muted:#64748b;--cq-border:#dde5ef;margin-top:20px}.cq-field{padding:20px 16px;margin-bottom:14px;border:1px solid var(--cq-border);border-radius:12px;background:#fff}.cq-group{padding:14px 16px;background:#edf3ff;border-color:#d7e4ff}.cq-label{display:flex;justify-content:space-between;gap:12px;font-size:14px;font-weight:600;color:var(--cq-text)}.cq-points{color:var(--cq-primary);font-size:12px;flex:none}.cq-help{display:block;font-size:12px;color:var(--cq-muted);margin-top:8px}.cq-text{display:block;font-size:16px;line-height:1.8;white-space:pre-wrap;word-break:break-word;color:var(--cq-text);margin:12px 0}.cq-option{display:flex;align-items:center;gap:12px;padding:12px;margin:10px 0 0;background:#fff;border:1px solid var(--cq-border);border-radius:8px;text-align:left;font-size:15px;line-height:1.6;color:var(--cq-text)}.cq-option::after,.cq-submit::after{display:none}.cq-option.selected{border-color:var(--cq-primary);background:#eef4ff}.cq-option.correct{border-color:#167d71;background:#eaf8f2}.cq-letter{flex:none;width:25px;height:25px;border:1px solid var(--cq-border);border-radius:50%;text-align:center;line-height:25px}.cq-answer{width:100%;box-sizing:border-box;min-height:150px;padding:14px;background:#f8fafc;border:1px solid var(--cq-border);border-radius:8px;font-size:15px;line-height:1.7;margin-top:14px}.cq-analysis{margin-top:16px;padding:14px;background:#f5f8fc;border-radius:8px}.cq-analysis text{display:block;color:var(--cq-text);font-size:14px;line-height:1.8;white-space:pre-wrap;margin-top:6px}.cq-submit{background:var(--cq-primary);color:#fff;font-size:16px;border-radius:9px;padding:4px}.cq-result{background:#edf3ff;color:var(--cq-primary);padding:16px;border-radius:10px}.cq-result text{display:block;line-height:1.7;font-size:14px}.cq-result text+text{font-size:12px;color:var(--cq-muted);margin-top:6px}
+<template>
+ <view class="question-reader">
+  <view v-if="history" class="history-banner"><text>上次作答 · 不计入本轮进度</text><ActionButton @tap="restore">返回本次作答</ActionButton></view>
+  <view v-if="error" class="error-summary" role="alert"><text>{{error}}</text><ActionButton v-for="f in missing" :key="f.id" @tap="locate(f)">{{f.label}} · 去作答</ActionButton></view>
+  <view v-for="entry in entries" :id="'answer-field-'+entry.field.id" :key="entry.field.id" class="answer-field" :class="[entry.field.kind,{'has-error':missing.some(f=>f.id===entry.field.id)}]" tabindex="-1">
+   <view v-if="props.question.type==='configured'" class="field-heading"><text>{{entry.field.label}}</text><text v-if="isAnswer(entry.field)">{{entry.field.maxScore}} 分</text></view>
+   <text v-if="entry.field.help" class="field-help">{{entry.field.help}}</text>
+   <template v-if="entry.field.kind==='material'"><text class="material-text" selectable>{{fieldValue(entry.field)}}</text></template>
+   <template v-else-if="entry.field.kind==='options'"><text v-for="(option,n) in fieldValue(entry.field)" :key="n" class="shared-option">{{String.fromCharCode(65+Number(n))}}. {{option}}</text></template>
+   <template v-else-if="isAnswer(entry.field)">
+    <text class="question-prompt" selectable>{{fieldValue(entry.field)?.prompt}}</text>
+    <text class="answer-rule">{{entry.field.kind==='multiple'?'可选择多个答案':entry.field.kind==='text'?'请写下你的分析与思路':'请选择一个答案'}}{{!entry.field.answerRequired?' · 选答':''}}<template v-if="entry.field.kind==='multiple'&&entry.field.scoring==='partial'"> · 漏选每项 {{entry.field.partialScore}} 分，错选不得分</template></text>
+    <textarea v-if="entry.field.kind==='text'" class="text-answer" :value="answers[entry.field.id]||''" :disabled="!!result||busy" :focus="focusField===entry.field.id" :aria-label="entry.field.label" :maxlength="20000" auto-height placeholder="在这里输入你的答案…" @input="edit(entry.field,$event)"/>
+    <view v-else class="answer-options"><ActionButton v-for="(option,n) in choices(entry.field)" :key="n" class="answer-option" :class="[optionState(entry.field,n),{multiple:entry.field.kind==='multiple'}]" :disabled="!!result||busy" :aria-pressed="(answers[entry.field.id]||[]).includes(n)" @tap="choose(entry.field,n)"><text class="option-letter">{{String.fromCharCode(65+n)}}</text><text class="option-copy">{{option}}</text><text v-if="optionLabel(entry.field,n)" class="option-state">{{optionLabel(entry.field,n)}}</text></ActionButton></view>
+    <text v-if="missing.some(f=>f.id===entry.field.id)" class="field-error">请完成这一题</text>
+    <view v-if="fieldResult(entry.field)" :id="'feedback-field-'+entry.field.id" class="field-feedback">
+     <view v-if="stampImpact&&entry.field.id===stampField" class="mistake-impact" aria-hidden="true"><view class="error-stamp impact-stamp"><text>答错</text></view></view>
+     <view class="feedback-heading"><text>{{fieldResult(entry.field).method==='self'?'对照要点自评':fieldResult(entry.field).method==='ai'?'AI 评分':'答案解析'}}</text><text v-if="typeof fieldResult(entry.field).score==='number'">{{fieldResult(entry.field).score}} / {{fieldResult(entry.field).maxScore}} 分</text></view>
+     <text v-if="entry.field.kind!=='text'" class="feedback-copy">你的答案 {{letters(answers[entry.field.id])}}　正确答案 {{letters(fieldResult(entry.field).answer)}}</text>
+     <template v-if="fieldResult(entry.field).reference"><text class="feedback-label">参考答案</text><text class="feedback-copy" selectable>{{fieldResult(entry.field).reference}}</text></template>
+     <template v-if="fieldResult(entry.field).rubric"><text class="feedback-label">评分要点</text><text class="feedback-copy" selectable>{{fieldResult(entry.field).rubric}}</text></template>
+     <text v-if="fieldResult(entry.field).explanation" class="feedback-copy" selectable>{{fieldResult(entry.field).explanation}}</text>
+     <text v-if="fieldResult(entry.field).feedback" class="feedback-copy">{{fieldResult(entry.field).feedback}}</text>
+     <text v-if="fieldResult(entry.field).error" class="field-error">{{fieldResult(entry.field).error}}</text>
+     <text v-if="['ai_pending','ai_processing'].includes(fieldResult(entry.field).status)" class="feedback-copy">答案已保存，正在评分…</text>
+     <view v-if="fieldResult(entry.field).method==='self'&&!history" class="self-score"><input v-model="selfScores[entry.field.id]" type="digit" :aria-label="entry.field.label+'自评分'" :placeholder="'0–'+fieldResult(entry.field).maxScore+' 分'"/><ActionButton :disabled="busy" @tap="updateScore(entry.field)">保存自评分</ActionButton></view>
+    </view>
+   </template>
+  </view>
+  <ActionButton v-if="!result" class="submit-answer" :loading="busy" :disabled="busy" @tap="submit">{{busy?'正在提交':'确认答案'}}</ActionButton>
+  <view v-else class="result-summary" :class="{'result-mistake':mistake,'result-correct':status==='正确'}" aria-live="polite"><view><text>{{status==='错误'?'回答错误':status}}</text><text v-if="typeof result.score==='number'">本题 {{result.score}} / {{result.maxScore}} 分</text></view><ActionButton v-if="!history&&result.status==='ai_failed'" :disabled="busy" @tap="updateScore()">重试评分</ActionButton><ActionButton v-else-if="!history" :disabled="busy" @tap="restart">重新练习</ActionButton></view>
+  <ActionButton v-if="props.question.type==='configured'&&!result&&!history" class="history-link" :disabled="busy" @tap="loadHistory">查看上次作答</ActionButton>
+ </view>
+</template>
+
+<style scoped>
+.question-reader{--practice-blue:#3569e8;--practice-ink:#263953;--practice-muted:#63748a;color:var(--practice-ink)}button{margin:0;font:inherit;line-height:1.5}button:after{border:0}button:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--practice-blue);outline-offset:3px}.answer-field{margin:0 0 26px;scroll-margin-top:20px}.answer-field:focus{outline:none}.field-heading{display:flex;justify-content:space-between;gap:12px;color:var(--practice-muted);font-size:12px;font-weight:600;line-height:1.6}.question-prompt{display:block;font-size:18px;font-weight:600;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0 12px}.field-help,.answer-rule{display:block;font-size:12px;line-height:1.7;color:var(--practice-muted);margin:6px 0 14px}.answer-options{display:flex;flex-direction:column;gap:12px}.answer-option{display:flex;align-items:center;gap:12px;text-align:left;min-height:58px;padding:14px;border:1px solid #e1e7ef;border-radius:13px;background:#fafbfd;color:var(--practice-ink);transition:background .16s,border-color .16s}.answer-option[disabled]{color:var(--practice-ink);opacity:1}.option-letter{display:flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border:1px solid #d8e0eb;border-radius:50%;font-size:13px;font-weight:600;background:#fff;color:var(--practice-muted)}.multiple .option-letter{border-radius:8px}.option-copy{flex:1;min-width:0;font-size:16px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}.option-state{font-size:11px;flex:none}.selected{background:#edf3ff;border-color:#7095ec}.selected .option-letter{background:var(--practice-blue);border-color:var(--practice-blue);color:#fff}.correct,.missed{background:#eef8f3;border-color:#70af94}.correct .option-letter{background:#288264;color:#fff;border-color:#288264}.wrong{background:#fff3f1;border-color:#d9908a}.wrong .option-letter{color:#b84842;border-color:#d9908a}.correct .option-state,.missed .option-state{color:#237355}.wrong .option-state{color:#ad413c}.text-answer{width:100%;min-height:180px;box-sizing:border-box;padding:14px;border:1px solid #dce4ef;border-radius:12px;background:#fafbfd;font-size:16px;line-height:1.8}.material,.options{background:#f3f6fa;padding:16px;border-radius:12px}.material-text,.shared-option{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:16px;line-height:1.85;margin-top:10px}.group{border-left:3px solid var(--practice-blue);padding-left:12px;margin-bottom:16px}.group .field-heading{font-size:16px;color:var(--practice-ink)}.field-feedback{margin-top:18px;padding:16px;background:#f3f6fb;border-radius:12px}.feedback-heading{display:flex;justify-content:space-between;gap:8px;font-size:14px;font-weight:600}.feedback-copy{display:block;margin-top:10px;font-size:15px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}.feedback-label{display:block;margin-top:16px;font-size:12px;color:var(--practice-muted)}.submit-answer{background:var(--practice-blue);color:#fff;border-radius:13px;min-height:48px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;box-shadow:0 6px 16px #3569e81a}.submit-answer[disabled]{opacity:.65;color:#fff}.result-summary{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e6ebf2;padding-top:16px;gap:12px;font-size:14px}.result-summary>view{display:flex;flex-direction:column;gap:4px}.result-summary>view>text+text{font-size:12px;color:var(--practice-muted)}.result-summary button,.self-score button,.history-banner button{min-height:44px;padding:10px 12px;border-radius:10px;background:#eaf1ff;color:#315ec7;font-size:13px}.history-link{background:transparent;color:var(--practice-muted);font-size:12px;min-height:44px;margin:6px auto 0}.history-banner,.error-summary{margin-bottom:20px;padding:12px;border-radius:12px;font-size:13px;line-height:1.7}.history-banner{background:#fff5df;color:#7a5a26}.history-banner button{margin-top:8px}.error-summary{background:#fff1ee;color:#a23830}.error-summary button{background:transparent;color:inherit;font-size:13px;text-align:left;min-height:44px}.field-error{display:block;color:#ac4137;font-size:13px;line-height:1.7;margin-top:8px}.has-error .text-answer{border-color:#c86a5f}.self-score{display:flex;gap:10px;margin-top:14px;align-items:center}.self-score input{flex:1;width:0;min-height:44px;box-sizing:border-box;padding:8px;background:#fff;border:1px solid #d9e1ec;border-radius:8px;font-size:16px}@media(prefers-reduced-motion:reduce){.answer-option{transition:none}}
+</style>
+
+<style scoped>
+.question-reader{--practice-error:#c63743;--practice-error-soft:#fff0f0}
+.answer-option.wrong,.answer-option.wrong[disabled]{background:var(--practice-error-soft);border-color:var(--practice-error);color:var(--practice-error);box-shadow:none}
+.answer-option.wrong .option-copy,.answer-option.wrong .option-state{color:var(--practice-error)}
+.answer-option.wrong .option-letter{background:#fff;color:var(--practice-error);border-color:var(--practice-error)}
+.answer-option.correct[disabled],.answer-option.missed[disabled]{background:#eef8f3}
+.answer-option.wrong .option-state{font-size:12px;font-weight:650}
+.result-summary.result-mistake{padding:14px;border:1px solid #efbdc2;border-radius:12px;background:var(--practice-error-soft)}
+.result-correct>view>text:first-child{color:#237355;font-weight:700}
+.result-mistake>view>text:first-child{color:var(--practice-error);font-size:20px;font-weight:750}
+.result-mistake button{background:var(--practice-error);color:#fff}
+.field-feedback{position:relative}
+.mistake-impact{position:absolute;z-index:4;right:12px;top:-18px;width:128px;height:110px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.error-stamp{position:relative;display:flex;align-items:center;justify-content:center;flex:none;width:110px;height:110px;border:4px solid var(--practice-error);border-radius:50%;color:var(--practice-error);background:#fff4efed;box-sizing:border-box;transform:rotate(-13deg);box-shadow:0 5px 12px #99253624}
+.error-stamp:after{content:'';position:absolute;inset:4px;border:1px solid var(--practice-error);border-radius:50%;pointer-events:none}
+.error-stamp>text{font-size:32px;line-height:1;font-weight:900;letter-spacing:2px;text-shadow:1px 0 currentColor}
+.impact-stamp{animation:mistake-stamp 3.2s both;transform-origin:50% 50%}
+@keyframes mistake-stamp{0%{opacity:0;transform:translateY(-48px) rotate(-24deg) scale(1.7)}7%{opacity:1;transform:translateY(3px) rotate(-13deg) scale(.94)}11%{transform:translateY(-2px) rotate(-13deg) scale(1.04)}16%,86%{opacity:1;transform:translateY(0) rotate(-13deg) scale(1)}100%{opacity:0;transform:rotate(-13deg) scale(1)}}
+@media(max-width:350px){.mistake-impact{right:4px;width:112px;height:96px}.error-stamp{width:96px;height:96px}.error-stamp>text{font-size:28px}}
+@media(prefers-reduced-motion:reduce){.impact-stamp{animation:none;transform:rotate(-13deg)}}
 </style>

@@ -18,7 +18,7 @@ export const userProfiles=Router()
 userProfiles.get('/',async(req,res)=>{
  const q=pageInput.extend({developer:z.enum(['','true','false']).default('')}).parse(req.query)
  const args=[q.search,q.developer===''?null:q.developer==='true']
- const where="u.account_kind='student' AND ($1='' OR strpos(u.nickname,$1)>0 OR strpos(u.phone,$1)>0) AND ($2::boolean IS NULL OR u.is_developer=$2)"
+ const where="u.account_kind='student' AND ($1='' OR strpos(u.nickname,$1)>0 OR strpos(u.phone,$1)>0 OR strpos(u.id,$1)>0) AND ($2::boolean IS NULL OR u.is_developer=$2)"
  const total=(await db.query('SELECT count(*)::int AS n FROM users u WHERE '+where,args)).rows[0].n
  const items=(await db.query(`SELECT ${fields},i.nickname AS inviter FROM users u LEFT JOIN users i ON i.id=u.inviter_id WHERE ${where} ORDER BY u.created_at DESC,u.id LIMIT 20 OFFSET $3`,[...args,(q.page-1)*20])).rows
  res.json({items,total})
@@ -70,7 +70,7 @@ scoped.get('/visits',async(req,res)=>{
  const q=pageInput.extend({from:date.optional(),to:date.optional(),kind:z.enum(['','subject','chapter','section','knowledge','course']).default('')}).parse(req.query)
  if(Boolean(q.from)!==Boolean(q.to)||(q.from&&q.to&&q.from>q.to))fail(400,'请选择完整且有效的时间范围')
  const {userId,examId}=res.locals.profileScope,args=[userId,examId,q.search,q.kind,q.from?q.from+'T00:00:00+08:00':null,q.to?new Date(Date.parse(q.to+'T00:00:00+08:00')+86400000).toISOString():null]
- const where="user_id=$1 AND exam_id=$2 AND ($3='' OR strpos(title,$3)>0) AND ($4='' OR kind=$4) AND ($5::timestamptz IS NULL OR started_at>=$5) AND ($6::timestamptz IS NULL OR started_at<$6)"
+ const where="user_id=$1 AND exam_id=$2 AND ($3='' OR strpos(title,$3)>0 OR strpos(id,$3)>0 OR strpos(content_id,$3)>0) AND ($4='' OR kind=$4) AND ($5::timestamptz IS NULL OR started_at>=$5) AND ($6::timestamptz IS NULL OR started_at<$6)"
  const total=(await db.query('SELECT count(*)::int AS n FROM learning_visits WHERE '+where,args)).rows[0].n
  const items=(await db.query('SELECT * FROM learning_visits WHERE '+where+' ORDER BY started_at DESC,id DESC LIMIT 20 OFFSET $7',[...args,(q.page-1)*20])).rows
  res.json({items,total})

@@ -11,7 +11,7 @@ const rows=ref<any[]>([]),exams=ref<any[]>([]),cycles=ref<any[]>([]),busy=ref(fa
 const filters=reactive({search:'',type:'',examId:'',cycleId:'',level:'',state:''})
 const stateNames:Record<string,string>={draft:'草稿',selling:'销售中',scheduled:'待考期开启',offline:'已下架',expired:'考期已结束',unavailable:'考试已停用'}
 const typeNames:Record<string,string>={entitlement:'权益商品',trial:'体验权益'}
-const matches=computed(()=>rows.value.filter(r=>(!filters.search||[r.title,r.frontend_title].some(name=>name?.includes(filters.search.trim())))&&(!filters.type||r.type===filters.type)&&(!filters.examId||r.exam_id===filters.examId)&&(!filters.cycleId||r.cycle_id===filters.cycleId)&&(!filters.level||r.level===filters.level)&&(!filters.state||r.saleState===filters.state)))
+const matches=computed(()=>rows.value.filter(r=>(!filters.search||[r.title,r.frontend_title,r.id].some(name=>name?.includes(filters.search.trim())))&&(!filters.type||r.type===filters.type)&&(!filters.examId||r.exam_id===filters.examId)&&(!filters.cycleId||r.cycle_id===filters.cycleId)&&(!filters.level||r.level===filters.level)&&(!filters.state||r.saleState===filters.state)))
 const items=computed(()=>matches.value.slice((page.value-1)*20,page.value*20))
 const counts=computed(()=>[{label:'全部商品',value:rows.value.length,icon:Package},{label:'销售中',value:rows.value.filter(r=>r.saleState==='selling').length,icon:ShieldCheck},{label:'体验权益',value:rows.value.filter(r=>r.type==='trial').length,icon:Clock3}])
 const money=(n:number)=>'¥'+(n/100).toFixed(2),date=(s:string)=>s?new Date(s).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—'

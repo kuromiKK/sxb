@@ -103,7 +103,7 @@ defineExpose({ load, open: edit })
 <template>
   <section class="administrator-management">
     <form class="admin-filters" @submit.prevent="query">
-      <label class="admin-filter-field"><span>姓名 / 手机号</span><el-input v-model="search" aria-label="姓名或手机号" clearable placeholder="搜索管理员姓名或手机号" /></label>
+      <label class="admin-filter-field"><span>姓名 / 手机号</span><el-input v-model="search" aria-label="姓名或手机号" clearable placeholder="搜索管理员姓名或手机号或唯一 ID" /></label>
       <div class="admin-filter-actions"><el-button type="primary" native-type="submit"><Search :size="16" aria-hidden="true"/>查询</el-button><el-button @click="resetFilters"><RotateCcw :size="16" aria-hidden="true"/>重置</el-button></div>
     </form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />

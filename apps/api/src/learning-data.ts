@@ -42,6 +42,20 @@ export async function migrateLearningData(){await transaction(async c=>{
 })}
 
 export const learningCapture=Router()
+learningCapture.get('/recent-course',async(req,res)=>{
+ const examId=z.string().min(1).max(160).parse(req.query.examId)
+ // Join the published hierarchy: withdrawn courses and supporting knowledge courses are excluded.
+ const row=(await db.query(`SELECT v.content_id AS "courseId",v.media_type AS type,
+  v.position_seconds AS "positionSeconds",v.duration_seconds AS "durationSeconds",r.payload AS progress
+  FROM learning_visits v JOIN content c ON c.id=v.content_id AND c.kind='course' AND c.status='published'
+  JOIN content s ON s.id=c.parent_id AND s.kind='section' AND s.status='published'
+  JOIN content ch ON ch.id=s.parent_id AND ch.kind='chapter' AND ch.status='published'
+  JOIN content su ON su.id=ch.parent_id AND su.kind='subject' AND su.status='published'
+  LEFT JOIN user_records r ON r.user_id=v.user_id AND r.exam_id=v.exam_id AND r.source_id=c.id AND r.kind='courseProgress'
+  WHERE v.user_id=$1 AND v.exam_id=$2 AND c.exam_id=$2
+  ORDER BY v.last_activity_at DESC,v.started_at DESC,v.id LIMIT 1`,[res.locals.user.id,examId])).rows[0]
+ res.json(row||null)
+})
 const visitInput=z.object({examId:z.string().min(1).max(160),contentId:z.string().min(1).max(160),sessionId:z.string().min(8).max(120)}).strict()
 learningCapture.post('/',async(req,res)=>{
  const b=visitInput.parse(req.body),uid=res.locals.user.id
@@ -108,7 +122,7 @@ const listSelect=`SELECT v.*,u.nickname,substring(u.phone,1,3)||'****'||right(u.
 learningManagement.get('/visits',async(req,res)=>{
  const q=range(req.query),f=z.object({user:z.string().max(100).default(''),title:z.string().max(100).default(''),kind:z.enum(['','subject','chapter','section','knowledge','course']).default(''),page:z.coerce.number().int().min(1).max(100000).default(1)}).parse(req.query)
  const args:any[]=[q.start,q.end,q.examId,f.user.trim(),f.title.trim(),f.kind]
- const where=`v.started_at>=$1 AND v.started_at<$2 AND ($3='' OR v.exam_id=$3) AND ($4='' OR strpos(u.nickname,$4)>0 OR strpos(u.phone,$4)>0) AND ($5='' OR strpos(v.title,$5)>0) AND ($6='' OR v.kind=$6)`
+ const where=`v.started_at>=$1 AND v.started_at<$2 AND ($3='' OR v.exam_id=$3) AND ($4='' OR strpos(u.nickname,$4)>0 OR strpos(u.phone,$4)>0 OR strpos(u.id,$4)>0) AND ($5='' OR strpos(v.title,$5)>0 OR strpos(v.id,$5)>0 OR strpos(v.content_id,$5)>0) AND ($6='' OR v.kind=$6)`
  const total=(await db.query(`SELECT count(*)::int AS n FROM learning_visits v JOIN users u ON u.id=v.user_id WHERE ${where}`,args)).rows[0].n
  const items=(await db.query(listSelect+` WHERE ${where} ORDER BY v.started_at DESC,v.id LIMIT 20 OFFSET $7`,[...args,(f.page-1)*20])).rows
  res.json({items,total})

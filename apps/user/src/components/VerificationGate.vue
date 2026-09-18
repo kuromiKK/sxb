@@ -13,7 +13,7 @@ const widgetData=computed(()=>({...slideData.value,thumbSize:(challenge.value?.d
 const widgetConfig=computed(()=>({width,height:(challenge.value?.height||220)*scale.value,size:(challenge.value?.size||220)*scale.value,thumbWidth:(challenge.value?.data.thumbWidth||150)*scale.value,thumbHeight:(challenge.value?.data.thumbHeight||40)*scale.value,title:challenge.value?.title,buttonText:'确认',showTheme:false,horizontalPadding:0,verticalPadding:0}))
 async function refresh(){const current=++generation;busy.value=true;challenge.value=undefined;answer.value='';try{const value=await api('/verification/challenge','POST',{scope,target});if(current!==generation)return;if(value.mode==='frontend'&&!value.required){finish('');return}challenge.value=value;localCode.value=String(Math.floor(1000+Math.random()*9000))}catch(e:any){if(current===generation)error.value=e.message}finally{if(current===generation)busy.value=false}}
 function finish(proof:string){visible.value=false;generation++;resolve?.(proof);resolve=undefined;reject=undefined}
-function cancel(){visible.value=false;generation++;reject?.(new Error('已取消验证'));resolve=undefined;reject=undefined}
+function cancel(){visible.value=false;generation++;reject?.(Object.assign(new Error('已取消验证'),{code:'VERIFICATION_CANCELLED'}));resolve=undefined;reject=undefined}
 function verify(nextScope:'sms'|'handout',nextTarget:string):Promise<string>{if(resolve)cancel();scope=nextScope;target=nextTarget;visible.value=true;error.value='';const result=new Promise<string>((ok,no)=>{resolve=ok;reject=no});void refresh();return result}
 async function confirm(value:any){if(busy.value||!challenge.value)return;const answer=captchaAnswer(challenge.value.type||'slide',value,scale.value);if('points' in answer&&!answer.points.length){error.value='请先按提示顺序点选图片';return}busy.value=true;const current=generation;error.value='';try{const result=await api('/verification/check','POST',{scope,target,challengeId:challenge.value.challengeId,answer});if(current===generation)finish(result.proof)}catch(e:any){if(current===generation){error.value=e.message;await refresh()}}finally{if(current===generation)busy.value=false}}
 function confirmLocal(){if(answer.value.trim()!==localCode.value){error.value='验证码不正确';return}finish('')}
@@ -22,13 +22,13 @@ defineExpose({verify})
 </script>
 <template>
  <view v-if="visible" class="verify-mask" :style="captchaCssVariables(challenge?.color||'#3569e8',challenge?.appearance,challenge?.variant)" @touchmove.stop.prevent>
-  <view class="verify-card" :class="{'is-dark':challenge?.appearance==='dark','is-busy':busy}" :style="{background:theme.bgColor,color:theme.textColor}" role="dialog" aria-label="安全验证" aria-modal="true">
+  <view class="verify-card sxb-dialog" :class="{'is-dark':challenge?.appearance==='dark','is-busy':busy}" :style="{background:theme.bgColor,color:theme.textColor}" role="dialog" aria-label="安全验证" aria-modal="true">
    <view class="verify-heading" :style="{color:theme.textColor}"><text>安全验证</text><button :style="{color:theme.iconColor}" aria-label="取消验证" @tap="cancel">×</button></view>
    <text v-if="busy" class="verify-hint">正在加载…</text>
    <GoCaptchaUni v-if="challenge?.mode==='gocaptcha'" :key="challenge.challengeId" :type="challenge.type||'slide'" :data="widgetData" :config="widgetConfig" :theme="theme" @event-confirm="confirm" @event-refresh="error='';refresh()" @event-close="cancel"/>
-   <view v-else-if="challenge?.mode==='frontend'" class="local-verify"><text class="local-code">{{localCode}}</text><input v-model="answer" type="number" maxlength="4" placeholder="请输入上方验证码" aria-label="验证码"/><button @tap="confirmLocal">确认</button></view>
+   <view v-else-if="challenge?.mode==='frontend'" class="local-verify"><text class="local-code">{{localCode}}</text><input v-model="answer" type="number" maxlength="4" placeholder="请输入上方验证码" aria-label="验证码"/><button class="sxb-dialog-action" @tap="confirmLocal">确认</button></view>
    <text v-if="error" class="verify-error" role="alert">{{error}}</text>
-   <button v-if="!challenge&&!busy" class="verify-retry" @tap="error='';refresh()">重新加载</button>
+   <button v-if="!challenge&&!busy" class="verify-retry sxb-dialog-action" @tap="error='';refresh()">重新加载</button>
   </view>
  </view>
 </template>

@@ -4,7 +4,9 @@ import multer from 'multer'
 import { fileTypeFromFile } from 'file-type'
 import { mkdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { lockResourceReferences } from './editor-images.ts'
 import { isIP } from 'node:net'
 import { z } from 'zod'
 import { db, transaction } from './db.ts'
@@ -18,7 +20,7 @@ import { recordLearning } from './reports.ts'
 export const mediaDirectory=resolve(process.env.MEDIA_DIR||'.local/media')
 const upload=multer({storage:multer.diskStorage({destination:(_req,_file,done)=>{mkdir(mediaDirectory,{recursive:true}).then(()=>done(null,mediaDirectory),e=>done(e,mediaDirectory))},filename:(_req,_file,done)=>done(null,id())}),limits:{fileSize:200*1024*1024,files:1,fields:0}})
 export const mediaAdmin=Router()
-const assetInput=z.object({examId:z.string().default(''),contentId:z.string().min(1).max(160),kind:z.enum(['image','video','audio','handout'])})
+const assetInput=z.object({examId:z.string().default(''),contentId:z.string().min(1).max(160),kind:z.enum(['image','video','audio','handout','import'])})
 export function externalUrl(value:string) {
   let url:URL;try{url=new URL(value)}catch{fail(400,'请输入完整 HTTPS 外链')}
   const host=url!.hostname.toLowerCase()
@@ -32,19 +34,27 @@ async function checkOwner(examId:string,contentId:string) {
   if(existing&&(existing.exam_id!==examId||!['subject','chapter','section','knowledge','course','cheatsheet'].includes(existing.kind)))fail(400,'资源只能绑定当前考试的正文或课程')
 }
 mediaAdmin.post('/upload',async(req,res,next)=>{
-  const b=assetInput.parse(req.query);if(b.examId)await checkOwner(b.examId,b.contentId);else if(b.kind!=='image')fail(400,'视频、音频和讲义必须选择所属考试')
+  const b=assetInput.parse(req.query);if(b.examId)await checkOwner(b.examId,b.contentId);else if(b.kind!=='image')fail(400,'文件必须选择所属考试')
   upload.single('file')(req,res,async(error)=>{
     if(error)return next(Object.assign(error,{status:error.code==='LIMIT_FILE_SIZE'?413:400,message:error.code==='LIMIT_FILE_SIZE'?'单个文件不能超过 200MB':'上传失败，请检查文件'}))
     const f=req.file;if(!f)return next(Object.assign(new Error('请选择文件'),{status:400}))
     try {
       const type=await fileTypeFromFile(f.path)
       const allowed:Record<string,string[]>={image:['image/jpeg','image/png','image/webp','image/gif'],video:['video/mp4','video/webm'],audio:['audio/mpeg','audio/mp4','audio/x-m4a','audio/wav','audio/ogg','audio/flac'],handout:['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.presentationml.presentation']}
-      if(!type||!allowed[b.kind].includes(type.mime))fail(400,'文件实际格式不支持，请使用图片、MP4/WebM、音频或 PDF/Word/PPTX 讲义')
+      allowed.import=['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+      if(!type||!allowed[b.kind].includes(type.mime))fail(400,'文件实际格式不支持；导入源文件须为 XLSX')
+      if(b.kind==='import'&&f.size>8*1024*1024)fail(400,'导入文件不能超过8MB')
+      const digest=createHash('sha256');for await(const chunk of createReadStream(f.path))digest.update(chunk)
+      const fingerprint=digest.digest('hex');let reused=false
       const assetId=id();const filename=Buffer.from(f.originalname,'latin1').toString('utf8').slice(0,200)
       await transaction(async c=>{
-        await c.query(`INSERT INTO media_assets(id,exam_id,content_id,owner_id,kind,source,filename,mime,size_bytes,disk_name) VALUES($1,$2,$3,$4,$5,'upload',$6,$7,$8,$9)`,[assetId,b.examId||null,b.contentId,res.locals.user.id,b.kind,filename,type!.mime,f.size,f.filename])
+        await lockResourceReferences(c)
+        const same=(await c.query("SELECT disk_name FROM media_assets WHERE file_hash=$1 AND size_bytes=$2 AND source='upload' LIMIT 1",[fingerprint,f.size])).rows[0]
+        const diskName=same?.disk_name||f.filename;reused=!!same
+        await c.query(`INSERT INTO media_assets(id,exam_id,content_id,owner_id,kind,source,filename,mime,size_bytes,disk_name,file_hash) VALUES($1,$2,$3,$4,$5,'upload',$6,$7,$8,$9,$10)`,[assetId,b.examId||null,b.contentId,res.locals.user.id,b.kind,filename,type!.mime,f.size,diskName,fingerprint])
         await c.query('INSERT INTO audit_logs(id,actor_id,action,target_id,details) VALUES($1,$2,$3,$4,$5)',[id(),res.locals.user.id,'media.upload',assetId,JSON.stringify({contentId:b.contentId,kind:b.kind,size:f.size})])
       })
+      if(reused)await unlink(f.path).catch(()=>{})
       res.json({id:assetId,kind:b.kind,filename})
     }catch(e){await unlink(f.path).catch(()=>{});next(e)}
   })
@@ -106,8 +116,17 @@ studyPublic.get('/message-images/:id',async(req,res)=>{
 studyPublic.get('/cheatsheets/:examId',async(req,res)=>res.json((await db.query(`SELECT * FROM content WHERE kind='cheatsheet' AND exam_id=$1 AND status='published' ORDER BY payload->>'opensAt' DESC,id`,[req.params.examId])).rows.map(summary)))
 studyPublic.get('/knowledge-content/:id',async(req,res)=>{
   const row=await publishedContent(req.params.id,'knowledge')
-  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row),handouts:await handoutItems(row)})
+  res.json(await knowledgeDetail(row))
 })
+// Published supporting articles are the displayed body. Keep the original knowledge
+// document untouched so unpublishing/deleting a course restores it automatically.
+// Only return course metadata here; protected text/media still use /courses/:id.
+export async function knowledgeDetail(row:any,userId?:string){
+ const courses=(await db.query("SELECT id,title,payload FROM content WHERE parent_id=$1 AND exam_id=$2 AND kind='course' AND status='published' AND NOT(payload ? 'deletedAt') ORDER BY created_at,id",[row.id,row.exam_id])).rows
+ const supportingCourses=courses.map(c=>({id:c.id,title:c.title,type:c.payload.type||'article'}))
+ const bodyCourseIds=supportingCourses.filter(c=>c.type==='article').map(c=>c.id)
+ return {id:row.id,title:row.title,isKnowledgeCourse:!!courses.length,bodySource:bodyCourseIds.length?'supporting-article':'knowledge',bodyCourseIds,supportingCourses,blocks:bodyCourseIds.length?[]:await blocks(row,userId),handouts:await handoutItems(row,userId)}
+}
 function handoutFileType(asset:any) {
   const extension=asset.filename.match(/\.(pdf|docx|pptx)$/i)?.[1]
   return extension?extension.toUpperCase():'文件'
@@ -153,6 +172,13 @@ export async function courseDetail(row:any,userId:string,sessionHash:string){
  const {downloadUrl,...publicPayload}=p
  return {...publicPayload,id:row.id,title:row.title,blocks:p.type==='article'&&(p.document||p.content)?await blocks(row,userId,sessionHash):[],handoutDownloadPath:p.handouts?.[0]?'/study-handouts/'+encodeURIComponent(p.handouts[0].assetId)+'/download':legacy&&!p.removeLegacyHandout?'/handouts/'+encodeURIComponent(legacy.id)+'/download':downloadUrl?'/courses/'+encodeURIComponent(row.id)+'/handout':undefined}
 }
+// Only the explicitly selected cover is public. Course body images and paid media stay protected.
+studyPublic.get('/course-covers/:id',async(req,res)=>{
+  const row=await publishedContent(req.params.id,'course')
+  const asset=(await db.query("SELECT * FROM media_assets WHERE id=$1 AND kind='image' AND content_id=$2 AND exam_id=$3",[row.payload.posterAssetId||'',row.id,row.exam_id])).rows[0]
+  if(!asset)fail(404,'课程封面不存在')
+  serve(asset,res)
+})
 studyPublic.get('/media/image/:id',async(req,res)=>{
   const asset=(await db.query('SELECT * FROM media_assets WHERE id=$1',[req.params.id])).rows[0]
   if(!asset||asset.kind!=='image')fail(404,'图片不存在')
@@ -163,7 +189,7 @@ export function serve(asset:any,res:any,inline=false) {
   if(asset.source==='external')return res.redirect(externalUrl(asset.external_url))
   if(!/^[a-f0-9-]{36}$/.test(asset.disk_name))fail(404,'资源不存在')
   res.type(asset.mime)
-  if(asset.kind==='handout'&&!(inline&&asset.mime==='application/pdf'))res.attachment(asset.filename)
+  if(asset.kind==='import'||(asset.kind==='handout'&&!(inline&&asset.mime==='application/pdf')))res.attachment(asset.filename)
   res.sendFile(asset.disk_name,{root:mediaDirectory})
 }
 studyPublic.get('/media/t/:token',async(req,res)=>{
@@ -176,7 +202,7 @@ studyPublic.get('/media/t/:token',async(req,res)=>{
 export const studyStudent=Router()
 studyStudent.get('/knowledge-content/:id/member',async(req,res)=>{
   const row=await publishedContent(req.params.id,'knowledge')
-  res.json({id:row.id,title:row.title,isKnowledgeCourse:row.payload.isKnowledgeCourse===true,blocks:await blocks(row,res.locals.user.id),handouts:await handoutItems(row,res.locals.user.id)})
+  res.json(await knowledgeDetail(row,res.locals.user.id))
 })
 async function handoutDownload(asset:any,req:any,res:any) {
   const row=await assetAccess(asset,res.locals.user.id)

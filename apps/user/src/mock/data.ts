@@ -54,7 +54,7 @@ export type KnowledgePoint = {
 
 export type KnowledgeSection = { id: string; no: number; name: string; points: KnowledgePoint[] }
 export type KnowledgeChapter = { id: string; no: number; name: string; sections: KnowledgeSection[] }
-export type KnowledgeSubject = { id: string; name: string; mastery: number; questionDone: number; questionTotal: number; chapters: KnowledgeChapter[] }
+export type KnowledgeSubject = { id: string; name: string; shortTitle?: string; fullName?: string; mastery: number; questionDone: number; questionTotal: number; chapters: KnowledgeChapter[] }
 
 const baseKnowledgeSubjects: KnowledgeSubject[] = [
   {
@@ -169,6 +169,7 @@ export const knowledgeSubjects: KnowledgeSubject[] = baseKnowledgeSubjects.map(s
 export type CourseType = 'video' | 'audio' | 'article'
 export type CourseLesson = {
   id: string
+  coverUrl?: string
   title?: string
   knowledgePointId?: string
   subjectId: string

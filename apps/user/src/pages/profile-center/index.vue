@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import CircleAction from '@/components/ui/CircleAction.vue'
 import { computed, onUnmounted, ref, nextTick } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
 import DebugMenu from '@/components/DebugMenu.vue'
 import { useAppStore } from '@/store/app'
-import { backOrFallback } from '@/utils/navigation'
+import { backOrFallback, openPage } from '@/utils/navigation'
 import { createRightsOrder, getActivePendingOrder, loadOrders, normalizeOrders, persistOrders, sortOrders, type PaymentMethod, type RightsOrder } from '@/utils/orders'
 import { monthlyReports, refreshMonthlyReports, type MonthlyReport } from '@/utils/monthlyReports'
 import { api, account, refreshRights, showApiError, token } from '@/services/api'
@@ -86,14 +87,13 @@ const unreadAnnouncementIds = ref<string[]>([])
 const faqs = ref<Array<{id:string;title:string;content:string;contentHtml?:string}>>([])
 const faqLoading=ref(false),faqError=ref('')
 const targetFaq=ref('')
-const directProtocol=ref(false)
 let faqRevision=0
 async function loadFaqs(){
  const rev=++faqRevision,examId=exam.value.id;faqLoading.value=true;faqError.value='';faqs.value=[]
  try{const data=await api<any[]>('/faqs/'+encodeURIComponent(examId));if(rev===faqRevision&&exam.value.id===examId){faqs.value=data;const index=data.findIndex(x=>x.id===targetFaq.value);visibleCount.value=Math.max(12,index+1);expanded.value=index>=0?targetFaq.value:'';if(targetFaq.value&&index<0)faqError.value='该常见问题已下架或不适用于当前考试'}}
  catch(e:any){if(rev===faqRevision)faqError.value=e.message||'加载失败，请重试'}finally{if(rev===faqRevision){faqLoading.value=false;if(targetFaq.value&&!faqError.value){await nextTick();uni.pageScrollTo({selector:'.faq-list .fold-content',duration:0})}}}
 }
-onShow(()=>{if(mode.value==='faq')void loadFaqs();if(['about','agreement','privacy'].includes(mode.value))void refreshSiteSettings().catch(()=>{})})
+onShow(()=>{if(mode.value==='faq')void loadFaqs();if(['about','agreement','privacy'].includes(mode.value))void refreshSiteSettings().catch(()=>{});if(token()&&['orders','rights'].includes(mode.value))void refreshOrders().then(items=>{orders.value=items}).catch(showApiError)})
 async function loadCenterData() {
   if(['faq','about','agreement','privacy'].includes(mode.value))return
   const data = await api(`/catalog/${exam.value.id}`)
@@ -123,11 +123,9 @@ const visibleFaqs = computed(() => faqs.value.slice(0, visibleCount.value))
 onLoad((options) => {
   if(options?.articleId)targetFaq.value=String(options.articleId)
   const next = options?.mode as CenterMode
-  directProtocol.value=next==='agreement'||next==='privacy'
   if (next && titles[next]) mode.value = next
   void loadCenterData().catch(showApiError)
   if(mode.value==='report')void refreshMonthlyReports().catch(showApiError)
-  if (token()&&['orders','rights'].includes(mode.value)) void refreshOrders().then(items => { orders.value = items }).catch(showApiError)
 })
 
 const orderTimer = setInterval(() => {
@@ -136,7 +134,7 @@ const orderTimer = setInterval(() => {
 }, 1000)
 onUnmounted(() => clearInterval(orderTimer))
 
-const back = () => { if (mode.value === 'agreement' || mode.value === 'privacy') { if(directProtocol.value)backOrFallback('/pages/login/index');else switchMode('about');return } backOrFallback('/pages/profile/index') }
+const back = () => backOrFallback(mode.value === 'agreement' || mode.value === 'privacy' ? '/pages/profile-center/index?mode=about' : '/pages/profile/index')
 const toggle = async (id: string) => {
   expanded.value = expanded.value === id ? '' : id
   if(mode.value==='announcements' && token()){
@@ -148,7 +146,7 @@ const toggle = async (id: string) => {
 }
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 const openCheatsheet=(id:string)=>uni.navigateTo({url:'/pages/cheatsheet-detail/index?id='+encodeURIComponent(id)})
-const switchMode = (next: CenterMode) => { mode.value = next; expanded.value = '';if(next==='faq')void loadFaqs() }
+const switchMode = (next: CenterMode) => openPage('/pages/profile-center/index?mode=' + next)
 const loadMore = () => { visibleCount.value += 12 }
 const openMonthlyReport = (item: MonthlyReport) => {
   if(item.locked)return toast('学习报告仅限当前考试SVIP用户')
@@ -374,7 +372,7 @@ const applyAnnouncementDebug = (key: string) => {
 
 <template>
   <view class="center-page page safe-top">
-    <view class="top-bar"><button @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text>{{ title }}</text><view></view><text v-if="mode === 'announcements'" class="top-bar-action" @tap="markAllRead">全部已读</text></view>
+    <view class="top-bar"><CircleAction @tap="back"/><text>{{ title }}</text><view></view><text v-if="mode === 'announcements'" class="top-bar-action" @tap="markAllRead">全部已读</text></view>
 
     <view v-if="mode === 'report'" class="report-archive"><view class="report-archive-hero"><view class="archive-hero-icon"><uni-icons type="map-filled" size="29" color="#e2c476" /></view><view><text>月度学习报告</text><text>每个自然月生成一次，记录学习成果与下月计划</text></view><text>{{ monthlyReports.filter(item => item.status === 'ready').length }}份</text></view><view class="report-year"><text>{{ new Date().getFullYear() }}年</text></view><view class="report-list"><view v-for="item in monthlyReports" :key="item.id" class="report-row" :class="{ generating: item.status === 'generating' }" @tap="openMonthlyReport(item)"><view class="report-month"><text>{{ String(item.month).padStart(2, '0') }}</text><text>月</text></view><view class="report-row-copy"><view><text>{{ item.year }}年{{ item.month }}月学习报告</text><text :class="item.status">{{ item.status === 'ready' ? '已生成' : '生成中' }}</text></view><view v-if="item.status === 'ready'" class="report-meta"><text>学习{{ item.metrics.studyDays }}天</text><text>{{ item.metrics.questions }}题</text><text>掌握 +{{ item.metrics.masteryGain }}%</text></view><view v-else class="generating-progress"><view><view></view></view><text>将在{{ item.month === 12 ? 1 : item.month + 1 }}月1日生成</text></view></view><uni-icons :type="item.status === 'ready' ? 'forward' : 'clock'" size="19" :color="item.status === 'ready' ? '#b99b50' : '#8792a4'" /></view></view></view>
 
@@ -395,17 +393,17 @@ const applyAnnouncementDebug = (key: string) => {
     <view v-else-if="mode === 'about'" class="about-block"><image v-if="siteSettings.basic.logo" class="about-logo" :src="siteSettings.basic.logo" mode="aspectFit" alt="平台 Logo"/><view v-else class="brand-mark">{{siteSettings.basic.name.slice(0,1)}}</view><text class="brand-name">{{siteSettings.basic.name}}</text><view class="about-intro"><rich-text :nodes="siteSettings.about.html"/></view><view class="list-card settings-list about-menu"><view @tap="switchMode('agreement')"><text>用户服务协议</text><text>V{{siteSettings.protocols.find(p=>p.kind==='agreement')?.version||'—'}} ›</text></view><view @tap="switchMode('privacy')"><text>隐私政策</text><text>V{{siteSettings.protocols.find(p=>p.kind==='privacy')?.version||'—'}} ›</text></view></view><text v-if="siteSettings.about.operator" class="copyright">{{siteSettings.about.operator}}</text><text v-if="siteSettings.about.copyright" class="copyright">{{siteSettings.about.copyright}}</text><text v-if="siteSettings.about.filing" class="copyright">{{siteSettings.about.filing}}</text></view>
 
     <ProtocolArticle v-else :kind="mode"/>
-    <view v-if="markAllReadStep" class="modal-mask announcement-modal-mask" @tap="markAllReadStep = 0"><view class="announcement-modal" @tap.stop><view class="announcement-modal-accent"></view><view class="announcement-modal-icon"><uni-icons type="email-filled" size="30" color="#fff" /></view><text class="announcement-modal-title">全部标记为已读？</text><text class="announcement-modal-desc">将清除 {{ unreadAnnouncementIds.length }} 条公告的未读标记，公告内容仍会保留。</text><view class="announcement-modal-count"><text>{{ unreadAnnouncementIds.length }}</text><text>条未读公告</text></view><view class="announcement-modal-actions"><button @tap="markAllReadStep = 0">暂不处理</button><button @tap="confirmMarkAllRead">确定</button></view></view></view>
+    <view v-if="markAllReadStep" class="modal-mask announcement-modal-mask" @tap="markAllReadStep = 0"><view class="announcement-modal sxb-dialog" @tap.stop><view class="announcement-modal-accent"></view><view class="announcement-modal-icon"><uni-icons type="email-filled" size="30" color="#fff" /></view><text class="announcement-modal-title">全部标记为已读？</text><text class="announcement-modal-desc">将清除 {{ unreadAnnouncementIds.length }} 条公告的未读标记，公告内容仍会保留。</text><view class="announcement-modal-count"><text>{{ unreadAnnouncementIds.length }}</text><text>条未读公告</text></view><view class="announcement-modal-actions sxb-dialog-actions"><button @tap="markAllReadStep = 0">暂不处理</button><button @tap="confirmMarkAllRead">确定</button></view></view></view>
     <CustomerService v-model="serviceVisible"/>
     <view v-if="logoutVisible || bindVisible" class="modal-mask" @tap="logoutVisible = false; bindVisible = false">
-      <view v-if="logoutVisible" class="center-modal logout-modal" @tap.stop><view class="modal-mark danger-mark"><uni-icons type="undo" size="27" color="#fff" /></view><text class="modal-title">确认退出登录？</text><text class="modal-desc modal-copy">退出后仍可浏览公开内容，错题、收藏和学习进度不会丢失；深度学习功能需要重新登录。</text><button class="logout-confirm" @tap="confirmSignOut">确认退出</button><button class="modal-cancel" @tap="logoutVisible = false">暂不退出</button></view>
-      <view v-else class="center-modal bind-modal" @tap.stop><text class="modal-title">更换绑定手机号</text><text class="modal-desc">{{ bindStep === 1 ? '先验证当前手机号 138****6452' : bindStep === 2 ? '输入新的手机号' : `验证新手机号 ${bindPhone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}` }}</text><input v-if="bindStep === 2" v-model="bindPhone" class="modal-input" type="number" placeholder="请输入新手机号" maxlength="11" /><view v-if="bindStep !== 2" class="code-input-row"><input v-model="bindCode" class="modal-input" type="number" placeholder="请输入6位验证码" maxlength="6" /><button @tap="sendCode">{{ codeSeconds ? `${codeSeconds}s` : '获取验证码' }}</button></view><button class="modal-primary" @tap="nextBind">{{ bindStep === 3 ? '确认换绑并重新登录' : '下一步' }}</button><button class="modal-cancel" @tap="bindVisible = false">取消</button></view>
+      <view v-if="logoutVisible" class="center-modal logout-modal sxb-dialog" @tap.stop><view class="modal-mark danger-mark"><uni-icons type="undo" size="27" color="#fff" /></view><text class="modal-title">确认退出登录？</text><text class="modal-desc modal-copy">退出后仍可浏览公开内容，错题、收藏和学习进度不会丢失；深度学习功能需要重新登录。</text><button class="logout-confirm sxb-dialog-action" @tap="confirmSignOut">确认退出</button><button class="modal-cancel sxb-dialog-action" @tap="logoutVisible = false">暂不退出</button></view>
+      <view v-else class="center-modal bind-modal sxb-dialog" @tap.stop><text class="modal-title">更换绑定手机号</text><text class="modal-desc">{{ bindStep === 1 ? '先验证当前手机号 138****6452' : bindStep === 2 ? '输入新的手机号' : `验证新手机号 ${bindPhone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}` }}</text><input v-if="bindStep === 2" v-model="bindPhone" class="modal-input" type="number" placeholder="请输入新手机号" maxlength="11" /><view v-if="bindStep !== 2" class="code-input-row"><input v-model="bindCode" class="modal-input" type="number" placeholder="请输入6位验证码" maxlength="6" /><button @tap="sendCode">{{ codeSeconds ? `${codeSeconds}s` : '获取验证码' }}</button></view><button class="modal-primary sxb-dialog-action" @tap="nextBind">{{ bindStep === 3 ? '确认换绑并重新登录' : '下一步' }}</button><button class="modal-cancel sxb-dialog-action" @tap="bindVisible = false">取消</button></view>
     </view>
-    <view v-if="handoutConfirmVisible" class="modal-mask" @tap="handoutConfirmVisible = false"><view v-if="activeHandout" class="center-modal handout-modal" @tap.stop><view class="modal-mark handout-mark"><uni-icons type="download" size="27" color="#fff" /></view><text class="modal-title">{{ handoutState(activeHandout) === 'updated' ? '下载新版讲义' : '重复下载讲义' }}</text><text class="modal-desc modal-copy">即将下载《{{ activeHandout.title }}》，继续前需要完成验证码校验。</text><view class="handout-version-card"><view><text>上次下载</text><text>v{{ activeHandout.downloadedVersion }}</text></view><view><text>系统版本</text><text :class="{ updated: handoutState(activeHandout) === 'updated' }">v{{ activeHandout.systemVersion }}</text></view><view><text>文件大小</text><text>{{ activeHandout.size }}</text></view></view><button class="modal-primary" @tap="openHandoutVerification">继续验证</button><button class="modal-cancel" @tap="handoutConfirmVisible = false">取消</button></view></view>
+    <view v-if="handoutConfirmVisible" class="modal-mask" @tap="handoutConfirmVisible = false"><view v-if="activeHandout" class="center-modal handout-modal sxb-dialog" @tap.stop><view class="modal-mark handout-mark"><uni-icons type="download" size="27" color="#fff" /></view><text class="modal-title">{{ handoutState(activeHandout) === 'updated' ? '下载新版讲义' : '重复下载讲义' }}</text><text class="modal-desc modal-copy">即将下载《{{ activeHandout.title }}》，继续前需要完成验证码校验。</text><view class="handout-version-card"><view><text>上次下载</text><text>v{{ activeHandout.downloadedVersion }}</text></view><view><text>系统版本</text><text :class="{ updated: handoutState(activeHandout) === 'updated' }">v{{ activeHandout.systemVersion }}</text></view><view><text>文件大小</text><text>{{ activeHandout.size }}</text></view></view><button class="modal-primary sxb-dialog-action" @tap="openHandoutVerification">继续验证</button><button class="modal-cancel sxb-dialog-action" @tap="handoutConfirmVisible = false">取消</button></view></view>
     <VerificationGate ref="verification"/>
-    <view v-if="purchaseNoticeVisible" class="modal-mask" @tap="purchaseNoticeVisible = false"><view v-if="activePurchaseOrder" class="center-modal purchase-notice" @tap.stop><view class="modal-mark pending-mark"><uni-icons type="wallet" size="27" color="#fff" /></view><text class="modal-title">存在待支付订单</text><text class="modal-desc modal-copy">你已有一笔{{ activePurchaseOrder.rightsName }}订单，请先支付、取消或等待订单自动失效后再创建新订单。</text><view class="pending-order-summary"><text>{{ activePurchaseOrder.productName }}</text><view><text>¥{{ activePurchaseOrder.amount }}</text><text>剩余 {{ orderCountdown(activePurchaseOrder) }}</text></view></view><button class="modal-primary" @tap="openPendingOrder">查看待支付订单</button><button class="modal-cancel" @tap="purchaseNoticeVisible = false">取消</button></view></view>
+    <view v-if="purchaseNoticeVisible" class="modal-mask" @tap="purchaseNoticeVisible = false"><view v-if="activePurchaseOrder" class="center-modal purchase-notice sxb-dialog" @tap.stop><view class="modal-mark pending-mark"><uni-icons type="wallet" size="27" color="#fff" /></view><text class="modal-title">存在待支付订单</text><text class="modal-desc modal-copy">你已有一笔{{ activePurchaseOrder.rightsName }}订单，请先支付、取消或等待订单自动失效后再创建新订单。</text><view class="pending-order-summary"><text>{{ activePurchaseOrder.productName }}</text><view><text>¥{{ activePurchaseOrder.amount }}</text><text>剩余 {{ orderCountdown(activePurchaseOrder) }}</text></view></view><button class="modal-primary sxb-dialog-action" @tap="openPendingOrder">查看待支付订单</button><button class="modal-cancel sxb-dialog-action" @tap="purchaseNoticeVisible = false">取消</button></view></view>
     <view v-if="orderDialogVisible && orderDialogMode" class="modal-mask order-dialog-mask" @tap="paymentPhase !== 'processing' && closeOrderDialog()">
-      <view class="order-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>
+      <view class="order-dialog sxb-dialog" :class="`dialog-${orderDialogMode}`" @tap.stop>
         <view class="order-dialog-top"><view class="order-dialog-icon"><uni-icons :type="orderDialogMode === 'cancel' ? 'closeempty' : orderDialogMode === 'pay' ? 'wallet' : 'medal'" size="28" color="#fff" /></view><view class="order-dialog-heading"><text>{{ orderDialogMode === 'pay' ? '订单支付' : orderDialogMode === 'cancel' ? '取消订单' : '创建权益订单' }}</text><text>{{ orderDialogMode === 'pay' ? '选择支付方式并完成付款' : orderDialogMode === 'cancel' ? '订单关闭后可重新选择权益' : '订单创建后30分钟内有效' }}</text></view><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog"><uni-icons type="closeempty" size="20" color="#7d8a9c" /></button></view>
         <view class="order-dialog-product"><view><text>{{ orderDialogOrder?.productName || '会员商品' }}</text><text>{{ orderDialogOrder?.rightsName || '会员权益' }} · 以订单对应考期为准</text></view><text>¥{{ orderDialogOrder?.amount || '—' }}</text></view>
         <view v-if="orderDialogMode === 'pay'" class="payment-methods">
@@ -417,10 +415,10 @@ const applyAnnouncementDebug = (key: string) => {
           </view>
         </view>
         <view v-if="orderDialogMode === 'pay' && paymentPhase === 'failed'" class="payment-result failed"><uni-icons type="closeempty" size="19" color="#c85056" /><view><text>支付未完成</text><text>{{ orderDialogOrder?.lastPaymentError || '请更换支付方式或稍后重试' }}</text></view></view><view v-else-if="orderDialogMode === 'pay' && paymentPhase === 'processing'" class="payment-result processing"><view class="payment-spinner"></view><view><text>正在发起{{ paymentMethodLabel(selectedPaymentMethod) }}</text><text>演示环境不会跳转第三方支付页面</text></view></view><view v-else-if="orderDialogMode === 'pay' && orderDialogOrder" class="order-dialog-notice"><uni-icons type="clock" size="18" color="#3569e8" /><text>请在 {{ orderCountdown(orderDialogOrder) }} 内完成支付</text></view><view v-else-if="orderDialogMode === 'cancel'" class="order-dialog-notice danger"><uni-icons type="info" size="18" color="#c85056" /><text>取消后本订单立即关闭，无法恢复</text></view><view v-else class="order-dialog-notice"><uni-icons type="info" size="18" color="#3569e8" /><text>有效期内不能重复创建新的权益订单</text></view>
-        <view class="order-dialog-actions"><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog">{{ orderDialogMode === 'cancel' ? '保留订单' : '暂不操作' }}</button><button :disabled="paymentPhase === 'processing'" :class="{ danger: orderDialogMode === 'cancel' }" @tap="confirmOrderDialog">{{ orderDialogMode === 'pay' ? paymentPhase === 'processing' ? '支付处理中' : paymentPhase === 'failed' ? '重新支付' : `${paymentMethodLabel(selectedPaymentMethod)} ¥${orderDialogOrder?.amount}` : orderDialogMode === 'cancel' ? '确认取消' : '确认创建' }}</button></view>
+        <view class="order-dialog-actions sxb-dialog-actions"><button :disabled="paymentPhase === 'processing'" @tap="closeOrderDialog">{{ orderDialogMode === 'cancel' ? '保留订单' : '暂不操作' }}</button><button :disabled="paymentPhase === 'processing'" :class="{ danger: orderDialogMode === 'cancel' }" @tap="confirmOrderDialog">{{ orderDialogMode === 'pay' ? paymentPhase === 'processing' ? '支付处理中' : paymentPhase === 'failed' ? '重新支付' : `${paymentMethodLabel(selectedPaymentMethod)} ¥${orderDialogOrder?.amount}` : orderDialogMode === 'cancel' ? '确认取消' : '确认创建' }}</button></view>
       </view>
     </view>
-    <view v-if="inviterVisible" class="modal-mask" @tap="inviterVisible = false"><view class="center-modal" @tap.stop><text class="modal-title">绑定推荐码</text><text class="modal-desc">绑定后不可更换</text><input v-model="inviterCode" class="modal-input" type="number" maxlength="12" placeholder="请输入数字推荐码" /><button class="modal-primary" :loading="inviterBusy" :disabled="inviterBusy" @tap="bindInviter">确认绑定</button><button class="modal-cancel" @tap="inviterVisible = false">取消</button></view></view>
+    <view v-if="inviterVisible" class="modal-mask" @tap="inviterVisible = false"><view class="center-modal sxb-dialog" @tap.stop><text class="modal-title">绑定推荐码</text><text class="modal-desc">绑定后不可更换</text><input v-model="inviterCode" class="modal-input" type="number" maxlength="12" placeholder="请输入数字推荐码" /><button class="modal-primary sxb-dialog-action" :loading="inviterBusy" :disabled="inviterBusy" @tap="bindInviter">确认绑定</button><button class="modal-cancel sxb-dialog-action" @tap="inviterVisible = false">取消</button></view></view>
     <DebugMenu v-if="mode === 'orders'" page="我的订单" :options="[{ key: 'first-pending', label: '第一条订单设为待支付' }, { key: 'next-payment-failure', label: '下次支付模拟失败' }]" @select="applyOrderDebug" />
     <DebugMenu v-if="mode === 'announcements'" page="公告" :options="[{ key: 'restore-unread', label: '前三条和第6条设为未读' }]" @select="applyAnnouncementDebug" />
   </view>

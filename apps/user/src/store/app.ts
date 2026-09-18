@@ -3,6 +3,7 @@ import { exam, examCategories, question } from '@/mock/data'
 import { getTodayAnsweredIds, loadPlan, savePlan, type PracticePlan } from '@/utils/practice-plan'
 import { api, token, learningPlan, clearSession, refreshRights, refreshPersonalData, clearPersonalCache, showApiError } from '@/services/api'
 import { refreshCatalog } from '@/services/catalog'
+import { currentPageUrl, openLogin, safePageUrl } from '@/utils/navigation'
 
 const savedExam = uni.getStorageSync('sxb-current-exam')
 const savedLogin = Boolean(token())
@@ -55,8 +56,9 @@ export const useAppStore = () => {
   const requireLogin = (redirect?: string) => {
     state.isLoggedIn = Boolean(token())
     if (state.isLoggedIn) return true
-    const query = redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''
-    uni.navigateTo({ url: `/pages/login/index${query}` })
+    const current = currentPageUrl(), target = safePageUrl(redirect || current)
+    const guardedPage = current.split('?')[0] === target.split('?')[0]
+    openLogin(guardedPage ? current : target, guardedPage)
     return false
   }
   const currentExam = computed(() => state.currentExam)

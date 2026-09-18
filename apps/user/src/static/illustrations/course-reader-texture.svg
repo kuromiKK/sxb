@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="250" viewBox="0 0 430 250" fill="none">
+ <defs><linearGradient id="paper" x1="0" y1="0" x2="0" y2="250" gradientUnits="userSpaceOnUse"><stop stop-color="#EFF5FD"/><stop offset=".6" stop-color="#F3F7FD"/><stop offset="1" stop-color="#fff"/></linearGradient></defs>
+ <path fill="url(#paper)" d="M0 0h430v250H0z"/>
+ <g stroke="#CADBF0" stroke-width="1" opacity=".48">
+  <path d="m299-37-70 189h27l14-39h64l14 39h29L308-37h-9Zm-20 127 23-66 24 66h-47Z"/>
+  <path d="M326 194c-24 0-37-15-37-37 0-24 17-38 42-38 12 0 20 3 28 8V96h23v94h-22v-11c-8 11-21 15-34 15Zm7-20c15 0 26-10 26-23v-6c-8-5-16-7-24-7-14 0-22 7-22 19 0 10 7 17 20 17Z"/>
+  <path d="M249 37h175M232 73h192M217 109h207M208 145h216M203 181h221" stroke-dasharray="2 5"/>
+ </g>
+ <g fill="#B8CEE8" opacity=".6"><circle cx="211" cy="57" r="2"/><circle cx="404" cy="210" r="2"/><circle cx="256" cy="210" r="2"/></g>
+</svg>

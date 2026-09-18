@@ -4,6 +4,7 @@ import { refreshCatalog } from '@/services/catalog'
 import { refreshRights, refreshPersonalData, showApiError, token } from '@/services/api'
 import { finishLearningBootstrap } from '@/utils/learning-bootstrap'
 import {refreshSiteSettings} from '@/services/site-settings'
+import { safePageUrl } from '@/utils/navigation'
 
 onLaunch((options) => {
   const initialPath=options?.path?'/'+options.path.replace(/^\//,''):'/pages/index/index'
@@ -20,7 +21,9 @@ onLaunch((options) => {
     const pages = getCurrentPages()
     const current = pages[pages.length - 1] as any
     const route = current?.$page?.fullPath || initialRoute
-    uni.reLaunch({ url: route, complete: finishLearningBootstrap })
+    // Do not clear a route the user already opened while initialization was running.
+    if (pages.length !== 1 || '/' + current?.route !== initialPath) { finishLearningBootstrap(); return }
+    uni.redirectTo({ url: safePageUrl(route), complete: finishLearningBootstrap })
   }).catch(error => {
     finishLearningBootstrap()
     if(publicEntry)return

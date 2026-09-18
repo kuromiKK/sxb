@@ -2,294 +2,269 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import uniIcons from '@dcloudio/uni-ui/lib/uni-icons/uni-icons.vue'
-import DebugMenu from '@/components/DebugMenu.vue'
-import { backOrFallback } from '@/utils/navigation'
-import { courseCatalog, knowledgeSubjects, type CourseLesson } from '@/mock/data'
-import { useAppStore } from '@/store/app'
+import CircleAction from '@/components/ui/CircleAction.vue'
+import ReadingAudio from '@/components/ReadingAudio.vue'
+import ReadingSheet from '@/components/ui/ReadingSheet.vue'
+import ReadingExcerpt from '@/components/ui/ReadingExcerpt.vue'
+import StudyContent from '@/components/StudyContent.vue'
+import ActionButton from '@/components/ui/ActionButton.vue'
+import VerificationGate from '@/components/VerificationGate.vue'
+import { courseCatalog, knowledgeSubjects, type CourseLesson, type KnowledgeSubject } from '@/mock/data'
+import { api, token, selectedExamId, refreshPersonalData, writeRecord, showApiError } from '@/services/api'
+import { refreshCatalog } from '@/services/catalog'
 import { getFavoriteIds, setFavorite } from '@/utils/favorites'
 import { getNoteBySource, saveNoteRecord } from '@/utils/notes'
-import { applyCourseDebugAccount, canAccessCourse, courseDebugOptions, getCourseAccessLevel } from '@/utils/course-access'
-import { api, writeRecord, showApiError, refreshRights } from '@/services/api'
-import { refreshCatalog } from '@/services/catalog'
-import VerificationGate from '@/components/VerificationGate.vue'
-import {verifiedDownload,openDownload} from '@/utils/verified-download'
-const verification=ref<InstanceType<typeof VerificationGate>>()
-
+import { verifiedDownload, openDownload } from '@/utils/verified-download'
+import { backOrFallback, openPage, openLogin, currentPageUrl } from '@/utils/navigation'
+import { learningReady } from '@/utils/learning-bootstrap'
 import { createLearningVisit } from '@/utils/learning-visit'
+
+type CourseDetail = Partial<CourseLesson> & { id:string; mediaUrl?:string; posterUrl?:string; blocks?:any[]; content?:string; articleSections?:Array<{title:string;paragraphs:string[]}>; handoutDownloadPath?:string }
+const id=ref(''),detail=ref<CourseDetail>(),courses=ref<CourseLesson[]>([]),subjects=ref<KnowledgeSubject[]>([])
+const busy=ref(true),error=ref(''),active=ref(true),personalError=ref(''),personalReady=ref(false)
+const favorite=ref(false),favoriteBusy=ref(false),completed=ref(false),finishing=ref(false)
+const progress=ref(0),position=ref(0),duration=ref(0),initialPosition=ref(0)
+const mediaError=ref(''),downloading=ref(false),downloadError=ref('')
+const resourceSheet=ref<''|'knowledge'|'directory'>(''),sheet=ref(false),note=ref(''),draft=ref(''),saving=ref(false),noteError=ref('')
+const verification=ref<InstanceType<typeof VerificationGate>>()
 const visit=createLearningVisit()
-onHide(()=>visit.leave())
-onShow(()=>{if(pageReady.value)void visit.begin(courseId.value)})
-onUnload(()=>visit.close())
-const { state, login, logout, requireLogin } = useAppStore()
-const courseId = ref(courseCatalog[0]?.id || '')
-const note = ref('')
-const noteSaved = ref(false)
-const isPlaying = ref(false)
-const completed = ref(false)
-const downloaded = ref(false)
-const favorite = ref(false)
-const pageReady = ref(false)
-const articleExpanded = ref(false)
-
-const detailData=ref<Partial<CourseLesson>>({})
-const course = computed<CourseLesson>(() => ({...(courseCatalog.find(item => item.id === courseId.value) || {id:courseId.value,progress:0,currentMinute:0} as CourseLesson),...detailData.value}))
-const record = computed(() => {
-  for (const subject of knowledgeSubjects) {
-    const chapter = subject.chapters.find(item => item.id === course.value.chapterId)
-    if (chapter) {
-      const section = chapter.sections.find(item => item.id === course.value.sectionId)
-      if (section) return { subject, chapter, section }
-    }
-  }
-  return undefined
+let revision=0,ownerExam='',ownerToken=''
+const course=computed(()=>({...courses.value.find(c=>c.id===id.value),...detail.value}) as CourseDetail)
+const typeName=computed(()=>({video:'视频精讲',audio:'音频精讲',article:'图文精讲'}[course.value.type||'article']))
+const title=computed(()=>course.value.title||course.value.sectionName||'精讲课')
+const record=computed(()=>{
+ for(const subject of subjects.value)for(const chapter of subject.chapters){const section=chapter.sections.find(s=>s.id===course.value.sectionId);if(section)return {subject,chapter,section}}
 })
-const knowledgePoints = computed(() => (record.value?.section.points || []).filter(point => !course.value.knowledgePointId || point.id === course.value.knowledgePointId))
-const articleSections = computed<Array<{title:string;paragraphs:string[]}>>(() => (course.value as any).articleSections || [{title:course.value.sectionName,paragraphs:[course.value.intro || '课程内容待发布']}])
-const mediaUrl = computed(() => String((course.value as any).mediaUrl || ''))
-const courseBlocks = computed<any[]>(() => (course.value as any).blocks || [])
-const coursePoster = computed(() => String((course.value as any).posterUrl || ''))
-const mediaProgress = async (event:any) => {
-  const seconds=Number(event.detail.currentTime)||0
-  const duration=Number(event.detail.duration)||0
-  visit.progress(seconds,duration)
-  currentMinute.value=Math.floor(seconds/60)
-  if(duration>0)courseProgress.value=Math.min(100,Math.round(seconds/duration*100))
+const points=computed(()=>(record.value?.section.points||[]).filter(p=>!course.value.knowledgePointId||p.id===course.value.knowledgePointId))
+const directory=computed(()=>courses.value.filter(c=>c.subjectId===course.value.subjectId&&(course.value.knowledgePointId?c.knowledgePointId===course.value.knowledgePointId:!c.knowledgePointId)).sort((a,b)=>a.chapterNo-b.chapterNo||a.sectionNo-b.sectionNo))
+const currentIndex=computed(()=>directory.value.findIndex(c=>c.id===id.value))
+const previous=computed(()=>directory.value[currentIndex.value-1])
+const next=computed(()=>directory.value[currentIndex.value+1])
+const directoryGroups=computed(()=>[...new Set(directory.value.map(c=>c.chapterId))].map(chapterId=>({id:chapterId,title:directory.value.find(c=>c.chapterId===chapterId)?.chapterName,items:directory.value.filter(c=>c.chapterId===chapterId)})))
+const status=computed(()=>completed.value?'已学完':progress.value>0?'已学 '+progress.value+'%':'未开始')
+const isOwner=()=>ownerExam===selectedExamId()&&ownerToken===token()
+function mediaUrl(url?:string){const base=import.meta.env.VITE_API_BASE||'/api';return url?.startsWith('/api/')?base.replace(/\/$/,'')+url.slice(4):url||''}
+async function load(){
+ const v=++revision;busy.value=true;error.value='';personalError.value='';personalReady.value=false;mediaError.value='';downloadError.value='';detail.value=undefined
+ try{
+  await learningReady
+  if(v!==revision)return
+  if(!id.value)throw new Error('缺少课程编号，请返回课程目录重新选择')
+  if(!token()){busy.value=false;error.value='登录后学习课程';openLogin('/pages/course-detail/index?id='+encodeURIComponent(id.value));return}
+  ownerExam=selectedExamId();ownerToken=token()
+  await refreshCatalog()
+  if(v!==revision||!isOwner())return
+  courses.value=courseCatalog.map(c=>({...c}));subjects.value=JSON.parse(JSON.stringify(knowledgeSubjects))
+  if(!courses.value.some(c=>c.id===id.value))throw new Error('课程已下架或不属于当前考试')
+  const result=await api<CourseDetail>('/courses/'+encodeURIComponent(id.value))
+  if(v!==revision||!isOwner())return
+  // Personal data is loaded before mounting the player, so its initial seek uses saved progress.
+  const personal=await Promise.allSettled([refreshPersonalData(),api<any[]>('/records/'+ownerExam+'?kind=courseProgress')])
+  if(v!==revision||!isOwner())return
+  const [synced,records]=personal
+  completed.value=false;progress.value=0;initialPosition.value=0;position.value=0;duration.value=0;favorite.value=false;note.value=''
+  if(synced.status==='fulfilled'&&records.status==='fulfilled'){
+   const saved=records.value.find(r=>r.source_id===id.value)?.payload
+   completed.value=Boolean(saved?.completed);progress.value=completed.value?100:Math.max(0,Math.min(100,Number(saved?.progress)||0))
+   initialPosition.value=completed.value?0:Math.max(0,Number(saved?.positionSeconds)||Number(saved?.currentMinute)*60||0)
+   position.value=initialPosition.value;duration.value=Number(saved?.durationSeconds)||0
+   favorite.value=getFavoriteIds().includes(id.value);note.value=getNoteBySource(id.value,'course')?.content||''
+   personalReady.value=true
+  }else personalError.value='学习记录暂未同步，请重试后收藏或保存笔记'
+  detail.value=result;busy.value=false
+  await visit.begin(id.value)
+ }catch(e){if(v===revision){error.value=e instanceof Error?e.message:'课程加载失败';busy.value=false}}
 }
-const accessLevel = ref(getCourseAccessLevel())
-const canAccess = computed(() => accessLevel.value === 'full' || (accessLevel.value === 'trial' && course.value.canTrial))
-const currentIndex = computed(() => courseCatalog.findIndex(item => item.id === course.value.id))
-const previousCourse = computed(() => currentIndex.value > 0 ? courseCatalog[currentIndex.value - 1] : undefined)
-const nextCourse = computed(() => currentIndex.value >= 0 && currentIndex.value < courseCatalog.length - 1 ? courseCatalog[currentIndex.value + 1] : undefined)
-const courseProgress = ref(course.value.progress)
-const currentMinute = ref(course.value.currentMinute)
-const completedStorageKey = 'sxb-completed-courses'
-const loadCompletedCourseIds = () => {
-  const stored = uni.getStorageSync(completedStorageKey)
-  return Array.isArray(stored) ? stored as string[] : []
+function mediaProgress(seconds:number,total:number){
+ if(!active.value||!isOwner())return
+ if(Number.isFinite(seconds))position.value=Math.max(0,seconds)
+ if(Number.isFinite(total)&&total>0){duration.value=total;if(!completed.value)progress.value=Math.min(100,Math.round(position.value/total*100))}
+ visit.progress(seconds,total)
 }
-const markCurrentCourseCompleted = () => {
-  const ids = loadCompletedCourseIds()
-  if (!ids.includes(course.value.id)) uni.setStorageSync(completedStorageKey, [...ids, course.value.id])
-  completed.value = true
-  courseProgress.value = 100
+function videoProgress(e:any){mediaProgress(Number(e.detail.currentTime),Number(e.detail.duration))}
+async function finish(){
+ if(finishing.value||completed.value||!personalReady.value||!isOwner())return
+ finishing.value=true
+ try{
+  await visit.flush()
+  await writeRecord('courseProgress',id.value,{completed:true,progress:100,positionSeconds:Math.floor(position.value),durationSeconds:Math.ceil(duration.value),currentMinute:Math.floor(position.value/60)})
+  if(!isOwner())return
+  completed.value=true;progress.value=100;uni.showToast({title:'这门课已学完',icon:'success'})
+ }catch(e){showApiError(e)}finally{finishing.value=false}
 }
-
-onLoad(async (options) => {
-  if (options?.id) courseId.value = decodeURIComponent(options.id)
-  const currentUrl = `/pages/course-detail/index?id=${encodeURIComponent(course.value.id)}`
-  if (!state.isLoggedIn) {
-    requireLogin(currentUrl)
-    return
-  }
-  try {
-    await refreshCatalog()
-    await refreshRights()
-    const detail = await api(`/courses/${courseId.value}`)
-    detailData.value=detail
-  } catch (error) { showApiError(error); return }
-  accessLevel.value = getCourseAccessLevel()
-  if (!canAccess.value) {
-    uni.reLaunch({
-      url: '/pages/courses/index',
-      success: () => uni.showToast({ title: '当前账号暂无该课程权限', icon: 'none' }),
-    })
-    return
-  }
-  const savedNote = getNoteBySource(courseId.value, 'course')?.content || uni.getStorageSync(`sxb-course-note-${courseId.value}`)
-  note.value = typeof savedNote === 'string' ? savedNote : ''
-  courseProgress.value = course.value.progress
-  completed.value = course.value.completed || loadCompletedCourseIds().includes(course.value.id)
-  if (completed.value) courseProgress.value = 100
-  currentMinute.value = course.value.currentMinute
-  const favorites = getFavoriteIds()
-  favorite.value = favorites.includes(courseId.value)
-  pageReady.value = true
-  void visit.begin(courseId.value)
-})
-
-const typeIcon = (type: CourseLesson['type']) => type === 'video' ? 'videocam' : type === 'audio' ? 'sound' : 'compose'
-const showToast = (title: string) => uni.showToast({ title, icon: 'none' })
-const back = () => backOrFallback('/pages/courses/index')
-const togglePlay = () => {
-  showToast('课程媒体尚未上传，请联系内容管理员')
+async function favoriteCourse(){
+ if(favoriteBusy.value||!personalReady.value||!isOwner())return
+ favoriteBusy.value=true
+ try{await setFavorite(id.value,'course',!favorite.value);if(isOwner())favorite.value=!favorite.value}catch(e){showApiError(e)}finally{favoriteBusy.value=false}
 }
-const seek = (event: any) => {
-  const nextProgress = Number(event?.detail?.value || 0)
-  courseProgress.value = nextProgress
-  currentMinute.value = Math.round(course.value.totalMinutes * nextProgress / 100)
+function openNotes(){draft.value=note.value;noteError.value='';sheet.value=true}
+function closeNotes(){
+ if(saving.value)return
+ if(draft.value!==note.value){uni.showModal({title:'笔记还没保存',content:'要放弃这次修改吗？',confirmText:'放弃修改',cancelText:'继续编辑',success:r=>{if(r.confirm)sheet.value=false}})}
+ else sheet.value=false
 }
-const saveNote = async () => {
-  if (!state.isLoggedIn) {
-    requireLogin(`/pages/course-detail/index?id=${encodeURIComponent(course.value.id)}`)
-    return
-  }
-  if (!note.value.trim()) return showToast('请先填写笔记内容')
-  await saveNoteRecord(course.value.id, 'course', note.value)
-  noteSaved.value = true
-  uni.showToast({ title: '课程笔记已保存', icon: 'success' })
-  setTimeout(() => { noteSaved.value = false }, 1600)
+async function saveNote(){
+ if(saving.value||!isOwner())return
+ if(!draft.value.trim()){noteError.value='请先写下笔记内容';return}
+ saving.value=true;noteError.value=''
+ try{await saveNoteRecord(id.value,'course',draft.value);if(!isOwner())return;note.value=draft.value.trim();draft.value=note.value;sheet.value=false;uni.showToast({title:'笔记已保存',icon:'success'})}
+ catch(e){noteError.value=e instanceof Error?e.message:'保存失败，请重试'}finally{saving.value=false}
 }
-const toggleFavorite = async () => {
-  await setFavorite(courseId.value, 'course', !favorite.value)
-  favorite.value = !favorite.value
-  showToast(favorite.value ? '已收藏精讲课' : '已取消收藏')
+async function download(){
+ if(downloading.value||!course.value.handoutDownloadPath||!verification.value)return
+ downloading.value=true;downloadError.value=''
+ try{const result=await verifiedDownload(verification.value,course.value.handoutDownloadPath);if(isOwner())openDownload(result.url)}
+ catch(e:any){if(e.code!=='VERIFICATION_CANCELLED')downloadError.value=e.message||'下载失败，请重试'}finally{downloading.value=false}
 }
-const finishCourse = async () => {
-  await writeRecord('courseProgress', course.value.id, { completed: true, progress: 100, minutes: currentMinute.value })
-  markCurrentCourseCompleted()
-  uni.showToast({ title: '已完成本节课程', icon: 'success' })
+function goCourse(target?:CourseLesson){
+ if(!target||target.id===id.value)return
+ resourceSheet.value=''
+ visit.leave()
+ uni.redirectTo({url:'/pages/course-detail/index?id='+encodeURIComponent(target.id)})
 }
-const openKnowledge = (pointId: string) => uni.navigateTo({ url: `/pages/knowledge-detail/index?id=${encodeURIComponent(pointId)}` })
-const openCodeModal = async () => {
-  if (!course.value.hasHandout) return
-  try {
-    const result=await verifiedDownload(verification.value!,(course.value as any).handoutDownloadPath||`/handouts/handout-${course.value.id}/download`)
-    openDownload(result.url)
-    downloaded.value=true
-  } catch(error){showApiError(error)}
+function activateButton(event:any){
+ // #ifdef H5
+ if(event.defaultPrevented||!['Enter',' '].includes(event.key)||typeof event.target?.closest!=='function')return
+ const button=(event.target as HTMLElement)?.closest('uni-button')
+ if(!button||button.hasAttribute('disabled')||button.getAttribute('aria-disabled')==='true')return
+ event.preventDefault();(button as HTMLElement).click()
+ // #endif
 }
-const goCourse = async (target?: CourseLesson, completeCurrent = false) => {
-  if (!target) return
-  if (!canAccessCourse(target.canTrial)) {
-    showToast('当前账号暂无该课程权限')
-    return
-  }
-  if (completeCurrent) await finishCourse()
-  uni.redirectTo({ url: `/pages/course-detail/index?id=${encodeURIComponent(target.id)}` })
-}
-const applyDebug = (key: string) => {
-  accessLevel.value = applyCourseDebugAccount(key, login, logout)
-  const currentUrl = `/pages/course-detail/index?id=${encodeURIComponent(course.value.id)}`
-  if (key === 'logged-out') {
-    requireLogin(currentUrl)
-    return
-  }
-  if (!canAccess.value) {
-    uni.reLaunch({
-      url: '/pages/courses/index',
-      success: () => showToast('当前账号暂无该课程权限'),
-    })
-    return
-  }
-  showToast('精讲课账号状态已切换')
-}
+const back=()=>backOrFallback('/pages/courses/index')
+const openKnowledge=(pointId:string)=>openPage('/pages/knowledge-detail/index?id='+encodeURIComponent(pointId))
+function practice(){const key=course.value.knowledgePointId?'knowledgePointId':'sectionId',value=course.value.knowledgePointId||course.value.sectionId;if(value)openPage('/pages/practice-session/index?'+key+'='+encodeURIComponent(value)+'&returnUrl='+encodeURIComponent(currentPageUrl()))}
+onLoad(options=>{id.value=String(options?.id||'')})
+onShow(()=>{active.value=true;void load()})
+onHide(()=>{resourceSheet.value='';active.value=false;revision++;visit.leave()})
+onUnload(()=>{revision++;visit.close()})
 </script>
 
 <template>
-  <view v-if="pageReady" class="course-detail-page safe-top">
-    <view class="detail-top"><button class="back-button" @tap="back"><uni-icons type="back" size="21" color="#4d5c73" /></button><text class="detail-top-title">精讲课</text><button class="favorite-button" :class="{ active: favorite }" @tap="toggleFavorite"><uni-icons :type="favorite ? 'star-filled' : 'star'" size="21" :color="favorite ? '#e98a3a' : '#8a96a7'" /></button></view>
-    <view class="crumb"><text>{{ course.subjectName }}</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.chapterNo }}章</text><uniIcons type="forward" size="13" color="#9ba6b5" /><text>第{{ course.sectionNo }}节</text></view>
-
-    <video v-if="mediaUrl&&course.type==='video'" :src="mediaUrl" :poster="coursePoster" controls style="width:100%;height:220px" @timeupdate="mediaProgress" @pause="visit.flush()" @ended="visit.flush();finishCourse()" />
-    <audio v-else-if="mediaUrl&&course.type==='audio'" :src="mediaUrl" :name="course.sectionName" controls @timeupdate="mediaProgress" @pause="visit.flush()" @ended="visit.flush();finishCourse()" />
-    <view v-else-if="course.type !== 'article'" class="media-panel" :class="`media-${course.type}`">
-      <view class="media-visual"><view class="media-orbit"></view><view class="media-main-icon"><uni-icons :type="typeIcon(course.type)" size="35" color="#fff" /></view><text>{{ course.type === 'video' ? '视频精讲' : '音频精讲' }}</text></view><view class="media-controls"><text>00:{{ String(currentMinute).padStart(2, '0') }}</text><slider :value="courseProgress" min="0" max="100" activeColor="#f2b04f" backgroundColor="rgba(255,255,255,.24)" block-size="13" @change="seek" /><text>{{ course.totalMinutes }}:00</text><button class="media-play" @tap="togglePlay"><uniIcons :type="isPlaying ? 'pause' : 'play-filled'" size="16" color="#fff" /></button></view>
+ <view @keydown="activateButton" class="course-detail-page" :class="'detail-'+(course.type||'article')">
+  <template v-if="busy || error">
+   <view class="loading-nav"><CircleAction @tap="back"/><text>精讲课</text></view>
+   <view class="detail-state" :role="error?'alert':'status'"><image src="/static/illustrations/course-studio.svg" mode="aspectFit" aria-hidden="true"/><text>{{error||'正在准备课程…'}}</text><view v-if="error" class="state-actions"><button role="button" tabindex="0" @tap="load">重新加载</button><button role="button" tabindex="0" v-if="!token()" @tap="openLogin()">去登录</button><button role="button" tabindex="0" v-else-if="error.includes('权限')||error.includes('会员')" @tap="openPage('/pages/products/index')">查看课程权益</button></view></view>
+  </template>
+  <template v-else-if="detail">
+   <view class="lesson-stage" :class="'stage-'+course.type">
+    <view class="detail-top"><CircleAction compact :tone="course.type==='video'?'light':'ink'" @tap="back"/><view class="top-actions"><CircleAction compact :tone="course.type==='video'?'light':'ink'" :icon="favorite?'heart-filled':'heart'" :label="favorite?'取消收藏':'收藏课程'" :active="favorite" :disabled="favoriteBusy||!personalReady" @tap="favoriteCourse"/><CircleAction compact :tone="course.type==='video'?'light':'ink'" icon="redo" label="分享（暂未开放）" disabled/></view></view>
+    <template v-if="course.type==='video'">
+     <video v-if="course.mediaUrl && !mediaError && active" id="lesson-video" class="lesson-video" :src="mediaUrl(course.mediaUrl)" :poster="mediaUrl(course.posterUrl)" :initial-time="initialPosition" :autoplay="false" controls @timeupdate="videoProgress" @pause="visit.flush()" @ended="visit.flush();finish()" @error="mediaError='视频暂时无法播放，请重新加载'"/>
+     <view v-else class="media-empty"><uni-icons aria-hidden="true" type="videocam" size="32" color="#b6c9e5"/><text>{{mediaError||'视频正在准备中'}}</text><button role="button" tabindex="0" v-if="mediaError" @tap="load">重新加载</button></view>
+    </template>
+    <template v-else-if="course.type==='audio'">
+     <ReadingAudio v-if="course.mediaUrl && !mediaError && active" :key="course.mediaUrl" class="lesson-audio" presentation="course" :poster="mediaUrl(course.posterUrl||course.coverUrl)" :src="mediaUrl(course.mediaUrl)" :title="title" label="音频精讲" :initial-position="initialPosition" @progress="mediaProgress" @pause="visit.flush()" @ended="finish" @error="mediaError='音频暂时无法播放，请重新加载'"/>
+     <view v-else class="audio-empty"><text>{{mediaError||'音频正在准备中'}}</text><button role="button" tabindex="0" v-if="mediaError" @tap="load">重新加载</button></view>
+    </template>
+    <view v-else class="article-stage" aria-hidden="true"/>
+   </view>
+   <view class="lesson-paper">
+    <view class="course-heading">
+     <view class="lesson-location"><text class="lesson-type">{{typeName}}</text><text>{{record?.subject.shortTitle||course.subjectName}}</text><text v-if="course.chapterNo">第{{course.chapterNo}}章</text></view>
+     <text class="course-title" role="heading" aria-level="1">{{title}}</text>
+     <view class="lesson-meta">
+      <view class="meta-copy"><text v-if="course.type!=='article' && course.totalMinutes">{{course.totalMinutes}} 分钟</text><text :class="{finished:completed}">{{status}}</text></view>
+      <ActionButton v-if="course.handoutDownloadPath" class="handout-pill" :disabled="downloading" @tap="download"><uni-icons aria-hidden="true" type="download" size="15" color="#3c669f"/>{{downloading?'获取中…':'下载讲义'}}</ActionButton>
+     </view>
+     <text v-if="downloadError" class="inline-error" role="alert">{{downloadError}}</text>
+     <ActionButton v-if="personalError" class="personal-retry" @tap="load">{{personalError}}</ActionButton>
     </view>
-
-    <view v-if="course.type !== 'article'" class="course-heading"><view class="course-title-row"><text class="course-title">第{{ course.sectionNo }}节 {{ course.sectionName }}</text><text class="course-status" :class="{ done: completed || courseProgress === 100 }">{{ completed || courseProgress === 100 ? '已完成' : courseProgress ? `已学 ${courseProgress}%` : '未开始' }}</text></view><text class="course-intro">{{ course.intro }}</text><view class="course-facts"><view><uniIcons type="clock" size="15" color="#7b8797" /><text>共 {{ course.totalMinutes }} 分钟</text></view><view><uniIcons :type="course.hasHandout ? 'paperclip' : 'closeempty'" size="15" :color="course.hasHandout ? '#3569e8' : '#9aa5b4'" /><text>{{ course.hasHandout ? '含配套讲义' : '暂无讲义' }}</text></view><view v-if="course.canTrial"><uniIcons type="flag" size="15" color="#e98a3a" /><text>可试听</text></view><view class="fact-type" :class="`type-${course.type}`"><uni-icons :type="typeIcon(course.type)" size="15" :color="course.type === 'video' ? '#3569e8' : '#d47a25'" /><text>{{ course.typeName }}</text></view></view></view>
-
-    <view v-else class="article-card">
-      <view class="article-course-head">
-        <view class="article-label-line"><text>图文精讲</text></view>
-        <view class="article-course-title-row"><text>第{{ course.sectionNo }}节 {{ course.sectionName }}</text><text class="course-status" :class="{ done: completed || courseProgress === 100 }">{{ completed || courseProgress === 100 ? '已完成' : courseProgress ? `已学 ${courseProgress}%` : '未开始' }}</text></view>
-        <view class="article-facts"><view><uniIcons :type="course.hasHandout ? 'paperclip' : 'closeempty'" size="15" :color="course.hasHandout ? '#3569e8' : '#9aa5b4'" /><text>{{ course.hasHandout ? '含配套讲义' : '暂无讲义' }}</text></view><view v-if="course.canTrial"><uniIcons type="flag" size="15" color="#e98a3a" /><text>可试听</text></view></view>
-      </view>
-      <view class="article-visual"><view class="visual-axis"><view><text>原则</text><text>明确方向</text></view><uni-icons type="arrowright" size="18" color="#8d85cf" /><view><text>方法</text><text>落实行动</text></view><uni-icons type="arrowright" size="18" color="#8d85cf" /><view><text>成效</text><text>回应需要</text></view></view><text>从基本原则出发，连接政策要求与专业实践</text></view>
-      <view class="article-body" :class="{ expanded: articleExpanded }">
-        <template v-if="courseBlocks.length"><view v-for="(block,index) in courseBlocks" :key="index" class="article-section"><rich-text v-if="block.kind==='text'" :nodes="block.html"/><image v-else-if="block.kind==='image'&&block.url" :src="block.url" mode="widthFix" style="max-width:100%"/></view></template>
-        <template v-else><view v-for="section in articleSections" :key="section.title" class="article-section"><text class="article-section-title">{{ section.title }}</text><text v-for="paragraph in section.paragraphs" :key="paragraph" class="article-paragraph">{{ paragraph }}</text></view></template>
-        <view class="article-key"><uni-icons type="info" size="18" color="#d47a25" /><text>阅读时重点关注原则如何转化为具体服务行动，并留意题干中的政策方向、服务目标和实践边界。</text></view>
-      </view>
-      <view v-if="!articleExpanded" class="article-fade"></view>
-      <button class="article-more" @tap="articleExpanded = !articleExpanded">{{ articleExpanded ? '收起全文' : '加载更多' }}<uni-icons :type="articleExpanded ? 'arrowup' : 'arrowdown'" size="17" color="#5b50b9" /></button>
+    <view class="lesson-content">
+     <view class="content-heading"><text class="content-label">{{course.type==='article'?'课程正文':'课程简介'}}</text><ActionButton class="finish-button" :class="{finished:completed}" :disabled="completed||finishing||!personalReady" @tap="finish"><uni-icons v-if="completed" type="checkmarkempty" size="14" color="#39816f" aria-hidden="true"/>{{completed?'已学完':finishing?'保存中…':'标记学完'}}</ActionButton></view>
+     <ReadingExcerpt v-if="course.intro" :key="'intro-'+id" :available-height="166" class="course-intro"><text class="intro-text">{{course.intro}}</text></ReadingExcerpt>
+     <text v-else-if="course.type!=='article'" class="intro-empty">暂无课程简介</text>
+    <view v-if="course.type==='article'" class="article-body">
+     <StudyContent v-if="course.blocks?.length" :blocks="course.blocks"/>
+     <text v-else-if="course.content" class="plain-body">{{course.content}}</text>
+     <template v-else-if="course.articleSections?.length"><view v-for="(section,index) in course.articleSections" :key="index" class="legacy-section"><text class="legacy-title">{{section.title}}</text><text v-for="(paragraph,p) in section.paragraphs" :key="p" class="plain-body">{{paragraph}}</text></view></template>
+     <view v-else class="section-empty">图文内容正在准备中</view>
     </view>
-
-    <view class="detail-section"><view class="section-title-row"><view class="section-title"><view class="title-bar"></view><text>本节知识点</text></view><text class="section-hint">{{ knowledgePoints.length }} 个知识点</text></view><view class="knowledge-list"><view v-for="point in knowledgePoints" :key="point.id" class="knowledge-row" @tap="openKnowledge(point.id)"><view class="knowledge-copy"><text class="knowledge-name">{{ point.title }}</text><view class="knowledge-meta"><text class="star-tag" :class="`star-${point.stars}`">{{ point.stars }}星</text><text>包含 {{ point.questionTotal }} 题</text><text>掌握 {{ point.mastery }}%</text></view></view><uniIcons type="forward" size="17" color="#9aa5b4" /></view></view></view>
-
-    <view class="note-section"><view class="section-title-row"><view class="section-title"><view class="title-bar orange"></view><text>课程笔记</text></view><text class="section-hint">记录本节课程的整体理解</text></view><textarea v-model="note" maxlength="1200" placeholder="写下老师强调的重点、自己的理解或复习提醒" placeholder-class="note-placeholder" /><view class="note-footer"><text>{{ note.length }} / 1200</text><button class="save-note" :class="{ saved: noteSaved }" @tap="saveNote"><uniIcons :type="noteSaved ? 'checkmarkempty' : 'compose'" size="15" color="#fff" />{{ noteSaved ? '已保存' : '保存笔记' }}</button></view></view>
-
-    <view v-if="course.hasHandout" class="handout-card" @tap="openCodeModal"><view class="handout-icon"><uniIcons type="paperclip" size="22" color="#3569e8" /></view><view class="handout-copy"><text class="handout-title">配套讲义</text><text class="handout-name">{{ course.handoutName }}</text><text class="handout-meta">PDF · 验证后下载</text></view><view class="handout-action"><uniIcons :type="downloaded ? 'checkmarkempty' : 'download'" size="18" :color="downloaded ? '#1a9a7b' : '#3569e8'" /><text>{{ downloaded ? '已验证' : '下载' }}</text></view></view>
-    <view v-else class="handout-empty"><uniIcons type="paperclip" size="17" color="#a2adbb" /><text>本节暂无配套讲义</text></view>
-
-    <button class="finish-button" :class="{ done: completed || courseProgress === 100 }" @tap="finishCourse"><uniIcons :type="completed || courseProgress === 100 ? 'checkmarkempty' : 'flag'" size="17" color="#fff" />{{ completed || courseProgress === 100 ? '已完成本节课程' : '标记为已完成' }}</button>
-    <view class="course-nav"><button class="previous-course" :disabled="!previousCourse" @tap="goCourse(previousCourse)"><uniIcons type="back" size="18" :color="previousCourse ? '#3569e8' : '#b8c0cd'" />上一节</button><button class="next-course" :disabled="!nextCourse" @tap="goCourse(nextCourse, true)">下一节<uniIcons type="forward" size="18" :color="nextCourse ? '#fff' : '#b8c0cd'" /></button></view>
-
-    <VerificationGate ref="verification"/>
-    <DebugMenu page="精讲课账号状态" :options="courseDebugOptions" @select="applyDebug" />
-  </view>
+    </view>
+    <view class="resource-tools">
+     <ActionButton aria-haspopup="dialog" :aria-expanded="resourceSheet==='knowledge'" @tap="resourceSheet='knowledge'"><view class="resource-icon"><uni-icons type="map" size="19" color="#4b73aa" aria-hidden="true"/></view><text>关联知识点</text><text class="resource-count">{{points.length}}</text></ActionButton>
+     <ActionButton aria-haspopup="dialog" :aria-expanded="resourceSheet==='directory'" @tap="resourceSheet='directory'"><view class="resource-icon"><uni-icons type="list" size="19" color="#457d7a" aria-hidden="true"/></view><text>课程目录</text><text class="resource-count">{{directory.length}}</text></ActionButton>
+    </view>
+   </view>
+   <view class="lesson-toolbar"><button role="button" tabindex="0" class="note-entry" :disabled="!personalReady" @tap="openNotes"><uni-icons aria-hidden="true" type="compose" size="20" color="#45678c"/><text>{{note?'我的笔记':'记笔记'}}</text><view v-if="note" class="note-dot"/></button><button role="button" tabindex="0" class="previous-course" :disabled="!previous" @tap="goCourse(previous)"><uni-icons aria-hidden="true" type="left" size="17" :color="previous?'#45678c':'#a6b0bb'"/><text>上一课</text></button><button role="button" tabindex="0" class="next-course" @tap="next?goCourse(next):back()"><text>{{next?'下一课':'返回课程'}}</text><uni-icons aria-hidden="true" type="right" size="16" color="#fff"/></button></view>
+  </template>
+  <ReadingSheet v-if="resourceSheet" :title="resourceSheet==='knowledge'?'关联知识点':'课程目录'" @close="resourceSheet=''">
+     <view v-if="resourceSheet==='knowledge'" class="knowledge-list">
+      <view v-if="!points.length" class="section-empty">本课程暂未关联知识点</view>
+      <button role="button" tabindex="0" v-for="(point,index) in points" :key="point.id" class="knowledge-row" @tap="openKnowledge(point.id)"><text class="point-index">{{String(index+1).padStart(2,'0')}}</text><view class="point-copy"><text>{{point.title}}</text><view class="point-meta"><text v-if="point.stars" class="point-stars">{{'★'.repeat(Math.max(0,Math.min(5,Math.round(point.stars))))}}</text><text>{{point.questionTotal||0}} 道题</text></view></view><uni-icons aria-hidden="true" type="right" size="15" color="#8091a8"/></button>
+      <button role="button" tabindex="0" v-if="points.some(p=>p.questionTotal>0)" class="practice-entry" @tap="practice"><uni-icons aria-hidden="true" type="compose" size="17" color="#547aa4"/><text>学完练一练</text><uni-icons aria-hidden="true" type="right" size="14" color="#547aa4"/></button>
+     </view>
+     <view v-else class="course-directory"><view v-for="group in directoryGroups" :key="group.id" class="directory-group"><text class="directory-heading">{{group.title}}</text><button role="button" tabindex="0" v-for="item in group.items" :key="item.id" class="directory-row" :class="{current:item.id===id}" :aria-current="item.id===id?'true':undefined" @tap="goCourse(item)"><image :src="'/static/icons/course-'+item.type+'.svg'" mode="aspectFit" aria-hidden="true"/><view><text>{{item.title||item.sectionName}}</text><text class="directory-meta">{{item.typeName}}<template v-if="item.type!=='article'&&item.totalMinutes"> · {{item.totalMinutes}} 分钟</template></text></view><text v-if="item.id===id" class="current-label">当前</text><uni-icons aria-hidden="true" v-else type="right" size="14" color="#8091a8"/></button></view></view>
+  </ReadingSheet>
+  <ReadingSheet v-if="sheet" title="我的课程笔记" @close="closeNotes"><view class="note-context">{{title}}</view><textarea v-model="draft" class="note-editor" aria-label="课程笔记" maxlength="1200" :disabled="saving" placeholder="记下老师强调的重点，或自己的理解…"/><view class="note-count">{{draft.length}} / 1200</view><text v-if="noteError" class="inline-error" role="alert">{{noteError}}</text><button role="button" tabindex="0" class="save-note" :disabled="saving||!draft.trim()" @tap="saveNote">{{saving?'正在保存…':'保存笔记'}}</button></ReadingSheet>
+  <VerificationGate ref="verification"/>
+ </view>
 </template>
 
-<style lang="scss" scoped>
-.course-detail-page { max-width: 430px; min-height: 100vh; margin: 0 auto; box-sizing: border-box; padding: calc(env(safe-area-inset-top) + 18rpx) 20px 42rpx; background: #f5f7fb; }.detail-top { display: flex; align-items: center; justify-content: space-between; height: 58rpx; }.back-button { width: 58rpx; height: 58rpx; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; background: #edf1fb; border: 0; border-radius: 15rpx; }.back-button::after { display: none; }.detail-top-title { color: #1e3048; font-size: var(--sxb-text-item); font-weight: 700; }.top-type { display: flex; align-items: center; gap: 4rpx; padding: 7rpx 9rpx; background: #eaf0ff; border-radius: 7rpx; color: #3569e8; font-size: var(--sxb-text-meta); font-weight: 700; }.top-type.type-audio { color: #cf7626; background: #fff2df; }.top-type.type-article { color: #6949df; background: #f0edff; }.crumb { display: flex; align-items: center; gap: 4rpx; margin-top: 18rpx; overflow: hidden; color: #8b96a5; font-size: var(--sxb-text-meta); white-space: nowrap; }.crumb text { overflow: hidden; text-overflow: ellipsis; }.media-panel { position: relative; overflow: hidden; min-height: 255rpx; margin-top: 17rpx; color: #fff; background: #1c3560; border-radius: 15rpx; box-shadow: 0 13rpx 28rpx rgba(35,56,102,.2); }.media-panel.media-audio { background: #8a542e; }.media-panel.media-article { background: #5442a2; }.media-visual { position: relative; height: 210rpx; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9rpx; }.media-visual>text,.article-cover>text:nth-child(2) { font-size: var(--sxb-text-small); font-weight: 700; }.media-orbit { position: absolute; width: 170rpx; height: 170rpx; border: 2rpx solid rgba(255,255,255,.19); border-radius: 50%; box-shadow: 0 0 0 22rpx rgba(255,255,255,.06), 0 0 0 45rpx rgba(255,255,255,.035); }.media-main-icon { position: relative; z-index: 1; width: 65rpx; height: 65rpx; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.16); border-radius: 20rpx; }.media-controls { height: 62rpx; display: flex; align-items: center; gap: 8rpx; padding: 0 15rpx; background: rgba(0,0,0,.15); color: #dbe5fb; font-size: var(--sxb-text-meta); }.media-controls slider { flex: 1; margin: 0; }.media-play { width: 38rpx; height: 38rpx; display: flex; align-items: center; justify-content: center; gap: 4rpx; margin: 0; padding: 0; color: #fff; background: #3569e8; border-radius: 50%; font-size: var(--sxb-text-meta); }.media-play::after { display: none; }.article-cover { height: 205rpx; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9rpx; }.article-cover>text:last-child { color: #ddd8ff; font-size: var(--sxb-text-meta); }.article-play { position: absolute; right: 17rpx; bottom: 15rpx; width: auto; height: 43rpx; padding: 0 12rpx; background: #e98a3a; border-radius: 8rpx; }.media-lock { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8rpx; background: rgba(20,32,59,.86); }.media-lock text { color: #e8eefc; font-size: var(--sxb-text-small); }.media-lock button { height: 43rpx; line-height: 43rpx; margin: 3rpx 0 0; padding: 0 14rpx; color: #243753; background: #f2b04f; border-radius: 7rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.media-lock button::after { display: none; }.course-heading { padding: 19rpx 2rpx 3rpx; }.course-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 9rpx; }.course-title { color: #1e3048; font-size: var(--sxb-text-title); line-height: 1.45; font-weight: 700; }.course-status { flex: none; padding: 5rpx 8rpx; color: #536b92; background: #eaf0ff; border-radius: 5rpx; font-size: var(--sxb-text-meta); }.course-status.done { color: #1a9a7b; background: #e8f7f1; }.course-intro { display: block; margin-top: 8rpx; color: #65758b; font-size: var(--sxb-text-small); line-height: 1.55; }.course-facts { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 12rpx; color: #7b8797; font-size: var(--sxb-text-meta); }.course-facts text { display: flex; align-items: center; gap: 3rpx; }.detail-section,.note-section { margin-top: 17rpx; padding: 18rpx; background: #fff; border: 1rpx solid #e0e6f0; border-radius: 13rpx; box-shadow: 0 7rpx 19rpx rgba(51,74,115,.04); }.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8rpx; }.section-title { display: flex; align-items: center; gap: 8rpx; color: #22354e; font-size: var(--sxb-text-body); font-weight: 700; }.title-bar { width: 5rpx; height: 24rpx; background: #3569e8; border-radius: 5rpx; }.title-bar.orange { background: #e98a3a; }.section-hint { color: #9aa5b4; font-size: var(--sxb-text-meta); }.knowledge-list { margin-top: 13rpx; border-top: 1rpx solid #edf0f5; }.knowledge-row { display: flex; align-items: flex-start; gap: 8rpx; padding: 14rpx 0; border-bottom: 1rpx solid #edf0f5; }.knowledge-row:last-child { border-bottom: 0; }.knowledge-copy { flex: 1; min-width: 0; }.knowledge-name { display: block; color: #30425c; font-size: var(--sxb-text-body); line-height: 1.55; }.knowledge-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-top: 7rpx; color: #8b96a5; font-size: var(--sxb-text-meta); }.star-tag { padding: 2rpx 7rpx; border-radius: 5rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.star-1 { color: #6f7e91; background: #eef1f5; }.star-2 { color: #3d78b9; background: #eaf3ff; }.star-3 { color: #3569e8; background: #eaf0ff; }.star-4 { color: #6949df; background: #f0edff; }.star-5 { color: #d47a25; background: #fff2df; }.note-section textarea { width: 100%; min-height: 180rpx; box-sizing: border-box; margin-top: 14rpx; padding: 13rpx; color: #34475f; background: #fafbfe; border: 1rpx solid #e3e8f1; border-radius: 9rpx; font-size: var(--sxb-text-body); line-height: 1.6; }.note-placeholder { color: #a1acba; }.note-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10rpx; color: #a1aaba; font-size: var(--sxb-text-meta); }.save-note { width: 124rpx; height: 42rpx; display: flex; align-items: center; justify-content: center; gap: 4rpx; margin: 0; padding: 0; color: #fff; background: #3569e8; border-radius: 7rpx; font-size: var(--sxb-text-meta); font-weight: 700; }.save-note::after { display: none; }.save-note.saved { background: #1a9a7b; }.handout-card { display: flex; align-items: center; gap: 11rpx; margin-top: 16rpx; padding: 16rpx; background: #edf3ff; border: 1rpx solid #d7e4ff; border-radius: 12rpx; }.handout-icon { width: 44rpx; height: 44rpx; display: flex; align-items: center; justify-content: center; flex: none; background: #fff; border-radius: 11rpx; }.handout-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3rpx; }.handout-title { color: #3569e8; font-size: var(--sxb-text-meta); font-weight: 700; }.handout-name { overflow: hidden; color: #30425c; font-size: var(--sxb-text-small); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }.handout-meta { color: #8593a7; font-size: var(--sxb-text-meta); }.handout-action { display: flex; align-items: center; flex-direction: column; gap: 3rpx; color: #3569e8; font-size: var(--sxb-text-meta); font-weight: 700; }.handout-empty { display: flex; align-items: center; gap: 6rpx; margin-top: 16rpx; padding: 14rpx 16rpx; color: #9ba6b5; background: #f1f3f6; border-radius: 9rpx; font-size: var(--sxb-text-meta); }.finish-button { width: 100%; height: 56rpx; display: flex; align-items: center; justify-content: center; gap: 5rpx; margin: 18rpx 0 0; padding: 0; color: #fff; background: #3569e8; border-radius: 9rpx; font-size: var(--sxb-text-small); font-weight: 700; }.finish-button::after { display: none; }.finish-button.done { background: #1a9a7b; }.course-nav { display: flex; justify-content: space-between; gap: 10rpx; margin-top: 13rpx; }.course-nav button { flex: 1; height: 46rpx; display: flex; align-items: center; justify-content: center; gap: 4rpx; margin: 0; padding: 0; color: #536783; background: #fff; border: 1rpx solid #dfe6f0; border-radius: 8rpx; font-size: var(--sxb-text-meta); }.course-nav button::after { display: none; }.course-nav button[disabled] { color: #b3bdc9; background: #f1f3f6; }.modal-mask { position: fixed; z-index: 50; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(16,28,51,.48); }.code-modal { width: 100%; box-sizing: border-box; padding: 21rpx; background: #fff; border-radius: 15rpx; box-shadow: 0 20rpx 46rpx rgba(25,42,76,.2); }.modal-title-row { display: flex; align-items: center; justify-content: space-between; }.modal-title-row>text { color: #22354e; font-size: var(--sxb-text-item); font-weight: 700; }.modal-title-row button { width: 38rpx; height: 38rpx; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; background: #f2f4f8; border-radius: 50%; }.modal-title-row button::after { display: none; }.modal-desc { display: block; margin-top: 12rpx; color: #748196; font-size: var(--sxb-text-small); line-height: 1.5; }.code-display { display: flex; align-items: center; justify-content: space-between; margin-top: 16rpx; padding: 13rpx 15rpx; background: #f0f3ff; border: 1rpx solid #dce6ff; border-radius: 9rpx; }.code-display>text { color: #3569e8; font-size: var(--sxb-text-heading); letter-spacing: 0; font-weight: 700; }.code-display button { height: 34rpx; line-height: 34rpx; margin: 0; padding: 0 8rpx; color: #3569e8; background: #fff; border-radius: 6rpx; font-size: var(--sxb-text-meta); }.code-display button::after { display: none; }.code-modal input { width: 100%; height: 75rpx; box-sizing: border-box; margin-top: 13rpx; padding: 0 14rpx; color: #34475f; background: #fafbfe; border: 1rpx solid #dfe6f0; border-radius: 9rpx; font-size: var(--sxb-text-body); }.code-placeholder { color: #a1acba; }.verify-button { width: 100%; height: 58rpx; line-height: 58rpx; margin: 15rpx 0 0; padding: 0; color: #fff; background: linear-gradient(100deg,#3569e8,#6949df); border-radius: 9rpx; font-size: var(--sxb-text-body); font-weight: 700; }.verify-button::after { display: none; }
-.course-facts > view { display: flex; align-items: center; gap: 3rpx; }
-.course-detail-page { padding-bottom: calc(150rpx + env(safe-area-inset-bottom)); }
-.detail-top-title { font-size: var(--sxb-text-title); }
-.top-type { font-size: var(--sxb-text-small); }
-.crumb { font-size: var(--sxb-text-small); }
-.media-panel { min-height: 335rpx; }
-.media-visual { height: 273rpx; }
-.article-cover { height: 267rpx; }
-.media-visual > text,
-.article-cover > text:nth-child(2) { font-size: var(--sxb-text-body); }
-.media-main-icon { width: 72rpx; height: 72rpx; }
-.media-controls { font-size: var(--sxb-text-small); }
-.course-title { font-size: var(--sxb-text-title); }
-.course-status { font-size: var(--sxb-text-small); }
-.course-intro { margin-top: 10rpx; font-size: var(--sxb-text-body); line-height: 1.7; }
-.course-facts { font-size: var(--sxb-text-small); }
-.section-title { font-size: var(--sxb-text-item); }
-.section-hint { color: #7f8da1; font-size: var(--sxb-text-body); }
-.knowledge-row { padding: 17rpx 0; }
-.knowledge-name { font-size: var(--sxb-text-item); line-height: 1.6; }
-.knowledge-meta { gap: 10rpx; margin-top: 9rpx; color: #718197; font-size: var(--sxb-text-body); }
-.star-tag { padding: 3rpx 8rpx; font-size: var(--sxb-text-small); }
-.note-section textarea { font-size: var(--sxb-text-body); }
-.note-footer { font-size: var(--sxb-text-small); }
-.save-note { font-size: var(--sxb-text-small); }
-.handout-title { font-size: var(--sxb-text-small); }
-.handout-name { font-size: var(--sxb-text-body); }
-.handout-meta,
-.handout-action { font-size: var(--sxb-text-small); }
-.finish-button { font-size: var(--sxb-text-body); }
-.course-nav { position: fixed; z-index: 40; left: 50%; bottom: 0; width: 100%; max-width: 430px; box-sizing: border-box; gap: 12rpx; margin: 0; padding: 13rpx 20px calc(13rpx + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #fff; border-top: 1rpx solid #dfe5ee; box-shadow: 0 -8rpx 24rpx rgba(36,54,79,.1); }
-.course-nav button { height: 62rpx; font-size: var(--sxb-text-body); }
-.course-nav .previous-course { color:#3569e8; background:#eef3ff; border:1rpx solid #cddcff; font-weight:700; }
-.course-nav .next-course { color:#fff; background:linear-gradient(110deg,#3569e8,#4f55b7); border:1rpx solid #4561c9; font-weight:700; box-shadow:0 7rpx 16rpx rgba(53,75,176,.18); }
-.course-nav .previous-course[disabled],.course-nav .next-course[disabled] { color:#b8c0cd; background:#eef1f5; border-color:#dfe4eb; box-shadow:none; opacity:1; }
-.favorite-button { width:58rpx; height:58rpx; display:flex; align-items:center; justify-content:center; margin:0; padding:0; background:#fff; border:1rpx solid #e0e6f0; border-radius:15rpx; }
-.favorite-button::after { display:none; }
-.favorite-button.active { background:#fff4e6; border-color:#f8d5a7; }
-.fact-type { padding:3rpx 7rpx; color:#3569e8; background:#eaf0ff; border-radius:5rpx; font-weight:700; }
-.fact-type.type-audio { color:#cf7626; background:#fff2df; }
-.fact-type.type-article { color:#6949df; background:#f0edff; }
-.article-card { position:relative; overflow:hidden; margin-top:16rpx; padding:20rpx 18rpx 15rpx; background:#fff; border:1rpx solid #dfe4ee; border-radius:12rpx; box-shadow:0 8rpx 22rpx rgba(43,58,91,.06); }
-.article-course-head { padding-top:10rpx; }
-.article-label-line { color:#6949df; font-size:var(--sxb-text-body); font-weight:700; }
-.article-course-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:10rpx; margin-top:11rpx; }
-.article-course-title-row>text:first-child { min-width:0; color:#1e3048; font-size:var(--sxb-text-title); line-height:1.5; font-weight:700; }
-.article-facts { display:flex; align-items:center; flex-wrap:wrap; gap:10rpx; margin-top:10rpx; color:#7b8797; font-size:var(--sxb-text-small); }
-.article-facts>view { display:flex; align-items:center; gap:3rpx; }
-.article-visual { margin-top:18rpx; padding:18rpx 13rpx 14rpx; background:linear-gradient(135deg,#f0edff,#edf3ff); border:1rpx solid #ddd9f7; border-top-color:#e8e5f7; border-radius:9rpx; }
-.article-course-head + .article-visual { padding-top:20rpx; border-top:1rpx solid #e4e7ee; }
-.visual-axis { display:flex; align-items:center; justify-content:space-between; gap:5rpx; }
-.visual-axis>view { min-width:0; display:flex; align-items:center; flex:1; flex-direction:column; gap:4rpx; padding:10rpx 4rpx; background:#fff; border:1rpx solid #dddff3; border-radius:7rpx; }
-.visual-axis>view text:first-child { color:#51459d; font-size:var(--sxb-text-small); font-weight:700; }
-.visual-axis>view text:last-child { color:#78849a; font-size:var(--sxb-text-meta); }
-.article-visual>text { display:block; margin-top:12rpx; color:#66748b; font-size:var(--sxb-text-meta); text-align:center; }
-.article-body { max-height:570rpx; overflow:hidden; transition:max-height .25s ease; }
-.article-body.expanded { max-height:5000rpx; }
-.article-section { padding-top:20rpx; }
-.article-section-title { display:block; color:#223650; font-size:var(--sxb-text-body); font-weight:700; }
-.article-paragraph { display:block; margin-top:11rpx; color:#465a73; font-size:var(--sxb-text-body); line-height:1.9; text-align:justify; }
-.article-key { display:flex; align-items:flex-start; gap:8rpx; margin-top:21rpx; padding:14rpx; color:#74562f; background:#fff7e9; border-left:5rpx solid #e5a344; border-radius:7rpx; font-size:var(--sxb-text-small); line-height:1.7; }
-.article-fade { position:absolute; z-index:1; right:0; bottom:59rpx; left:0; height:100rpx; pointer-events:none; background:linear-gradient(180deg,rgba(255,255,255,0),#fff 82%); }
-.article-more { position:relative; z-index:2; width:100%; height:50rpx; display:flex; align-items:center; justify-content:center; gap:5rpx; margin:9rpx 0 0; padding:0; color:#5b50b9; background:#f2f0ff; border:1rpx solid #ded9fb; border-radius:8rpx; font-size:var(--sxb-text-small); font-weight:700; }
-.article-more::after { display:none; }
-.section-hint { font-size:var(--sxb-text-meta); }
-.knowledge-row { padding:14rpx 0; }
-.knowledge-name { font-size:var(--sxb-text-body); line-height:1.65; }
-.knowledge-meta { gap:11rpx; margin-top:11rpx; color:#8b96a5; font-size:var(--sxb-text-meta); }
-.star-tag { padding:2rpx 7rpx; font-size:var(--sxb-text-meta); line-height:1.3; }
+<style scoped lang="scss">
 
-@import '@/styles/content-system.scss';
+.course-detail-page{
+ --lesson-ink:var(--sxb-ink,#24364f);--lesson-muted:var(--sxb-muted,#5d6e83);--lesson-blue:var(--sxb-blue,#3569e8);
+ --lesson-line:var(--sxb-ui-line,#e9edf2);--lesson-soft:#f2f6fc;
+ max-width:430px;min-height:100vh;min-height:100dvh;box-sizing:border-box;margin:0 auto;
+ padding-bottom:calc(86px + env(safe-area-inset-bottom,0px));background:#fff;color:var(--lesson-ink);
+}
+.lesson-stage{position:relative;padding-top:env(safe-area-inset-top,0px);background:#edf4ff}
+.detail-top{position:absolute;top:env(safe-area-inset-top,0px);left:8px;right:8px;z-index:4;display:flex;align-items:center;justify-content:space-between;pointer-events:none}
+.top-actions{display:flex;pointer-events:auto}
+.stage-video .detail-top{left:0;right:0;padding:0 8px;background:linear-gradient(#0e1c3266,transparent)}
+.lesson-video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#142439}
+.media-empty{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:12px;flex-direction:column;aspect-ratio:16/9;padding:48px 20px 20px;background:#172c47;color:#c4d5eb;font-size:14px}
+.media-empty button{font-size:13px;color:white;background:#ffffff20;padding:0 16px;min-height:44px;border-radius:24px}
+.stage-audio{padding:calc(54px + env(safe-area-inset-top,0px)) 20px 24px;background:linear-gradient(135deg,#e8f0fc,#e6f1ee)}
+.lesson-audio{position:relative}
+.audio-empty{padding:24px;color:var(--lesson-muted);font-size:14px}
+.audio-empty button{margin-top:12px;font-size:13px;border-radius:20px;color:var(--lesson-blue)}
+.stage-article{background:transparent}
+.article-stage{height:50px}
+.detail-article{background:#fff url('@/static/illustrations/course-reader-texture.svg') center top / 100% auto no-repeat}
+.lesson-paper{position:relative;padding:20px 22px 24px}
+.detail-article .lesson-paper{padding-top:12px}
+.lesson-location{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;line-height:1.6;color:var(--lesson-muted)}
+.lesson-type{padding:3px 7px;border-radius:5px;font-size:11px;font-weight:600;background:#edf3fd;color:#426995}
+.lesson-location>text:last-child:not(.lesson-type){padding-left:8px;border-left:1px solid #d6deea}
+.course-title{display:block;margin-top:12px;font-size:23px;font-weight:700;line-height:1.5;letter-spacing:.2px;overflow-wrap:anywhere}
+.lesson-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;min-height:44px}
+.meta-copy{display:flex;align-items:center;flex-wrap:wrap;gap:10px;color:var(--lesson-muted);font-size:12px;line-height:1.7}
+.meta-copy>text+text:before{content:'·';margin-right:10px;color:#9aa9b9}
+.finished{color:#39816f}
+.handout-pill{display:flex;align-items:center;justify-content:center;gap:5px;min-height:44px;flex:none;margin:0;padding:0 12px;background:transparent;color:#3c669f;font-size:12px;line-height:1.5;position:relative;isolation:isolate}
+.handout-pill:before{content:'';position:absolute;inset:6px 0;border-radius:18px;background:#edf4ff;z-index:-1}
+.lesson-content{margin-top:18px;padding-top:10px;border-top:1px solid var(--lesson-line)}
+.content-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin-bottom:6px}
+.content-label{font-size:15px;line-height:1.5;font-weight:650;letter-spacing:.3px}
+.finish-button{display:flex;align-items:center;justify-content:center;gap:4px;flex:none;min-height:44px;margin:0;padding:0 2px;background:transparent;color:var(--lesson-muted);font-size:12px;line-height:1.5}
+.finish-button.finished[disabled]{color:#39816f;background:transparent}
+.finish-button[disabled]:not(.finished){opacity:.5;background:transparent}
+.intro-text,.intro-empty{display:block;white-space:pre-wrap;font-size:15px;line-height:1.95;color:#526279}
+.course-intro :deep(.excerpt-toggle){font-size:12px}
+.article-body{margin-top:18px;font-size:16px;line-height:1.95;overflow-wrap:anywhere}
+.plain-body{display:block;white-space:pre-wrap;margin:12px 0}
+.legacy-title{font-size:18px;font-weight:600}
+.article-body :deep(.content-block:first-child){margin-top:0}
+.resource-tools{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:24px}
+.resource-tools button{display:flex;align-items:center;justify-content:flex-start;gap:7px;min-height:54px;width:100%;box-sizing:border-box;margin:0;padding:9px 10px;border-radius:15px;background:#f1f5fb;color:#425c7b;font-size:12px;line-height:1.5;text-align:left}
+.resource-tools button+button{background:#eff6f4;color:#416865}
+.resource-icon{display:flex;align-items:center;justify-content:center;flex:none}
+.resource-count{margin-left:auto;font-size:12px;font-variant-numeric:tabular-nums;color:var(--lesson-muted)}
+.lesson-toolbar{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:calc(100% - 28px);max-width:402px;box-sizing:border-box;padding:6px;display:flex;align-items:center;gap:6px;background:#fffffff5;border:1px solid #e8edf4;border-radius:22px;box-shadow:0 4px 20px #2846740d;z-index:20}
+.lesson-toolbar button{display:flex;align-items:center;justify-content:center;gap:5px;min-height:44px;margin:0;line-height:1.5;font-size:13px;background:transparent;color:#45678c;padding:0 8px;border-radius:17px}
+.note-entry{position:relative;min-width:72px}
+.note-entry>text{font-size:12px}
+.note-dot{position:absolute;top:5px;right:8px;width:5px;height:5px;border-radius:50%;background:#81abdb}
+.previous-course{flex:1}
+.lesson-toolbar .next-course{flex:1.4;background:#416fba;color:white}
+.lesson-toolbar button[disabled]{opacity:.45}
+button::after{border:0}button{cursor:pointer;touch-action:manipulation}button:focus-visible{outline:2px solid var(--lesson-blue);outline-offset:2px}button:active{opacity:.75}
+@media(max-width:350px){.lesson-paper{padding-left:16px;padding-right:16px}.course-title{font-size:21px}.resource-tools{gap:8px}.resource-tools button{gap:5px;padding:8px}.lesson-toolbar{gap:4px}.note-entry{min-width:64px}}
+@media(prefers-reduced-motion:reduce){button{transition:none}}
+.knowledge-list{padding-top:6px}.knowledge-row{display:flex;align-items:center;gap:12px;width:100%;margin:0;padding:17px 0;background:transparent;text-align:left;line-height:1.6;border-bottom:1px solid #eef2f6;border-radius:0}.point-index{align-self:flex-start;margin-top:2px;color:#8dabc8;font-size:13px;font-variant-numeric:tabular-nums}.point-copy{flex:1;min-width:0;font-size:14px;color:var(--lesson-ink)}.point-meta{display:flex;gap:12px;margin-top:7px;color:var(--lesson-muted);font-size:12px}.point-stars{color:#a68146}.practice-entry{display:flex;align-items:center;gap:8px;min-height:44px;margin:16px 0 0;padding:0 14px;border-radius:22px;background:#edf4fb;color:#547aa4;font-size:13px}.practice-entry>text{flex:1;text-align:left}
+.directory-group{padding:18px 0 0}.directory-heading{display:block;font-size:12px;color:var(--lesson-muted);margin-bottom:10px}.directory-row{display:flex;align-items:center;gap:10px;width:100%;padding:12px 10px;margin:0 0 8px;border-radius:14px;background:#f7f9fc;text-align:left;line-height:1.6;color:var(--lesson-ink);font-size:14px}.directory-row>image{width:34px;height:34px;flex:none}.directory-row>view{flex:1;min-width:0}.directory-row>view>text{display:block;overflow-wrap:anywhere}.directory-meta{font-size:12px;color:var(--lesson-muted);margin-top:4px}.directory-row.current{background:#edf4ff}.current-label{font-size:11px;color:#4776b8;flex:none}
+.note-context{font-size:13px;color:var(--lesson-muted);line-height:1.7;margin:0 0 14px}.note-editor{box-sizing:border-box;width:100%;height:200px;padding:15px;font-size:15px;line-height:1.8;border-radius:18px;background:#f5f8fc;color:var(--lesson-ink)}.note-count{text-align:right;margin:8px 0 16px;color:var(--lesson-muted);font-size:12px}.save-note{width:100%;min-height:48px;line-height:48px;margin:0;padding:0;border-radius:24px;background:#416fba;color:white;font-size:14px}.save-note[disabled]{opacity:.5}.inline-error{display:block;color:#a73b32;font-size:13px;line-height:1.6;margin:10px 0}.personal-retry{font-size:12px;line-height:1.7;color:#a06d2d;background:#fff7e9;border-radius:12px;padding:10px;margin:12px 0}
+.loading-nav{display:flex;align-items:center;padding:env(safe-area-inset-top,0px) 10px 0;gap:8px;font-size:15px}.detail-state{display:flex;align-items:center;flex-direction:column;gap:20px;padding:50px 24px;color:var(--lesson-muted);font-size:14px;line-height:1.7;text-align:center}.detail-state>image{width:150px;height:125px}.state-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}.state-actions button{min-height:44px;padding:0 16px;margin:0;border-radius:22px;font-size:13px;color:#416fba;background:#e7effb}.section-empty{padding:28px 8px;color:var(--lesson-muted);font-size:13px;text-align:center}
+
 </style>

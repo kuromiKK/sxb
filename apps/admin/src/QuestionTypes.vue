@@ -13,7 +13,7 @@ const sample=ref<Record<string,any>>({}),answers=ref<Record<string,any>>({}),pre
 const icons={material:FileText,options:List,single:CircleDot,multiple:ListChecks,boolean:CircleCheck,text:TextCursorInput,group:Layers3}
 const componentKinds=Object.keys(fieldNames) as FieldKind[]
 const descriptions:Record<FieldKind,string>={material:'案例、阅读材料与背景',options:'多个小题复用一组选项',single:'多个选项，选择一个',multiple:'多个选项，选择多个',boolean:'正确 / 错误',text:'文字作答，自评或 AI 判分',group:'组合多个独立的小题'}
-const filtered=computed(()=>records.value.filter(t=>t.name.includes(search.value)&&(status.value==='all'||t.enabled===(status.value==='enabled'))))
+const filtered=computed(()=>records.value.filter(t=>(t.name+' '+t.id).toLowerCase().includes(search.value.trim().toLowerCase())&&(status.value==='all'||t.enabled===(status.value==='enabled'))))
 const allFields=computed(()=>flattenFields(draft.value?.definition.fields||[]))
 const active=computed(()=>allFields.value.find(f=>f.id===selected.value))
 const entries=computed(()=>{const result:{f:QuestionField;list:QuestionField[];depth:number}[]=[];const walk=(list:QuestionField[],depth=0)=>list.forEach(f=>{result.push({f,list,depth});walk(f.children,depth+1)});walk(draft.value?.definition.fields||[]);return result})
